@@ -63,18 +63,34 @@ describe("renderFewShotBlock", () => {
     expect(inputs).toHaveLength(18);
   });
 
-  test("each rendered output is valid JSON parseable as {class, confidence}", () => {
+  test("each rendered output is valid JSON parseable with the full CoT shape", () => {
     const block = renderFewShotBlock();
     const outputs = block.match(/→ ({[^\n]+})/g) ?? [];
     expect(outputs).toHaveLength(18);
     for (const out of outputs) {
       const json = out.replace(/^→ /, "");
-      const parsed = JSON.parse(json) as { class: string; confidence: number };
+      const parsed = JSON.parse(json) as {
+        verb: string;
+        scope: string;
+        needsContext: boolean;
+        class: string;
+        confidence: number;
+      };
+      expect(typeof parsed.verb).toBe("string");
+      expect(typeof parsed.scope).toBe("string");
+      expect(typeof parsed.needsContext).toBe("boolean");
       expect(typeof parsed.class).toBe("string");
       expect(typeof parsed.confidence).toBe("number");
       expect(parsed.confidence).toBeGreaterThan(0);
       expect(parsed.confidence).toBeLessThanOrEqual(1);
     }
+  });
+
+  test("CoT field order is fixed: verb, scope, needsContext, class, confidence", () => {
+    const block = renderFewShotBlock();
+    const first = block.match(/→ ({[^\n]+})/)?.[1] ?? "";
+    const keyOrder = (first.match(/"([a-zA-Z]+)":/g) ?? []).map((k) => k.replace(/[":]/g, ""));
+    expect(keyOrder).toEqual(["verb", "scope", "needsContext", "class", "confidence"]);
   });
 
   test("is deterministic — repeated calls produce identical bytes (cache stability)", () => {

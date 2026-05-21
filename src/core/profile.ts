@@ -11,6 +11,24 @@ export const ALL_CLASSES: ReadonlyArray<Class> = [
   "max",
 ];
 
+/**
+ * One-tier upgrade map. Used by the asymmetric-confidence safety net in
+ * the pipeline: when a classifier is between SHORT_CIRCUIT and
+ * HIGH_CONFIDENCE thresholds, the chosen class is upgraded by one tier so
+ * a misroute lands UP (~$0.05 wasted on too-strong) rather than DOWN
+ * (~$0.50 if Haiku can't handle the actual Opus-class task).
+ *
+ * `max` is the ceiling — there is nothing higher to bump to.
+ */
+export const UPGRADE: Record<Class, Class> = {
+  trivial: "simple",
+  simple: "standard",
+  standard: "hard",
+  hard: "reasoning",
+  reasoning: "max",
+  max: "max",
+};
+
 /** Default `balanced` profile per plan. Trivial uses --bare; simple/trivial restrict tools and MCP. */
 export const balancedProfile: Profile = {
   name: "balanced",

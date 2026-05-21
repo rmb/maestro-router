@@ -39,13 +39,56 @@ describe("createPipeline", () => {
       classifiers: [
         fixed("a", null),
         fixed("b", null),
-        fixed("c", { class: "hard", confidence: 0.7 }),
+        fixed("c", { class: "hard", confidence: 0.9 }),
       ],
       profile: balancedProfile,
     });
     const d = await p.route(req("hi"));
     expect(d.class).toBe("hard");
     expect(d.classifier).toBe("c");
+  });
+
+  test("LLM medium-confidence short-circuit upgrades one tier (T1.3)", async () => {
+    const p = createPipeline({
+      // 0.6 ≤ conf < 0.85 from the LLM → predicted "standard" routes as "hard".
+      classifiers: [fixed("llm", { class: "standard", confidence: 0.7 })],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("hi"));
+    expect(d.class).toBe("hard");
+    expect(d.classifier).toBe("llm");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.upgrade")).toBe(true);
+  });
+
+  test("LLM high-confidence short-circuit is honored verbatim", async () => {
+    const p = createPipeline({
+      classifiers: [fixed("llm", { class: "standard", confidence: 0.95 })],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("x"));
+    expect(d.class).toBe("standard");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.upgrade")).toBe(false);
+  });
+
+  test("LLM max stays at max even with medium confidence (no tier above)", async () => {
+    const p = createPipeline({
+      classifiers: [fixed("llm", { class: "max", confidence: 0.7 })],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("x"));
+    expect(d.class).toBe("max");
+  });
+
+  test("non-LLM classifiers are never upgraded — heuristic confidence encodes boundary, not reliability", async () => {
+    // Heuristic at 0.7 on "trivial" should still route as "trivial" (no upgrade
+    // to "simple"). Upgrading these caused a 40pp accuracy regression.
+    const p = createPipeline({
+      classifiers: [fixed("heuristic", { class: "trivial", confidence: 0.7 })],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("x"));
+    expect(d.class).toBe("trivial");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.upgrade")).toBe(false);
   });
 
   test("sub-threshold results go to weighted vote", async () => {

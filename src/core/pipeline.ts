@@ -3,6 +3,7 @@
 
 import type { Cache } from "./cache.js";
 import { cacheKey } from "./cache.js";
+import { UPGRADE } from "./profile.js";
 import type {
   Class,
   Classification,
@@ -15,6 +16,13 @@ import type {
 } from "./types.js";
 
 const SHORT_CIRCUIT_THRESHOLD = 0.6;
+/**
+ * Confidence above which the classifier's predicted class is trusted as-is.
+ * Between SHORT_CIRCUIT and HIGH thresholds, the class is upgraded one tier
+ * via UPGRADE — the misroute-up penalty (~$0.05) is bounded; misroute-down
+ * (Haiku-on-Opus-task) costs ~$0.50, so we bias upward on uncertainty.
+ */
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
 const DEFAULT_CLASS: Class = "standard";
 
 export type PipelineOptions = {
@@ -74,13 +82,34 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
         if (result === null) continue;
         if (result.diagnostics) diagnostics.push(...result.diagnostics);
         if (result.confidence >= SHORT_CIRCUIT_THRESHOLD) {
+          // Asymmetric upgrade only kicks in for classifiers whose
+          // confidence is meaningfully calibrated to misroute-risk — in
+          // practice that's the LLM stage, whose system prompt explicitly
+          // teaches it to express uncertainty. Heuristic/embedding
+          // confidences encode boundary strength, not reliability;
+          // upgrading them would shift many correctly-routed prompts up a
+          // tier (verified empirically — caused a 40pp accuracy regression
+          // when applied globally).
+          const upgrade =
+            c.name === "llm" && result.confidence < HIGH_CONFIDENCE_THRESHOLD;
+          const finalClass = upgrade ? UPGRADE[result.class] : result.class;
+          const finalDiagnostics: Diagnostic[] = upgrade
+            ? [
+                ...diagnostics,
+                {
+                  severity: "info",
+                  code: "pipeline.upgrade",
+                  message: `${result.class} → ${finalClass} (conf ${result.confidence.toFixed(2)} < ${HIGH_CONFIDENCE_THRESHOLD})`,
+                },
+              ]
+            : [...diagnostics];
           const decision = buildDecision({
-            cls: result.class,
+            cls: finalClass,
             classifier: c.name,
             confidence: result.confidence,
             profile,
             latencyMs: Date.now() - start,
-            diagnostics,
+            diagnostics: finalDiagnostics,
           });
           if (cache) cache.set(key, decision);
           return decision;

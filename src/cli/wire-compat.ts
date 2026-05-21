@@ -246,7 +246,7 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     const res = await streamClaude({
       binary: realClaude,
       args: claudeArgs,
-      prompt: "",
+      inheritStdin: true,
       stdout: process.stdout,
       stderr: process.stderr,
       forwardSigint: true,
@@ -254,13 +254,14 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     return res.exitCode ?? 0;
   }
 
-  // stream-json input is opaque (system / user / tool messages mixed). v0.2
-  // doesn't classify these — passthrough unmodified.
+  // stream-json input is a long-lived JSON message stream from the VSCode
+  // panel — child inherits parent stdin so the extension's writes flow
+  // through. v0.2 doesn't classify these turn-by-turn yet; just passthrough.
   if (argsContainStreamJsonInput(claudeArgs)) {
     const res = await streamClaude({
       binary: realClaude,
       args: claudeArgs,
-      prompt: "",
+      inheritStdin: true,
       stdout: process.stdout,
       stderr: process.stderr,
       forwardSigint: true,
@@ -272,10 +273,12 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   const pre = preflight();
   const prompt = (await readStdin()).trim();
   if (!prompt) {
+    // No prompt detected on stdin within the read timeout. Fall back to
+    // inheriting stdin so anything the caller still writes reaches claude.
     const res = await streamClaude({
       binary: realClaude,
       args: claudeArgs,
-      prompt: "",
+      inheritStdin: true,
       stdout: process.stdout,
       stderr: process.stderr,
       forwardSigint: true,

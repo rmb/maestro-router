@@ -12,7 +12,14 @@ export type StreamResult = {
 export type StreamClaudeOptions = {
   binary?: string;
   args: ReadonlyArray<string>;
-  prompt: string;
+  /** Single prompt to write then close stdin. Mutually exclusive with `inheritStdin`. */
+  prompt?: string;
+  /**
+   * If true, the child inherits the parent's stdin directly (no prompt write).
+   * Required for `--input-format stream-json` invocations where the parent
+   * keeps writing JSON messages over the lifetime of the call (VSCode panel UI).
+   */
+  inheritStdin?: boolean;
   signal?: AbortSignal;
   /** Where to pipe live subprocess stdout. Defaults to process.stdout. */
   stdout?: Writable;
@@ -38,22 +45,28 @@ export function streamClaude(opts: StreamClaudeOptions): Promise<StreamResult> {
     const errStream: Writable = opts.stderr ?? process.stderr;
 
     const child = nodeSpawn(binary, [...opts.args], {
-      stdio: ["pipe", "pipe", "pipe"],
+      // For stream-json input (VSCode panel UI), inherit parent stdin so the
+      // long-lived JSON message stream flows through. Otherwise pipe so we
+      // can write a single prompt and close.
+      stdio: [opts.inheritStdin ? "inherit" : "pipe", "pipe", "pipe"],
     });
 
     let capturedStdout = "";
     let settled = false;
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    child.stdout.on("data", (chunk: string) => {
-      capturedStdout += chunk;
-      outStream.write(chunk);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      errStream.write(chunk);
-    });
+    if (child.stdout) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        capturedStdout += chunk;
+        outStream.write(chunk);
+      });
+    }
+    if (child.stderr) {
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        errStream.write(chunk);
+      });
+    }
 
     const onAbort = (): void => {
       if (!child.killed) child.kill("SIGTERM");
@@ -92,14 +105,18 @@ export function streamClaude(opts: StreamClaudeOptions): Promise<StreamResult> {
       resolve({ exitCode: code, capturedStdout });
     });
 
-    try {
-      child.stdin.write(opts.prompt);
-      child.stdin.end();
-    } catch (err) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err as Error);
+    if (!opts.inheritStdin) {
+      try {
+        if (child.stdin) {
+          child.stdin.write(opts.prompt ?? "");
+          child.stdin.end();
+        }
+      } catch (err) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err as Error);
+      }
     }
   });
 }

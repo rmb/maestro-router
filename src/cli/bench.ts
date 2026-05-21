@@ -258,8 +258,9 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
 
   let seed: number | undefined;
   if (args.cmdOpts.tournamentSeed !== undefined) {
-    const parsed = parseInt(args.cmdOpts.tournamentSeed, 10);
-    if (!Number.isFinite(parsed)) {
+    const raw = args.cmdOpts.tournamentSeed.trim();
+    const parsed = Number(raw);
+    if (raw === "" || !Number.isInteger(parsed)) {
       process.stderr.write("--tournament-seed must be an integer\n");
       process.exit(2);
     }

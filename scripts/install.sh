@@ -73,14 +73,6 @@ echo "  binary: $(which maestro)"
 echo "→ Wiring VSCode (claudeProcessWrapper)…"
 maestro install-vscode
 
-echo ""
-echo "✓ Done."
-echo ""
-echo "Next steps:"
-echo "  1. Reload your VSCode window:"
-echo "     Cmd+Shift+P → 'Developer: Reload Window'"
-echo "  2. Use Claude Code in VSCode as normal — every prompt now auto-routes"
-echo "     through Maestro."
-echo "  3. Check savings later with:  maestro stats"
+maestro guide
 echo ""
 echo "Uninstall any time with:  bash scripts/install.sh --uninstall"

@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerBenchCommand } from "./bench.js";
+import { registerGuideCommand } from "./guide.js";
 import { registerInstallHookCommand } from "./install-hook.js";
 import { registerInstallVscodeCommand } from "./install-vscode.js";
 import { registerReplayCommand } from "./replay.js";
@@ -64,6 +65,7 @@ export async function buildProgram(): Promise<Command> {
   registerBenchCommand(program);
   registerInstallVscodeCommand(program);
   registerInstallHookCommand(program);
+  registerGuideCommand(program);
 
   return program;
 }

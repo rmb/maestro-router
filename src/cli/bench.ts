@@ -30,7 +30,9 @@ import {
   dim,
   gray,
   header,
+  magenta,
   pct,
+  yellow,
 } from "./render.js";
 import { format, loadCliConfig } from "./utils.js";
 
@@ -303,32 +305,40 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
 
 function renderTournamentHuman(report: TournamentReport): string {
   const lines: string[] = [];
+  lines.push("");
+  lines.push(header("Tournament results"));
   lines.push(
-    `Tournament results (${report.ran}/${report.totalPrompts} prompts ran, $${report.totalCostUsd.toFixed(4)} spent)`,
+    `  ${bold("prompts")}   ${cyan(`${report.ran}/${report.totalPrompts}`)}  ${dim("ran")}`,
   );
+  lines.push(`  ${bold("spent")}     ${cyan("$" + report.totalCostUsd.toFixed(4))}`);
+  lines.push("");
+  lines.push(dim("  class            tier-down      verdict"));
   for (const cls of ALL_CLASSES) {
     const target = DOWNGRADE[cls];
     if (target === null) {
-      lines.push(`  ${cls}: skipped (no cheaper tier)`);
+      lines.push(`    ${cls.padEnd(10)} ${gray("—".padEnd(13))} ${dim("skipped (no cheaper tier)")}`);
       continue;
     }
     const wr = report.perClassWinRates[cls];
     if (wr.ran === 0) {
-      lines.push(`  ${cls} → ${target}: not sampled`);
+      lines.push(`    ${cls.padEnd(10)} ${gray((`→ ${target}`).padEnd(13))} ${dim("not sampled")}`);
       continue;
     }
     const wins = wr.downgradeWins + wr.ties;
     const recommend = wins > wr.aLosses;
-    const tag = recommend
-      ? `recommend downgrade${wr.ran < 3 ? ` (n=${wr.ran}, low confidence)` : ""}`
-      : "keep current";
-    lines.push(`  ${cls} → ${target}: ${wins}/${wr.ran} wins → ${tag}`);
+    const ratio = wr.ran > 0 ? wins / wr.ran : 0;
+    const verdict = recommend
+      ? `${accuracyColor(ratio)("✓ recommend downgrade")}${wr.ran < 3 ? dim(` (n=${wr.ran})`) : ""}`
+      : gray("keep current");
+    lines.push(
+      `    ${cls.padEnd(10)} ${cyan((`→ ${target}`).padEnd(13))} ${accuracyColor(ratio)(`${wins}/${wr.ran}`)}  ${verdict}`,
+    );
     const suggested = report.recommendedDowngrades.find(
       (r) => r.from === cls && r.to === target,
     );
     if (suggested) {
       lines.push(
-        `    suggested pattern: ${suggested.promptPattern} → ${target} (confidence 0.85)`,
+        `                              ${dim("→ pattern")} ${magenta(suggested.promptPattern)} ${dim("conf 0.85")}`,
       );
     }
   }
@@ -336,7 +346,8 @@ function renderTournamentHuman(report: TournamentReport): string {
     (r: TournamentRowResult) => r.skipReason === "budget_cap_reached",
   ).length;
   if (skippedBudget > 0) {
-    lines.push(`  budget cap reached — ${skippedBudget} prompt(s) not run`);
+    lines.push("");
+    lines.push(`  ${yellow("⚠")} ${yellow("budget cap reached")} ${dim(`— ${skippedBudget} prompt(s) not run`)}`);
   }
   return lines.join("\n");
 }

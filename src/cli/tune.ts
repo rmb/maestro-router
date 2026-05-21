@@ -5,6 +5,17 @@ import { createTelemetry } from "../core/telemetry.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, HeuristicRule, ProfileOverride, TelemetryEvent } from "../core/types.js";
 import {
+  bold,
+  cyan,
+  dim,
+  gray,
+  green,
+  header,
+  magenta,
+  pct,
+  yellow,
+} from "./render.js";
+import {
   DEFAULT_TELEMETRY_PATH,
   format,
   loadCliConfig,
@@ -165,27 +176,61 @@ function escapeRegex(s: string): string {
 
 function renderHuman(s: Suggestion, applying: boolean): string {
   const lines: string[] = [];
-  lines.push("Maestro tune analysis");
+
+  lines.push("");
+  lines.push(header("Maestro tune"));
+
   if (s.learnedHeuristics.length === 0) {
-    lines.push("  no new heuristic patterns to suggest (need ≥5 overrides on the same word)");
+    lines.push(`  ${dim("no new patterns")} ${gray("(need ≥" + MIN_PATTERN_OCCURRENCES + " overrides on the same word in the last " + PATTERN_WINDOW_DAYS + " days)")}`);
   } else {
-    lines.push(`  ${s.learnedHeuristics.length} candidate heuristic pattern(s):`);
+    lines.push(
+      `  ${bold("candidate patterns")}  ${cyan(s.learnedHeuristics.length)}  ${dim("(from override events)")}`,
+    );
     for (const r of s.learnedHeuristics) {
       lines.push(
-        `    /${r.pattern}/  →  ${r.class}  (matched ${r.matchedCount} overrides, confidence ${r.confidence})`,
+        `    ${magenta("/" + r.pattern + "/")}  ${dim("→")}  ${classColor(r.class)(r.class)}  ${gray("×" + r.matchedCount)}  ${dim("conf " + r.confidence.toFixed(2))}`,
       );
     }
   }
+
   if (s.overrideAdjustments.length > 0) {
     lines.push("");
-    lines.push("  Classes with high override rates:");
+    lines.push(dim("  classes with high override rates"));
     for (const a of s.overrideAdjustments) {
-      lines.push(`    ${a.class}: ${a.reason}`);
+      const match = /(\d+)\/(\d+) \((\d+)%\)/.exec(a.reason);
+      const rate = match?.[3] ? parseInt(match[3], 10) / 100 : 0;
+      lines.push(
+        `    ${classColor(a.class)(a.class.padEnd(10))} ${yellow(pct(rate, 0))}  ${gray(a.reason.replace(/[\d.%/() ]+$/, ""))}`,
+      );
     }
   }
+
   if (!applying && s.learnedHeuristics.length > 0) {
     lines.push("");
-    lines.push("Re-run with --apply to write these to ~/.maestro/heuristics.json.");
+    lines.push(green("  → run `maestro tune --apply` to write these to ~/.maestro/heuristics.json"));
   }
+
+  if (applying && s.learnedHeuristics.length > 0) {
+    lines.push("");
+    lines.push(green(`  ✓ wrote ${s.learnedHeuristics.length} heuristic(s) to ~/.maestro/heuristics.json`));
+  }
+
   return lines.join("\n");
+}
+
+function classColor(cls: Class): (s: string | number) => string {
+  switch (cls) {
+    case "trivial":
+      return gray;
+    case "simple":
+      return cyan;
+    case "standard":
+      return green;
+    case "hard":
+      return yellow;
+    case "reasoning":
+      return magenta;
+    case "max":
+      return (s) => bold(magenta(s));
+  }
 }

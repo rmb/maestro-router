@@ -14,6 +14,7 @@ import { ALL_CLASSES } from "../core/profile.js";
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import type { Class, Classifier, HeuristicRule, Message, Profile, ProfileOverride, Request } from "../core/types.js";
+import { stratifiedSample } from "../eval/sample-stratified.js";
 import {
   buildProposedHeuristics,
   DOWNGRADE,
@@ -252,9 +253,14 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
     process.exit(1);
   }
 
-  // Sample the labeled set deterministically (head). Tournament is a
-  // measurement, not a stochastic test — reproducibility matters.
-  const sampled = args.entries.slice(0, sample);
+  // Sample with stratified coverage across classes (deterministic — no
+  // RNG). `trivial` is excluded because it has no cheaper tier; including
+  // it would just produce "no cheaper tier" skips and waste the sample
+  // slot. Round-robin per class so partial budget runs still hit every
+  // tier rather than burning the budget on one class.
+  const sampled = stratifiedSample(args.entries, sample, {
+    excludeClasses: ["trivial"],
+  });
 
   // Pre-classify each prompt through the current pipeline to get its assigned class.
   const inputs: TournamentInput[] = [];

@@ -58,6 +58,32 @@ describe("parseOutput", () => {
     expect(r!.diagnostics.map((d) => d.code)).toContain("claude.is_error");
   });
 
+  // R8 (spike): --max-budget-usd produces this specific envelope
+  const BUDGET_EXCEEDED_JSON = `{"type":"result","subtype":"error_max_budget_usd","is_error":true,"duration_ms":25818,"duration_api_ms":0,"stop_reason":"end_turn","session_id":"23c17f62","total_cost_usd":0.06260525,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0,"service_tier":"standard"},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":9,"outputTokens":2441,"cacheReadInputTokens":0,"cacheCreationInputTokens":40313,"costUSD":0.06260525}},"errors":["Reached maximum budget ($0.01)"]}`;
+
+  test("R8: detects error_max_budget_usd subtype and emits claude.budget_exceeded", () => {
+    const r = parseOutput(BUDGET_EXCEEDED_JSON);
+    expect(r).not.toBeNull();
+    const codes = r!.diagnostics.map((d) => d.code);
+    expect(codes).toContain("claude.budget_exceeded");
+    expect(codes).not.toContain("claude.is_error");
+  });
+
+  test("R8: falls back to modelUsage tokens when top-level usage zeroed", () => {
+    const r = parseOutput(BUDGET_EXCEEDED_JSON);
+    expect(r!.cost.inputTokens).toBe(9);
+    expect(r!.cost.outputTokens).toBe(2441);
+    expect(r!.cost.cacheCreationInputTokens).toBe(40313);
+    expect(r!.cost.totalCostUsd).toBeCloseTo(0.06260525);
+  });
+
+  test("R8: budget_exceeded message includes realized cost", () => {
+    const r = parseOutput(BUDGET_EXCEEDED_JSON);
+    const msg = r!.diagnostics.find((d) => d.code === "claude.budget_exceeded")?.message;
+    expect(msg).toMatch(/Reached maximum budget/);
+    expect(msg).toMatch(/0\.062605/);
+  });
+
   test("returns null for non-result type", () => {
     const other = JSON.stringify({ type: "system", message: "info" });
     expect(parseOutput(other)).toBeNull();

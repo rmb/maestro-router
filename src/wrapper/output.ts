@@ -18,12 +18,14 @@ export type ParsedOutput = {
  */
 type ClaudeJsonOutput = {
   type?: string;
+  subtype?: string;
   total_cost_usd?: number;
   duration_ms?: number;
   duration_api_ms?: number;
   stop_reason?: string;
   session_id?: string;
   is_error?: boolean;
+  errors?: ReadonlyArray<string>;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -57,12 +59,34 @@ export function parseOutput(raw: string, userConfig: UserConfig = {}): ParsedOut
   if (!parsed) return null;
   if (typeof parsed.type !== "string" || parsed.type !== "result") return null;
 
+  // R8 observation: on budget-error, top-level usage zeros out and real
+  // counts live in modelUsage[*]. Prefer the model-level numbers when the
+  // top-level reports zero output but the model used tokens.
+  const modelEntry = pickModelEntry(parsed.modelUsage);
+  const usage = parsed.usage ?? {};
+  const inputTokens =
+    usage.input_tokens && usage.input_tokens > 0
+      ? usage.input_tokens
+      : (modelEntry?.inputTokens ?? 0);
+  const outputTokens =
+    usage.output_tokens && usage.output_tokens > 0
+      ? usage.output_tokens
+      : (modelEntry?.outputTokens ?? 0);
+  const cacheCreation =
+    usage.cache_creation_input_tokens && usage.cache_creation_input_tokens > 0
+      ? usage.cache_creation_input_tokens
+      : (modelEntry?.cacheCreationInputTokens ?? 0);
+  const cacheRead =
+    usage.cache_read_input_tokens && usage.cache_read_input_tokens > 0
+      ? usage.cache_read_input_tokens
+      : (modelEntry?.cacheReadInputTokens ?? 0);
+
   const cost: CostBreakdown = {
-    totalCostUsd: parsed.total_cost_usd ?? 0,
-    inputTokens: parsed.usage?.input_tokens ?? 0,
-    outputTokens: parsed.usage?.output_tokens ?? 0,
-    cacheCreationInputTokens: parsed.usage?.cache_creation_input_tokens ?? 0,
-    cacheReadInputTokens: parsed.usage?.cache_read_input_tokens ?? 0,
+    totalCostUsd: parsed.total_cost_usd ?? modelEntry?.costUSD ?? 0,
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens: cacheCreation,
+    cacheReadInputTokens: cacheRead,
     durationMs: parsed.duration_ms ?? 0,
     durationApiMs: parsed.duration_api_ms ?? 0,
     stopReason: parsed.stop_reason ?? "unknown",
@@ -79,7 +103,14 @@ export function parseOutput(raw: string, userConfig: UserConfig = {}): ParsedOut
       message: `cache_creation_input_tokens=${cost.cacheCreationInputTokens} exceeded ${threshold}; consider /clear or /compact to reset cache cost`,
     });
   }
-  if (parsed.is_error === true) {
+  if (parsed.subtype === "error_max_budget_usd") {
+    const errMsg = parsed.errors?.[0] ?? "max_budget_usd reached";
+    diagnostics.push({
+      severity: "warning",
+      code: "claude.budget_exceeded",
+      message: `${errMsg}; realized cost $${cost.totalCostUsd.toFixed(6)}`,
+    });
+  } else if (parsed.is_error === true) {
     diagnostics.push({
       severity: "warning",
       code: "claude.is_error",
@@ -98,4 +129,14 @@ function pickModelName(modelUsage: ClaudeJsonOutput["modelUsage"]): string {
   if (!modelUsage) return "unknown";
   const keys = Object.keys(modelUsage);
   return keys[0] ?? "unknown";
+}
+
+function pickModelEntry(
+  modelUsage: ClaudeJsonOutput["modelUsage"],
+): NonNullable<ClaudeJsonOutput["modelUsage"]>[string] | null {
+  if (!modelUsage) return null;
+  const keys = Object.keys(modelUsage);
+  const first = keys[0];
+  if (!first) return null;
+  return modelUsage[first] ?? null;
 }

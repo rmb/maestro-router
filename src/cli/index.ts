@@ -6,11 +6,13 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerBenchCommand } from "./bench.js";
+import { registerInstallVscodeCommand } from "./install-vscode.js";
 import { registerReplayCommand } from "./replay.js";
 import { registerRunCommand } from "./run-cmd.js";
 import { registerStatsCommand } from "./stats.js";
 import { registerTelemetryCommand } from "./telemetry-cmd.js";
 import { registerTuneCommand } from "./tune.js";
+import { shouldEnterWireCompat, wireCompatMain } from "./wire-compat.js";
 
 export type GlobalOptions = {
   quiet?: boolean;
@@ -59,19 +61,28 @@ export async function buildProgram(): Promise<Command> {
   registerTuneCommand(program);
   registerReplayCommand(program);
   registerBenchCommand(program);
+  registerInstallVscodeCommand(program);
 
   return program;
 }
 
 export async function main(argv: ReadonlyArray<string> = process.argv): Promise<void> {
+  if (shouldEnterWireCompat(argv)) {
+    const code = await wireCompatMain(argv);
+    process.exit(code);
+  }
   const program = await buildProgram();
   await program.parseAsync([...argv]);
 }
 
+import { realpathSync } from "node:fs";
+
 const isDirectInvocation = (): boolean => {
   if (typeof process === "undefined" || !process.argv[1]) return false;
   try {
-    return fileURLToPath(import.meta.url) === process.argv[1];
+    const thisFile = fileURLToPath(import.meta.url);
+    const invoked = realpathSync(process.argv[1]);
+    return thisFile === invoked;
   } catch {
     return false;
   }

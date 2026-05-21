@@ -156,7 +156,35 @@ describe("buildClaudeArgs — S9 MCP isolation", () => {
 });
 
 describe("buildClaudeArgs — S6 --bare", () => {
-  test("includes --bare when class supports bare AND bare_safe AND not disabled", () => {
+  test("includes --bare when class supports bare AND bare_safe AND not disabled AND bareSupported", () => {
+    const decision = baseDecision("trivial", [
+      { severity: "info", code: "heuristic.bare_safe", message: "" },
+    ]);
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+      bareSupported: true,
+    });
+    expect(args).toContain("--bare");
+  });
+
+  test("omits --bare when bareSupported is false (OAuth auth)", () => {
+    const decision = baseDecision("trivial", [
+      { severity: "info", code: "heuristic.bare_safe", message: "" },
+    ]);
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+      bareSupported: false,
+    });
+    expect(args).not.toContain("--bare");
+  });
+
+  test("omits --bare when bareSupported is undefined (default)", () => {
     const decision = baseDecision("trivial", [
       { severity: "info", code: "heuristic.bare_safe", message: "" },
     ]);
@@ -166,7 +194,7 @@ describe("buildClaudeArgs — S6 --bare", () => {
       sessionId: "x",
       isResume: false,
     });
-    expect(args).toContain("--bare");
+    expect(args).not.toContain("--bare");
   });
 
   test("omits --bare when bare_safe diagnostic absent", () => {
@@ -190,6 +218,7 @@ describe("buildClaudeArgs — S6 --bare", () => {
       userConfig: emptyConfig,
       sessionId: "x",
       isResume: false,
+      bareSupported: true,
     });
     expect(args).not.toContain("--bare");
   });
@@ -203,6 +232,7 @@ describe("buildClaudeArgs — S6 --bare", () => {
       userConfig: emptyConfig,
       sessionId: "x",
       isResume: false,
+      bareSupported: true,
     });
     expect(args).not.toContain("--bare");
   });

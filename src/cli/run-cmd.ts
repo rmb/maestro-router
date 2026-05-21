@@ -84,6 +84,7 @@ export function registerRunCommand(program: Command): void {
         userConfig: cli.userConfig,
         sessionId: session.sessionId,
         isResume: !session.isNew,
+        bareSupported: pre.bareSupported,
       });
 
       const stripped = stripOverride(prompt);

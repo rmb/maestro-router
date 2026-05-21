@@ -24,6 +24,18 @@ export type PreflightResult = {
   binary: string;
   version: string;
   missingFlags: ReadonlyArray<string>;
+  /**
+   * Auth method as reported by `claude auth status` (e.g. "claude.ai" for
+   * OAuth/subscription, "apiKey" for ANTHROPIC_API_KEY). Empty string if
+   * auth status could not be determined.
+   */
+  authMethod: string;
+  /**
+   * Whether --bare is usable with the current auth method. False on OAuth
+   * because --bare explicitly skips keychain reads (per Claude CLI docs);
+   * true only when auth is via ANTHROPIC_API_KEY.
+   */
+  bareSupported: boolean;
   reason?: string;
 };
 
@@ -63,6 +75,8 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       binary,
       version: "",
       missingFlags: [],
+      authMethod: "",
+      bareSupported: false,
       reason: `Claude CLI not found at '${binary}'. Install: https://docs.claude.com`,
     };
   }
@@ -73,6 +87,8 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       binary,
       version: "",
       missingFlags: [],
+      authMethod: "",
+      bareSupported: false,
       reason: `Could not parse Claude CLI version from '${versionRes.stdout.trim()}'`,
     };
   }
@@ -82,6 +98,8 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       binary,
       version,
       missingFlags: [],
+      authMethod: "",
+      bareSupported: false,
       reason: `Claude CLI ${version} is below the required minimum ${MIN_VERSION}. Run \`claude install\` to upgrade.`,
     };
   }
@@ -93,6 +111,8 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       binary,
       version,
       missingFlags: [],
+      authMethod: "",
+      bareSupported: false,
       reason: "Could not retrieve Claude CLI --help output to verify flags",
     };
   }
@@ -103,10 +123,46 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       binary,
       version,
       missingFlags: missing,
+      authMethod: "",
+      bareSupported: false,
       reason: `Required flags not exposed by this Claude CLI: ${missing.join(", ")}. Run \`claude install\` to upgrade.`,
     };
   }
-  return { ok: true, binary, version, missingFlags: [] };
+
+  // Detect auth method. --bare is incompatible with OAuth (claude.ai login)
+  // because it skips keychain reads — so we must avoid emitting --bare for
+  // subscription users. API-key auth (ANTHROPIC_API_KEY) keeps the savings.
+  const auth = detectAuth(spawn, binary);
+  return {
+    ok: true,
+    binary,
+    version,
+    missingFlags: [],
+    authMethod: auth.method,
+    bareSupported: auth.bareSupported,
+  };
+}
+
+function detectAuth(spawn: SpawnLike, binary: string): { method: string; bareSupported: boolean } {
+  const res = spawn(binary, ["auth", "status"]);
+  if (res.error || res.status !== 0) {
+    return { method: "", bareSupported: false };
+  }
+  // `claude auth status` prints JSON. Parse defensively.
+  const parsed = tryParseJson(res.stdout);
+  const method = typeof parsed?.authMethod === "string" ? parsed.authMethod : "";
+  // --bare requires API key per Claude CLI docs ("OAuth and keychain are never read").
+  const bareSupported = method === "apiKey" || process.env.ANTHROPIC_API_KEY !== undefined;
+  return { method, bareSupported };
+}
+
+function tryParseJson(s: string): { authMethod?: unknown } | null {
+  try {
+    const obj: unknown = JSON.parse(s);
+    return typeof obj === "object" && obj !== null ? (obj as { authMethod?: unknown }) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function parseVersion(text: string): string | null {

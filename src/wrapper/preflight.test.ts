@@ -64,6 +64,12 @@ const okSpawn: SpawnLike = (_cmd, args) => {
       ].join("\n"),
     };
   }
+  if (args[0] === "auth" && args[1] === "status") {
+    return {
+      status: 0,
+      stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+    };
+  }
   return { status: 1, stdout: "" };
 };
 
@@ -73,6 +79,33 @@ describe("preflight", () => {
     expect(r.ok).toBe(true);
     expect(r.version).toBe("2.1.112");
     expect(r.missingFlags).toEqual([]);
+    expect(r.authMethod).toBe("claude.ai");
+    // OAuth → bare not supported unless ANTHROPIC_API_KEY env is set
+    expect(r.bareSupported).toBe(process.env.ANTHROPIC_API_KEY !== undefined);
+  });
+
+  test("bareSupported true when authMethod is apiKey", () => {
+    const apiKeySpawn: SpawnLike = (_c, args) => {
+      if (args[0] === "--version") return { status: 0, stdout: "2.1.112" };
+      if (args[0] === "--help") return okSpawn("c", args);
+      if (args[0] === "auth") {
+        return { status: 0, stdout: JSON.stringify({ authMethod: "apiKey" }) };
+      }
+      return { status: 1, stdout: "" };
+    };
+    const r = preflight({ binary: "claude", spawn: apiKeySpawn });
+    expect(r.bareSupported).toBe(true);
+  });
+
+  test("bareSupported false when authMethod is claude.ai (OAuth)", () => {
+    const origKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const r = preflight({ binary: "claude", spawn: okSpawn });
+      expect(r.bareSupported).toBe(false);
+    } finally {
+      if (origKey !== undefined) process.env.ANTHROPIC_API_KEY = origKey;
+    }
   });
 
   test("binary not found → ok=false", () => {

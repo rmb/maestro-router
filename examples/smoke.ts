@@ -54,6 +54,7 @@ async function main(): Promise<void> {
     userConfig: {},
     sessionId,
     isResume: !isNew,
+    bareSupported: pre.bareSupported,
   });
   log(`claude args: ${args.join(" ")}`);
 

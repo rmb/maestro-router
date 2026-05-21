@@ -9,6 +9,12 @@ export type BuildArgsInput = {
   sessionId: string;
   /** true if continuing a prior session, false if starting fresh with this id. */
   isResume: boolean;
+  /**
+   * Whether the current auth method supports --bare. False on OAuth.
+   * When false, --bare is suppressed even if the profile would have set it.
+   * Defaults to false (safe).
+   */
+  bareSupported?: boolean;
 };
 
 /**
@@ -50,11 +56,12 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 
-  // S6: --bare requires three conditions
+  // S6: --bare requires four conditions (R-auth: bare_supported by env)
   const codes = decision.diagnostics.map((d) => d.code);
   const bareSafe = codes.includes("heuristic.bare_safe");
   const disableBare = codes.includes("override.disable_bare");
-  if (spec.bare === true && bareSafe && !disableBare) {
+  const bareSupported = input.bareSupported === true;
+  if (spec.bare === true && bareSafe && !disableBare && bareSupported) {
     args.push("--bare");
   }
 

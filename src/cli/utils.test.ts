@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { format, loadCliConfig, wrap, writeUserConfig } from "./utils.js";
@@ -31,6 +31,126 @@ describe("format", () => {
 
   test("default mode falls back to JSON for objects", () => {
     expect(JSON.parse(format({ a: 1 }))).toEqual({ a: 1 });
+  });
+});
+
+describe("loadCliConfig (F2 per-project discovery)", () => {
+  async function makeProjectConfig(
+    root: string,
+    files: { config?: object; overrides?: object; heuristics?: unknown[] },
+  ): Promise<void> {
+    const projectDir = join(root, ".maestro");
+    await mkdir(projectDir, { recursive: true });
+    if (files.config) {
+      await writeFile(join(projectDir, "config.json"), JSON.stringify(files.config));
+    }
+    if (files.overrides) {
+      await writeFile(
+        join(projectDir, "profile-overrides.json"),
+        JSON.stringify(files.overrides),
+      );
+    }
+    if (files.heuristics) {
+      await writeFile(
+        join(projectDir, "heuristics.json"),
+        JSON.stringify(files.heuristics),
+      );
+    }
+  }
+
+  test("discovers per-project .maestro/ in cwd", async () => {
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { profile: "quality" } });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: project,
+    });
+    expect(c.projectConfigDir).toBe(join(project, ".maestro"));
+    expect(c.userConfig.profile).toBe("quality");
+  });
+
+  test("walks up from a nested cwd to find .maestro/", async () => {
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { profile: "cheap" } });
+    const nested = join(project, "src", "deep", "nested");
+    await mkdir(nested, { recursive: true });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: nested,
+    });
+    expect(c.projectConfigDir).toBe(join(project, ".maestro"));
+    expect(c.userConfig.profile).toBe("cheap");
+  });
+
+  test("project config overrides user-global key-by-key", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(
+      globalPath,
+      JSON.stringify({ profile: "balanced", dailyCostCapUsd: 5 }),
+    );
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { profile: "quality" } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    // overridden
+    expect(c.userConfig.profile).toBe("quality");
+    // preserved from global
+    expect(c.userConfig.dailyCostCapUsd).toBe(5);
+  });
+
+  test("project profile-overrides merge per-class on top of global", async () => {
+    // No user-global overrides for now (use missing path).
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, {
+      overrides: { hard: { maxBudgetUsd: 99 } },
+    });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: project,
+    });
+    expect(c.profileOverrides.hard?.maxBudgetUsd).toBe(99);
+  });
+
+  test("project heuristics concatenate after global heuristics", async () => {
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, {
+      heuristics: [
+        { pattern: "deploy", class: "max", confidence: 0.95, source: "manual" },
+      ],
+    });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: project,
+    });
+    expect(c.userHeuristics).toHaveLength(1);
+    expect(c.userHeuristics[0]!.pattern).toBe("deploy");
+  });
+
+  test("noProject: true disables F2 discovery", async () => {
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { profile: "quality" } });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: project,
+      noProject: true,
+    });
+    expect(c.projectConfigDir).toBeNull();
+    expect(c.userConfig.profile).toBeUndefined();
+  });
+
+  test("string-style call still works (back-compat)", async () => {
+    const c = await loadCliConfig(join(dir, "missing.json"));
+    expect(c.userConfig).toEqual({});
+    expect(c.profileOverrides).toEqual({});
+  });
+
+  test("missing project config dir → projectConfigDir is null", async () => {
+    const isolated = join(dir, "isolated");
+    await mkdir(isolated, { recursive: true });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing.json"),
+      cwd: isolated,
+    });
+    expect(c.projectConfigDir).toBeNull();
   });
 });
 

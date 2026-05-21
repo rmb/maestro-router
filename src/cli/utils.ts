@@ -1,10 +1,12 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { loadUserHeuristics } from "../classifiers/heuristic.js";
 import type {
+  Class,
+  ClassSpec,
   HeuristicRule,
   ProfileOverride,
   UserConfig,
@@ -21,23 +23,107 @@ export type LoadedCliConfig = {
   profileOverrides: ProfileOverride;
   userHeuristics: HeuristicRule[];
   configPath: string;
+  /** F2: directory of the discovered `.maestro/` project config, or null. */
+  projectConfigDir: string | null;
+};
+
+export type LoadCliConfigOptions = {
+  /** Override the user-global config path. */
+  overridePath?: string;
+  /** Starting directory for per-project config discovery. Defaults to process.cwd(). */
+  cwd?: string;
+  /** Skip per-project discovery (F2). */
+  noProject?: boolean;
 };
 
 /**
- * F2 layered config loader (filesystem side). Reads
- *   ~/.maestro/config.json          → UserConfig
- *   ~/.maestro/profile-overrides.json → ProfileOverride
- *   ~/.maestro/heuristics.json      → HeuristicRule[]
- * All optional; missing files yield empty defaults. An optional
- * `overridePath` redirects the user-config read.
+ * Layered config loader (F2). Reads in priority order, project overrides global:
+ *
+ *   1. User-global  — ~/.maestro/{config,profile-overrides,heuristics}.json
+ *   2. Per-project  — <walk-up>/.maestro/{config,profile-overrides,heuristics}.json
+ *
+ * Per-project values override user-global values key-by-key for UserConfig and
+ * per-class for ProfileOverride. Heuristic rule lists concatenate (global
+ * first, then project) so the project's rules take precedence in the pipeline.
+ *
+ * All files are optional; missing files yield empty defaults. The user-global
+ * `.maestro/` directory (same as DEFAULT_CONFIG_DIR) is never selected as a
+ * project root, so cwd inside $HOME doesn't double-count.
  */
-export async function loadCliConfig(overridePath?: string): Promise<LoadedCliConfig> {
-  const configPath = overridePath ?? DEFAULT_USER_CONFIG;
-  const userConfig = (await readJsonOrNull<UserConfig>(configPath)) ?? {};
-  const profileOverrides =
+export async function loadCliConfig(
+  optsOrPath?: string | LoadCliConfigOptions,
+): Promise<LoadedCliConfig> {
+  const opts: LoadCliConfigOptions =
+    typeof optsOrPath === "string"
+      ? { overridePath: optsOrPath }
+      : (optsOrPath ?? {});
+  const configPath = opts.overridePath ?? DEFAULT_USER_CONFIG;
+
+  const userGlobal = (await readJsonOrNull<UserConfig>(configPath)) ?? {};
+  const overridesGlobal =
     (await readJsonOrNull<ProfileOverride>(DEFAULT_PROFILE_OVERRIDES)) ?? {};
-  const userHeuristics = await loadUserHeuristics(DEFAULT_HEURISTICS);
-  return { userConfig, profileOverrides, userHeuristics, configPath };
+  const heuristicsGlobal = await loadUserHeuristics(DEFAULT_HEURISTICS);
+
+  let projectConfigDir: string | null = null;
+  let userProject: UserConfig = {};
+  let overridesProject: ProfileOverride = {};
+  let heuristicsProject: HeuristicRule[] = [];
+
+  if (!opts.noProject) {
+    projectConfigDir = await findProjectConfigDir(opts.cwd ?? process.cwd());
+    if (projectConfigDir) {
+      userProject =
+        (await readJsonOrNull<UserConfig>(join(projectConfigDir, "config.json"))) ?? {};
+      overridesProject =
+        (await readJsonOrNull<ProfileOverride>(
+          join(projectConfigDir, "profile-overrides.json"),
+        )) ?? {};
+      heuristicsProject = await loadUserHeuristics(
+        join(projectConfigDir, "heuristics.json"),
+      );
+    }
+  }
+
+  return {
+    userConfig: { ...userGlobal, ...userProject },
+    profileOverrides: mergeProfileOverrides(overridesGlobal, overridesProject),
+    userHeuristics: [...heuristicsGlobal, ...heuristicsProject],
+    configPath,
+    projectConfigDir,
+  };
+}
+
+async function findProjectConfigDir(start: string): Promise<string | null> {
+  let dir = resolve(start);
+  const root = parse(dir).root;
+  const userGlobalDir = resolve(DEFAULT_CONFIG_DIR);
+  while (true) {
+    const candidate = join(dir, ".maestro");
+    // Skip user-global to avoid double-counting when cwd is inside $HOME.
+    if (resolve(candidate) !== userGlobalDir) {
+      try {
+        const s = await stat(candidate);
+        if (s.isDirectory()) return candidate;
+      } catch {
+        /* not present */
+      }
+    }
+    if (dir === root) return null;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function mergeProfileOverrides(
+  base: ProfileOverride,
+  overlay: ProfileOverride,
+): ProfileOverride {
+  const result: ProfileOverride = { ...base };
+  for (const [cls, spec] of Object.entries(overlay) as [Class, Partial<ClassSpec>][]) {
+    result[cls] = { ...result[cls], ...spec };
+  }
+  return result;
 }
 
 async function readJsonOrNull<T>(path: string): Promise<T | null> {

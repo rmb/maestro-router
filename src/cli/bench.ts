@@ -67,6 +67,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--tournament", "run model-tier downgrade tournament with real Claude calls (S4)")
     .option("--tournament-sample <n>", "tournament: number of prompts to run", "10")
     .option("--tournament-budget <usd>", "tournament: cost cap before aborting", "5")
+    .option("--tournament-seed <n>", "tournament: deterministic sample seed (default: input order)")
     .option("--confirm-cost", "tournament: required to actually spend money")
     .option("--tournament-output <path>", "tournament: write proposed overrides + heuristics here")
     .option("--update-baseline", "write the new report as the baseline")
@@ -81,6 +82,7 @@ export function registerBenchCommand(program: Command): void {
         tournament?: boolean;
         tournamentSample?: string;
         tournamentBudget?: string;
+        tournamentSeed?: string;
         confirmCost?: boolean;
         tournamentOutput?: string;
         updateBaseline?: boolean;
@@ -214,6 +216,7 @@ type TournamentModeArgs = {
   cmdOpts: {
     tournamentSample?: string;
     tournamentBudget?: string;
+    tournamentSeed?: string;
     confirmCost?: boolean;
     tournamentOutput?: string;
   };
@@ -253,6 +256,16 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
     process.exit(1);
   }
 
+  let seed: number | undefined;
+  if (args.cmdOpts.tournamentSeed !== undefined) {
+    const parsed = parseInt(args.cmdOpts.tournamentSeed, 10);
+    if (!Number.isFinite(parsed)) {
+      process.stderr.write("--tournament-seed must be an integer\n");
+      process.exit(2);
+    }
+    seed = parsed;
+  }
+
   // Sample with stratified coverage across classes (deterministic — no
   // RNG). `trivial` is excluded because it has no cheaper tier; including
   // it would just produce "no cheaper tier" skips and waste the sample
@@ -260,6 +273,7 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
   // tier rather than burning the budget on one class.
   const sampled = stratifiedSample(args.entries, sample, {
     excludeClasses: ["trivial"],
+    ...(seed !== undefined ? { seed } : {}),
   });
 
   // Pre-classify each prompt through the current pipeline to get its assigned class.

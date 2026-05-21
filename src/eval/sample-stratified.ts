@@ -5,6 +5,12 @@ import type { Class } from "../core/types.js";
 export type StratifiedSampleOptions = {
   /** Classes to skip entirely (e.g. trivial — no cheaper tier to test). */
   excludeClasses?: ReadonlyArray<Class>;
+  /**
+   * When set, each per-class group is shuffled deterministically with the
+   * given seed before round-robin emit. Lets users vary which N prompts get
+   * sampled across runs while keeping any single run reproducible.
+   */
+  seed?: number;
 };
 
 /**
@@ -45,6 +51,11 @@ export function stratifiedSample<T extends { expectedClass: Class }>(
     group.push(e);
   }
 
+  if (opts.seed !== undefined) {
+    const rng = mulberry32(opts.seed);
+    for (const group of groups.values()) shuffleInPlace(group, rng);
+  }
+
   const out: T[] = [];
   const cursors = new Map<Class, number>();
   let anyTaken = true;
@@ -61,4 +72,22 @@ export function stratifiedSample<T extends { expectedClass: Class }>(
     }
   }
   return out;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleInPlace<T>(arr: T[], rng: () => number): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+  }
 }

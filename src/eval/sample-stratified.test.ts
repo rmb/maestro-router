@@ -99,4 +99,22 @@ describe("stratifiedSample", () => {
     expect(out.every((x) => x.expectedClass !== "trivial")).toBe(true);
     expect(out).toHaveLength(3);
   });
+
+  test("same seed produces the same sample across calls", () => {
+    const entries: Entry[] = [];
+    for (let i = 0; i < 10; i++) entries.push(e(`s${i}`, "simple"));
+    for (let i = 0; i < 10; i++) entries.push(e(`st${i}`, "standard"));
+    const a = stratifiedSample(entries, 6, { seed: 42 });
+    const b = stratifiedSample(entries, 6, { seed: 42 });
+    expect(a.map((x) => x.prompt)).toEqual(b.map((x) => x.prompt));
+  });
+
+  test("different seeds produce different samples", () => {
+    const entries: Entry[] = [];
+    for (let i = 0; i < 10; i++) entries.push(e(`s${i}`, "simple"));
+    for (let i = 0; i < 10; i++) entries.push(e(`st${i}`, "standard"));
+    const a = stratifiedSample(entries, 6, { seed: 1 });
+    const b = stratifiedSample(entries, 6, { seed: 2 });
+    expect(a.map((x) => x.prompt)).not.toEqual(b.map((x) => x.prompt));
+  });
 });

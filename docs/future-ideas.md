@@ -10,11 +10,14 @@ Opt-in anonymous usage data to improve routing across users. Includes
 `core/telemetry-remote.ts`, consent flow, CLI `off`/`forget` subcommands,
 ADR-0005, PostHog EU project + dashboards. v0.2 ships local-only telemetry.
 
-### Embedding classifier (S2)
+### ~~Embedding classifier (S2)~~ — Shipped in v0.2.2
 `@xenova/transformers` peer, ONNX local embedding via
 `Xenova/all-MiniLM-L6-v2`, build-time `pnpm embed` script, `exemplars.json`
-+ `seeds.checksum` (R3 mitigation), runtime fail-open if peer missing. v0.2
-relies on override + turn-type + heuristic.
++ sha256 `seedsChecksum` drift gate (verified at runtime *and* by the
+`prebuild` script), runtime fail-soft when the peer is missing. Runs between
+`heuristic` and `llm` so it can short-circuit before paying the LLM cost.
+Opt out with `userConfig.useEmbeddingClassifier = false`. See
+`src/classifiers/embedding.ts`.
 
 ### ~~LLM classifier via `--json-schema` (S12)~~ — Shipped in v0.2.1
 `claude --print --model haiku --json-schema '{...}'` returns structured JSON.

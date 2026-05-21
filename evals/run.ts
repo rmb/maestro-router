@@ -3,6 +3,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { embeddingClassifier } from "../src/classifiers/embedding.js";
 import { heuristicClassifier } from "../src/classifiers/heuristic.js";
 import {
   createLLMClassifier,
@@ -72,7 +73,9 @@ async function main(): Promise<void> {
     .map((l) => JSON.parse(l) as EvalEntry);
 
   const llm = chooseLlm(entries);
+  const useEmbedding = process.env["MAESTRO_EMBEDDING_EVAL"] === "1";
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristicClassifier];
+  if (useEmbedding) classifiers.push(embeddingClassifier);
   if (llm) classifiers.push(llm);
 
   const pipeline = createPipeline({

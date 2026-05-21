@@ -65,6 +65,16 @@ Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003
        │                              │                               │
        │                              ▼                               │
        │                ┌────────────────────────────────┐            │
+       │                │ embedding.ts (S2, opt-out)     │            │
+       │                │  Xenova/all-MiniLM-L6-v2 ONNX  │            │
+       │                │  cosine sim to ~60 frozen      │            │
+       │                │  exemplars; sha256 drift gate; │            │
+       │                │  null + diagnostic if peer not │            │
+       │                │  installed                     │            │
+       │                └────────────────────────────────┘            │
+       │                              │                               │
+       │                              ▼                               │
+       │                ┌────────────────────────────────┐            │
        │                │ llm.ts (S12, opt-out)          │            │
        │                │  claude --print --json-schema  │            │
        │                │  haiku, $0.01 cap, 2s timeout  │            │
@@ -166,6 +176,9 @@ src/
     override.ts     @fast / @deep / @think / @fast+context (S6 escape)
     turn-type.ts    user_prompt / tool_result / error_recovery / continuation
     heuristic.ts    Built-in regex + user-defined rules + size policy
+    embedding.ts    ONNX feature-extraction + cosine to frozen exemplars (S2)
+    exemplars-seeds.ts  Frozen seed list (~60 entries) — checksum-pinned
+    exemplars.json  Pre-computed vectors written by `pnpm embed`
     llm.ts          claude --print --json-schema (S12) — opt-out
     internal-index.ts  Namespace target for `export * as classifiers`
 
@@ -316,10 +329,13 @@ For the wrapper-architecture v0.2 release:
 - No SDK middleware
 - No Bedrock / OpenAI / Codex compatibility
 - No remote telemetry (PostHog) — local JSONL only
-- No embedding-based classifier
 
 LLM-based classifier via `claude --print --json-schema` (S12) shipped in
 v0.2.1; opt out via `userConfig.useLlmClassifier = false`.
+
+Embedding classifier via `@xenova/transformers` (S2) shipped in v0.2.2;
+optional peer dependency, opt out via `userConfig.useEmbeddingClassifier
+= false`. Returns null + diagnostic if the peer isn't installed.
 
 These are deferred and documented in
 [`tasks/todo.md → Backlog`](../tasks/todo.md) and

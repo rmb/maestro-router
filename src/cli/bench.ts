@@ -3,6 +3,7 @@
 import type { Command } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { embeddingClassifier } from "../classifiers/embedding.js";
 import { createHeuristicClassifier, heuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier } from "../classifiers/override.js";
@@ -54,6 +55,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--tournament-output <path>", "tournament: write proposed overrides + heuristics here")
     .option("--update-baseline", "write the new report as the baseline")
     .option("--llm", "include the LLM classifier (costs ~$0.001 per uncertain prompt; default off)")
+    .option("--embedding", "include the in-process embedding classifier (requires @xenova/transformers; default off)")
     .action(
       async (cmdOpts: {
         eval: string;
@@ -67,6 +69,7 @@ export function registerBenchCommand(program: Command): void {
         tournamentOutput?: string;
         updateBaseline?: boolean;
         llm?: boolean;
+        embedding?: boolean;
       }) => {
         const parent = program.opts<ParentOptions>();
         const cli = await loadCliConfig(parent.config);
@@ -110,8 +113,15 @@ export function registerBenchCommand(program: Command): void {
         // bench excludes the LLM classifier by default — running 100+ live
         // Claude calls per `pnpm eval` costs real money and is slow. Use
         // --llm to opt in (and ensure your subscription tolerates the cost).
+        // Embedding is opt-in via --embedding so default `pnpm eval` stays fast
+        // and reproducible when @xenova/transformers isn't installed. The
+        // classifier returns null gracefully when the peer is missing, but the
+        // first call on a cold model load costs >1s and would dominate p95.
+        const useEmbedding =
+          cmdOpts.embedding === true && cli.userConfig.useEmbeddingClassifier !== false;
         const useLlm = cmdOpts.llm === true && cli.userConfig.useLlmClassifier !== false;
         const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+        if (useEmbedding) classifiers.push(embeddingClassifier);
         if (useLlm) classifiers.push(llmClassifier);
         const pipeline = createPipeline({
           classifiers,

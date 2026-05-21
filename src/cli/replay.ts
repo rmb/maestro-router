@@ -2,6 +2,7 @@
 
 import type { Command } from "commander";
 import { readFile } from "node:fs/promises";
+import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier } from "../classifiers/override.js";
@@ -36,8 +37,10 @@ export function registerReplayCommand(program: Command): void {
         cli.userHeuristics.length > 0
           ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
           : heuristicClassifier;
+      const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
       const useLlm = cli.userConfig.useLlmClassifier !== false;
       const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({
         classifiers,

@@ -22,7 +22,8 @@ User prompt (VSCode terminal or panel UI)
        │    1. override.ts        (@fast / @deep / @think / @fast+context / etc.)
        │    2. turn-type.ts       (user_prompt / tool_result / error_recovery / continuation)
        │    3. heuristic.ts       (built-in regex + user heuristics.json)
-       │    4. llm.ts             (S12 — claude --print --json-schema haiku, opt-out)
+       │    4. embedding.ts       (S2 — Xenova/all-MiniLM-L6-v2 ONNX, optional peer, opt-out)
+       │    5. llm.ts             (S12 — claude --print --json-schema haiku, opt-out)
        ├─ profile.ts: class → { model, effort, maxBudgetUsd, tools?, bare?, mcpConfig?, excludeDynamicSections? }
        ├─ cache.ts: sha256(prompt + scenario), 24h TTL, 1000 entries
        ├─ session.ts: reuse session_id by cwd (F9 amortization)
@@ -100,7 +101,7 @@ backlog of deferred ideas.
 ## Deferred (do not build in v0.2)
 
 - Remote PostHog telemetry → v0.3 (S1)
-- Embedding classifier (`@xenova/transformers`) → v0.3 (S2)
+- Embedding classifier (`@xenova/transformers`, S2) — shipped in v0.2.2; optional peer
 - Session token ceiling — free via `--max-budget-usd` (C11 → essentially shipped)
 - Tournament (single-axis, S4) — shipped in v0.2.1 via `bench --tournament`
 - Tournament matrix (model × effort) — v0.3 (S4 expansion)

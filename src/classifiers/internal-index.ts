@@ -17,3 +17,13 @@ export {
   createLLMClassifier,
   LLM_CLASSIFIER_SYSTEM_PROMPT,
 } from "./llm.js";
+export {
+  embeddingClassifier as embedding,
+  createEmbeddingClassifier,
+  computeSeedsChecksum,
+  cosineSimilarity,
+} from "./embedding.js";
+export {
+  EXEMPLAR_SEEDS,
+  EXEMPLAR_SEEDS_VERSION,
+} from "./exemplars-seeds.js";

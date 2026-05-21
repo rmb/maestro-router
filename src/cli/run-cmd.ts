@@ -1,6 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import type { Command } from "commander";
+import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
@@ -65,8 +66,10 @@ export function registerRunCommand(program: Command): void {
           ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
           : heuristicClassifier;
 
+      const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
       const useLlm = cli.userConfig.useLlmClassifier !== false;
       const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({
         classifiers,

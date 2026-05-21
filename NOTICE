@@ -1,0 +1,25 @@
+Maestro
+Copyright 2026 Maestro Contributors
+
+This product is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this product except in compliance with the License. You may
+obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This product credits external patterns:
+
+- Microsoft Chat Customizations Evaluations — anti-injection wrapping
+  (<PROMPT_TO_CLASSIFY> tags), extractJSON utility, parallel pipeline,
+  size limits, diagnostic output conventions.
+
+- claude-code-router (musistudio/claude-code-router) — the CCR scenario
+  protocol shape (background / think / longContext / webSearch / image)
+  informed Maestro's turn-type classifier design even though Maestro does
+  not depend on or interoperate with CCR at runtime.
+
+- RTK (Rust Token Killer) — hook-based token compression pattern;
+  Maestro complements RTK by operating at the model-selection layer
+  while RTK operates at the tool-output layer.
+
+- PostHog — telemetry consent pattern (deferred to v0.3).

@@ -62,6 +62,15 @@ Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003
        │                │  built-in regex + user rules   │            │
        │                │  + size policy + bare_safe     │            │
        │                └────────────────────────────────┘            │
+       │                              │                               │
+       │                              ▼                               │
+       │                ┌────────────────────────────────┐            │
+       │                │ llm.ts (S12, opt-out)          │            │
+       │                │  claude --print --json-schema  │            │
+       │                │  haiku, $0.01 cap, 2s timeout  │            │
+       │                │  <PROMPT_TO_CLASSIFY> anti-    │            │
+       │                │  injection wrap                │            │
+       │                └────────────────────────────────┘            │
        │                                                              │
        │  Sub-threshold results vote (weighted). No match → standard. │
        └─────────────────────────────┬────────────────────────────────┘
@@ -128,6 +137,7 @@ src/
     override.ts     @fast / @deep / @think / @fast+context (S6 escape)
     turn-type.ts    user_prompt / tool_result / error_recovery / continuation
     heuristic.ts    Built-in regex + user-defined rules + size policy
+    llm.ts          claude --print --json-schema (S12) — opt-out
     internal-index.ts  Namespace target for `export * as classifiers`
 
   wrapper/          Subprocess concerns. Depend on core + node:child_process.
@@ -268,8 +278,9 @@ For the wrapper-architecture v0.2 release:
 - No Bedrock / OpenAI / Codex compatibility
 - No remote telemetry (PostHog) — local JSONL only
 - No embedding-based classifier
-- No LLM-based classifier (re-introducable in v0.3 via `claude --print
-  --json-schema` — see [`future-ideas.md`](future-ideas.md) S12)
+
+LLM-based classifier via `claude --print --json-schema` (S12) shipped in
+v0.2.1; opt out via `userConfig.useLlmClassifier = false`.
 
 These are deferred and documented in
 [`tasks/todo.md → Backlog`](../tasks/todo.md) and

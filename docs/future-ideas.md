@@ -16,12 +16,15 @@ ADR-0005, PostHog EU project + dashboards. v0.2 ships local-only telemetry.
 + `seeds.checksum` (R3 mitigation), runtime fail-open if peer missing. v0.2
 relies on override + turn-type + heuristic.
 
-### LLM classifier via `--json-schema` (S12)
+### ~~LLM classifier via `--json-schema` (S12)~~ — Shipped in v0.2.1
 `claude --print --model haiku --json-schema '{...}'` returns structured JSON.
-Brings back the original LLM classifier without requiring API access — just
-spawn Haiku via CLI for ambiguous prompts. Adds ~$0.001 per classifier call
-(Haiku via subscription). Worth re-introducing in v0.3 when v0.2 telemetry
-shows where heuristic + turn-type + override leave gaps.
+Brings back the LLM classifier without API access — just spawn Haiku via CLI
+for ambiguous prompts. ~$0.001 per uncertain prompt. Runs *after*
+override + turn-type + heuristic, only fires on prompts none of them matched.
+Anti-injection wrapping via `<PROMPT_TO_CLASSIFY>` tags. Opt out with
+`userConfig.useLlmClassifier = false`. Oracle-mocked eval lifts accuracy from
+83.94% → 91.24% (upper bound; live Haiku will be lower).
+See `src/classifiers/llm.ts`.
 
 ### Tournament matrix (S4, C6 expansion)
 Expand `bench --tournament` from single-axis model-tier downgrade to a model

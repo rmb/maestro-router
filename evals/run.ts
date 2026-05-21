@@ -4,11 +4,16 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { heuristicClassifier } from "../src/classifiers/heuristic.js";
+import {
+  createLLMClassifier,
+  llmClassifier,
+  type LLMClassifierSpawn,
+} from "../src/classifiers/llm.js";
 import { overrideClassifier } from "../src/classifiers/override.js";
 import { turnTypeClassifier } from "../src/classifiers/turn-type.js";
 import { createPipeline } from "../src/core/pipeline.js";
 import { balancedProfile } from "../src/core/profile.js";
-import type { Class, Message, Request } from "../src/core/types.js";
+import type { Class, Classifier, Message, Request } from "../src/core/types.js";
 
 type EvalEntry = {
   prompt: string;
@@ -21,6 +26,43 @@ type EvalEntry = {
 const ALL_CLASSES: Class[] = ["trivial", "simple", "standard", "hard", "reasoning", "max"];
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Build a mock spawn that resolves prompts via a lookup table: prompt → true
+ * class. Used when MAESTRO_LLM_ORACLE=1 to simulate a perfect Haiku classifier
+ * without spawning real claude. Demonstrates the *upper bound* of pipeline
+ * accuracy improvement from S12.
+ */
+function makeOracleSpawn(entries: EvalEntry[]): LLMClassifierSpawn {
+  const oracle = new Map<string, Class>();
+  for (const e of entries) {
+    // Strip the anti-injection wrapper for lookup
+    oracle.set(e.prompt, e.expectedClass);
+  }
+  return async (_cmd, _args, opts) => {
+    const m = opts.input.match(/^<PROMPT_TO_CLASSIFY>([\s\S]*)<\/PROMPT_TO_CLASSIFY>$/);
+    const inner = m?.[1] ?? opts.input;
+    const cls = oracle.get(inner) ?? "standard";
+    const envelope = {
+      type: "result",
+      subtype: "success",
+      result: JSON.stringify({ class: cls, confidence: 0.9 }),
+    };
+    return {
+      stdout: JSON.stringify(envelope),
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+    };
+  };
+}
+
+function chooseLlm(entries: EvalEntry[]): Classifier | null {
+  const mode = process.env.MAESTRO_LLM_EVAL;
+  if (mode === "live") return llmClassifier;
+  if (mode === "oracle") return createLLMClassifier({ spawn: makeOracleSpawn(entries) });
+  return null; // default: keep the baseline 3-classifier pipeline
+}
+
 async function main(): Promise<void> {
   const labeledPath = join(__dirname, "labeled.jsonl");
   const data = await readFile(labeledPath, "utf8");
@@ -29,8 +71,12 @@ async function main(): Promise<void> {
     .filter((l) => l.trim().length > 0)
     .map((l) => JSON.parse(l) as EvalEntry);
 
+  const llm = chooseLlm(entries);
+  const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristicClassifier];
+  if (llm) classifiers.push(llm);
+
   const pipeline = createPipeline({
-    classifiers: [overrideClassifier, turnTypeClassifier, heuristicClassifier],
+    classifiers,
     profile: balancedProfile,
   });
 
@@ -102,7 +148,11 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(report, null, 2));
 
   const baselinePath = join(__dirname, "baseline.json");
-  await writeFile(baselinePath, JSON.stringify(report, null, 2));
+  // Only overwrite baseline.json in the default (no-LLM) mode — that's the
+  // canonical regression baseline. Live/oracle runs are demonstrative.
+  if (!process.env.MAESTRO_LLM_EVAL) {
+    await writeFile(baselinePath, JSON.stringify(report, null, 2));
+  }
 }
 
 function buildRequest(entry: EvalEntry): Request {

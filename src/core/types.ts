@@ -69,6 +69,12 @@ export type UserConfig = {
   autoCompact?: boolean;
   autoCompactThresholdTokens?: number;
   telemetryPath?: string;
+  /**
+   * When true (default), use `claude --json-schema` as a final classifier
+   * for prompts the cheap classifiers can't handle. Adds ~$0.001 per
+   * uncertain prompt on Haiku. Set false to disable entirely (S12).
+   */
+  useLlmClassifier?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

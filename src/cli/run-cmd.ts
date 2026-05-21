@@ -2,8 +2,10 @@
 
 import type { Command } from "commander";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
+import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
+import type { Classifier } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
@@ -63,8 +65,11 @@ export function registerRunCommand(program: Command): void {
           ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
           : heuristicClassifier;
 
+      const useLlm = cli.userConfig.useLlmClassifier !== false;
+      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({
-        classifiers: [overrideClassifier, turnTypeClassifier, heuristic],
+        classifiers,
         profile,
       });
 

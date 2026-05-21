@@ -22,6 +22,7 @@ User prompt (VSCode terminal or panel UI)
        │    1. override.ts        (@fast / @deep / @think / @fast+context / etc.)
        │    2. turn-type.ts       (user_prompt / tool_result / error_recovery / continuation)
        │    3. heuristic.ts       (built-in regex + user heuristics.json)
+       │    4. llm.ts             (S12 — claude --print --json-schema haiku, opt-out)
        ├─ profile.ts: class → { model, effort, maxBudgetUsd, tools?, bare?, mcpConfig?, excludeDynamicSections? }
        ├─ cache.ts: sha256(prompt + scenario), 24h TTL, 1000 entries
        ├─ session.ts: reuse session_id by cwd (F9 amortization)
@@ -100,7 +101,6 @@ backlog of deferred ideas.
 
 - Remote PostHog telemetry → v0.3 (S1)
 - Embedding classifier (`@xenova/transformers`) → v0.3 (S2)
-- LLM classifier (via `claude --print --json-schema` in v0.3, S12)
 - Session token ceiling — free via `--max-budget-usd` (C11 → essentially shipped)
 - Tournament matrix (model × effort) — v0.3 (S4)
 - Per-tool profile overrides → v0.3 (C12)

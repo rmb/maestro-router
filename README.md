@@ -14,7 +14,7 @@ or local tarball (see below).
 For every prompt you send to Claude Code, Maestro:
 
 1. Detects turn type (new prompt vs tool result vs error recovery)
-2. Classifies complexity (override → turn-type → heuristic, short-circuit at 0.6 confidence)
+2. Classifies complexity (override → turn-type → heuristic → LLM, short-circuit at 0.6 confidence). The LLM stage is a `claude --print --json-schema` call to Haiku (~$0.001 per uncertain prompt). Opt out with `useLlmClassifier: false` in `~/.maestro/config.json`.
 3. Picks the right `--model`, `--effort`, and `--max-budget-usd` from your profile
 4. Applies Claude-specific savings: `--exclude-dynamic-system-prompt-sections` (cache reuse), per-class `--tools` and `--mcp-config` restriction for low-class prompts, and `--bare` for definite-trivial patterns *when authenticated by `ANTHROPIC_API_KEY`* (Pro/Team OAuth skips `--bare` because Claude CLI doesn't read keychain credentials in bare mode)
 5. Spawns `claude --print --session-id <uuid> --resume ...` so conversation continuity is preserved across model swaps
@@ -164,8 +164,8 @@ pass `--ignore-scripts` (see lessons.md).
 - v0.2.1 (planned) — better replay (telemetry prompt hash), `bench --tournament` with real Claude
 
 Backlog of considered-but-deferred ideas (remote telemetry, embedding
-classifier, LLM-as-classifier via `--json-schema`, per-tool profile overrides,
-Bedrock/Codex compatibility) lives in [docs/future-ideas.md](docs/future-ideas.md).
+classifier, per-tool profile overrides, Bedrock/Codex compatibility) lives in
+[docs/future-ideas.md](docs/future-ideas.md).
 
 ## More reading
 

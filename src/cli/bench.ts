@@ -4,12 +4,13 @@ import type { Command } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHeuristicClassifier, heuristicClassifier } from "../classifiers/heuristic.js";
+import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
-import type { Class, HeuristicRule, Message, ProfileOverride, Request } from "../core/types.js";
+import type { Class, Classifier, HeuristicRule, Message, ProfileOverride, Request } from "../core/types.js";
 import { format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -88,8 +89,11 @@ export function registerBenchCommand(program: Command): void {
           extraHeuristics.length > 0
             ? createHeuristicClassifier({ extraRules: extraHeuristics })
             : heuristicClassifier;
+        const useLlm = cli.userConfig.useLlmClassifier !== false;
+        const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+        if (useLlm) classifiers.push(llmClassifier);
         const pipeline = createPipeline({
-          classifiers: [overrideClassifier, turnTypeClassifier, heuristic],
+          classifiers,
           profile,
         });
 

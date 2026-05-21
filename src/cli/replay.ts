@@ -3,11 +3,12 @@
 import type { Command } from "commander";
 import { readFile } from "node:fs/promises";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
+import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
-import type { Class, Request, TelemetryEvent } from "../core/types.js";
+import type { Class, Classifier, Request, TelemetryEvent } from "../core/types.js";
 import { format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -35,8 +36,11 @@ export function registerReplayCommand(program: Command): void {
         cli.userHeuristics.length > 0
           ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
           : heuristicClassifier;
+      const useLlm = cli.userConfig.useLlmClassifier !== false;
+      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({
-        classifiers: [overrideClassifier, turnTypeClassifier, heuristic],
+        classifiers,
         profile,
       });
 

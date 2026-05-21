@@ -12,3 +12,8 @@ export {
   BUILTIN_RULES,
   loadUserHeuristics,
 } from "./heuristic.js";
+export {
+  llmClassifier as llm,
+  createLLMClassifier,
+  LLM_CLASSIFIER_SYSTEM_PROMPT,
+} from "./llm.js";

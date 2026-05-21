@@ -48,6 +48,13 @@ echo "→ Installing dev dependencies (pnpm)…"
 pnpm install --ignore-scripts
 
 echo "→ Building…"
+# The embedding classifier (S2) is an optional peer (@xenova/transformers).
+# By default it isn't installed, so exemplars.json hasn't been generated yet
+# and the prebuild checksum gate would fail. The runtime classifier degrades
+# gracefully without exemplars (returns null + diagnostic, pipeline continues).
+# Users who want embedding can opt in later:
+#   npm install -g @xenova/transformers && pnpm embed
+export MAESTRO_SKIP_EMBED_CHECK=1
 pnpm build
 
 echo "→ Packing tarball…"

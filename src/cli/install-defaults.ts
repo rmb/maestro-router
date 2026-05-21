@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
   useEmbeddingClassifier: true,
   autoCompact: false,
   autoCompactThresholdTokens: 8000,
-  feedbackPrompts: "occasional",
+  feedbackPrompts: "never",
   feedbackSampleRate: 0.15,
   autoLearn: true,
 };

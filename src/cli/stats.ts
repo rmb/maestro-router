@@ -2,7 +2,7 @@
 
 import type { Command } from "commander";
 import { createTelemetry } from "../core/telemetry.js";
-import { ALL_CLASSES, balancedProfile } from "../core/profile.js";
+import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, TelemetryEvent } from "../core/types.js";
 import {
   bar,
@@ -21,8 +21,11 @@ import { DEFAULT_TELEMETRY_PATH, format, loadCliConfig } from "./utils.js";
 
 const DEFAULT_WINDOW_DAYS = 7;
 
-/** Cost-per-million-input-tokens estimate for the Opus-everywhere baseline. */
-const OPUS_BASELINE_FACTOR = 5; // rough: Opus ≈ 5× Sonnet, 15× Haiku
+/** Opus token prices (USD per token). Source: Anthropic pricing page. */
+const OPUS_INPUT_PER_TOK = 15 / 1_000_000;
+const OPUS_OUTPUT_PER_TOK = 75 / 1_000_000;
+const OPUS_CACHE_WRITE_PER_TOK = 18.75 / 1_000_000;
+const OPUS_CACHE_READ_PER_TOK = 1.50 / 1_000_000;
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 
@@ -88,6 +91,10 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   let cacheReadTokens = 0;
   let cacheCreationCost = 0;
   let cacheReadCount = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheCreationTokens = 0;
+  let totalCacheReadTokens = 0;
 
   for (const e of events) {
     if (e.type === "decision") {
@@ -104,6 +111,10 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
           cacheCreationCost += cost; // attribute full cost when cache was bootstrapped that turn
         }
         if (e.cost.cacheReadInputTokens > 0) cacheReadCount++;
+        totalInputTokens += e.cost.inputTokens;
+        totalOutputTokens += e.cost.outputTokens;
+        totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
+        totalCacheReadTokens += e.cost.cacheReadInputTokens;
       }
     } else if (e.type === "override") {
       const key = `${e.from}>${e.to}`;
@@ -125,7 +136,13 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     };
   }
 
-  const baselineOpus = estimateBaselineOpusCost(totalCost, perClass);
+  const baselineOpus = estimateBaselineOpusCost(
+    totalCost,
+    totalInputTokens,
+    totalOutputTokens,
+    totalCacheCreationTokens,
+    totalCacheReadTokens,
+  );
 
   return {
     windowDays,
@@ -163,42 +180,25 @@ function round(n: number, digits: number): number {
 }
 
 /**
- * Estimate "what would this have cost on Opus-everywhere?" by re-pricing each
- * decision's class spec against opus + max effort using a rough multiplier on
- * the actual realized cost. Real Anthropic pricing varies per model + cache
- * usage; this is a coarse heuristic, surfaced as `baselineOpusEverywhereUsd`.
+ * Reprice the observed token mix at Opus rates. More accurate than flat
+ * per-class multipliers because Anthropic prices cache writes, cache reads,
+ * and output tokens at consistent ratios across models, so the token counts
+ * are the ground truth regardless of which model was actually used.
  */
 function estimateBaselineOpusCost(
   actualCost: number,
-  perClass: Record<Class, { count: number; totalCost: number }>,
+  inputTokens: number,
+  outputTokens: number,
+  cacheCreationTokens: number,
+  cacheReadTokens: number,
 ): number {
-  let baseline = 0;
-  for (const cls of ALL_CLASSES) {
-    const factor = baselineFactor(cls);
-    baseline += perClass[cls].totalCost * factor;
-  }
-  // Fallback if all classes are zero
-  return baseline > 0 ? baseline : actualCost * OPUS_BASELINE_FACTOR;
-}
-
-function baselineFactor(cls: Class): number {
-  // Rough scalars: how much more would this prompt cost on opus@max vs the
-  // class's actual model+effort? Higher classes already use opus so factor ~1;
-  // trivial→opus is ~15× difference.
-  switch (cls) {
-    case "trivial":
-      return balancedProfile.classes.trivial.model === "haiku" ? 15 : 1;
-    case "simple":
-      return 8;
-    case "standard":
-      return 5;
-    case "hard":
-      return 3;
-    case "reasoning":
-      return 1.5;
-    case "max":
-      return 1;
-  }
+  const tokenBased =
+    inputTokens * OPUS_INPUT_PER_TOK +
+    outputTokens * OPUS_OUTPUT_PER_TOK +
+    cacheCreationTokens * OPUS_CACHE_WRITE_PER_TOK +
+    cacheReadTokens * OPUS_CACHE_READ_PER_TOK;
+  // Fall back to a 5× multiplier only when no token data is available.
+  return tokenBased > 0 ? tokenBased : actualCost * 5;
 }
 
 function renderHuman(s: Summary): string {

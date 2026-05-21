@@ -7,10 +7,17 @@ import { join } from "node:path";
 import { format, loadCliConfig, wrap, writeUserConfig } from "./utils.js";
 
 let dir: string;
+let prevMaestroHome: string | undefined;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "maestro-cli-utils-"));
+  // Isolate from the real ~/.maestro — any heuristics.json or config.json
+  // there would leak into hermetic-empty assertions.
+  prevMaestroHome = process.env.MAESTRO_HOME;
+  process.env.MAESTRO_HOME = join(dir, "fake-home");
 });
 afterEach(async () => {
+  if (prevMaestroHome === undefined) delete process.env.MAESTRO_HOME;
+  else process.env.MAESTRO_HOME = prevMaestroHome;
   await rm(dir, { recursive: true, force: true });
 });
 

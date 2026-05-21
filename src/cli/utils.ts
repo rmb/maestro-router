@@ -12,7 +12,18 @@ import type {
   UserConfig,
 } from "../core/types.js";
 
-export const DEFAULT_CONFIG_DIR = join(homedir(), ".maestro");
+/**
+ * Resolves the user-global maestro config root. Honors $MAESTRO_HOME so
+ * tests (and ephemeral sandboxes) can pin a clean directory; falls back to
+ * `~/.maestro` for normal use.
+ */
+function resolveConfigDir(): string {
+  const override = process.env.MAESTRO_HOME;
+  if (override && override.length > 0) return override;
+  return join(homedir(), ".maestro");
+}
+
+export const DEFAULT_CONFIG_DIR = resolveConfigDir();
 export const DEFAULT_USER_CONFIG = join(DEFAULT_CONFIG_DIR, "config.json");
 export const DEFAULT_PROFILE_OVERRIDES = join(DEFAULT_CONFIG_DIR, "profile-overrides.json");
 export const DEFAULT_HEURISTICS = join(DEFAULT_CONFIG_DIR, "heuristics.json");
@@ -57,12 +68,18 @@ export async function loadCliConfig(
     typeof optsOrPath === "string"
       ? { overridePath: optsOrPath }
       : (optsOrPath ?? {});
-  const configPath = opts.overridePath ?? DEFAULT_USER_CONFIG;
+  // Re-resolve at call time so $MAESTRO_HOME set after module load (e.g.
+  // by test beforeEach) is honored. The exported DEFAULT_* constants
+  // remain stable for callers that compute paths up-front.
+  const configDir = resolveConfigDir();
+  const configPath = opts.overridePath ?? join(configDir, "config.json");
+  const overridesPath = join(configDir, "profile-overrides.json");
+  const heuristicsPath = join(configDir, "heuristics.json");
 
   const userGlobal = (await readJsonOrNull<UserConfig>(configPath)) ?? {};
   const overridesGlobal =
-    (await readJsonOrNull<ProfileOverride>(DEFAULT_PROFILE_OVERRIDES)) ?? {};
-  const heuristicsGlobal = await loadUserHeuristics(DEFAULT_HEURISTICS);
+    (await readJsonOrNull<ProfileOverride>(overridesPath)) ?? {};
+  const heuristicsGlobal = await loadUserHeuristics(heuristicsPath);
 
   let projectConfigDir: string | null = null;
   let userProject: UserConfig = {};

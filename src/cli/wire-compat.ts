@@ -1,15 +1,29 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 //
-// Wire-compatibility layer. When invoked with Claude-style argv (e.g.,
-// by VSCode's `claudeCode.claudeProcessWrapper`), Maestro:
-//   1. reads the prompt from stdin (Claude --print mode does this),
-//   2. classifies it,
-//   3. overrides the model/effort/budget flags,
-//   4. exec's the *real* `claude` with the modified args.
+// Wire-compatibility layer for the official Claude Code VSCode extension's
+// `claudeCode.claudeProcessWrapper` setting.
+//
+// IMPORTANT: the extension does NOT treat the wrapper as a claude
+// replacement. It invokes the wrapper with the REAL claude binary path as
+// argv[1] and the actual claude arguments as argv[2..]. The wrapper is
+// expected to fork/exec the real claude with the remaining arguments,
+// optionally adding/modifying flags.
+//
+// Maestro's wrapper:
+//   1. Recognizes the wrapper invocation shape.
+//   2. For management subcommands (auth, --version, --help, mcp, ...) it
+//      passes through completely unmodified so the extension's probes
+//      (e.g. `claude auth status`) return what the extension expects.
+//   3. For real prompt invocations (--print with stdin), it classifies the
+//      prompt and overrides --model / --effort / --max-budget-usd, then
+//      exec's the real claude.
+//   4. stream-json input from the VSCode panel is opaque (multiple JSON
+//      messages with system / user / etc. fields). For v0.2 we passthrough
+//      stream-json invocations unmodified — classification of streaming
+//      multi-turn input is deferred until we have a tested parser.
 
-import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { delimiter, sep } from "node:path";
+import { isAbsolute } from "node:path";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { overrideClassifier } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
@@ -40,46 +54,105 @@ const KNOWN_SUBCOMMANDS = new Set([
 ]);
 
 /**
- * Decide whether argv is a Claude-style passthrough invocation (e.g. from
- * claudeProcessWrapper) versus a Maestro subcommand. The signal is:
- * `--print` present AND no known Maestro subcommand in the first positional.
+ * Claude CLI management subcommands that should always passthrough
+ * unmodified. The VSCode extension probes several of these on startup.
+ * Note: --version / --help are NOT here because Maestro handles those at
+ * the top level (commander shows maestro --help / maestro --version).
+ * Inside process-wrapper mode they reach this set indirectly via argv[3].
  */
-export function shouldEnterWireCompat(argv: ReadonlyArray<string>): boolean {
-  const args = argv.slice(2);
-  if (args.length === 0) return false;
-  for (const a of args) {
-    if (a === "--print") return shouldEnterWireCompatPositional(args);
-    if (!a.startsWith("-")) {
-      if (KNOWN_SUBCOMMANDS.has(a)) return false;
-      // Bare positional that is not a known subcommand → user error, let
-      // commander handle it.
-      return false;
-    }
-  }
-  return false;
-}
+const PASSTHROUGH_FIRST_ARGS = new Set([
+  "auth",
+  "mcp",
+  "doctor",
+  "agents",
+  "plugin",
+  "plugins",
+  "install",
+  "update",
+  "upgrade",
+  "setup-token",
+  "auto-mode",
+]);
 
-function shouldEnterWireCompatPositional(args: ReadonlyArray<string>): boolean {
-  for (const a of args) {
-    if (!a.startsWith("-") && KNOWN_SUBCOMMANDS.has(a)) return false;
-  }
-  return true;
-}
+/** Flags Maestro handles itself when invoked as a CLI (not as a wrapper). */
+const MAESTRO_TOP_LEVEL_FLAGS = new Set(["--version", "-V", "--help", "-h"]);
 
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return "";
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
+export type WireCompatShape = "none" | "process-wrapper" | "direct-claude-args";
 
 /**
- * Resolve the real `claude` binary on PATH, excluding the path of this
- * Maestro binary so we don't recurse. Returns null when not found or only
- * the Maestro binary is on PATH under the name `claude`.
+ * Identify whether argv represents a wrapper invocation.
+ *
+ * - "process-wrapper": argv[2] is the real claude binary path, argv[3..]
+ *   are claude args. This is what the VSCode extension does.
+ * - "direct-claude-args": argv[2..] looks like claude args directly (no
+ *   binary path). Used when a user aliases `claude=maestro` in their shell.
+ * - "none": this is a Maestro subcommand invocation; commander handles it.
  */
+export function detectWireCompatShape(argv: ReadonlyArray<string>): WireCompatShape {
+  const args = argv.slice(2);
+  if (args.length === 0) return "none";
+
+  // If first non-flag arg is a known Maestro subcommand, normal mode.
+  for (const a of args) {
+    if (a.startsWith("-")) continue;
+    if (KNOWN_SUBCOMMANDS.has(a)) return "none";
+    break;
+  }
+
+  const first = args[0]!;
+
+  // Maestro's own top-level flags must reach commander.
+  if (MAESTRO_TOP_LEVEL_FLAGS.has(first)) return "none";
+
+  // VSCode-style: first arg is an absolute path that exists and looks like
+  // the real claude binary.
+  if (isAbsolute(first) && looksLikeClaudeBinary(first)) {
+    return "process-wrapper";
+  }
+
+  // Direct claude args: contains --print or a Claude management subcommand.
+  if (args.includes("--print") || PASSTHROUGH_FIRST_ARGS.has(first)) {
+    return "direct-claude-args";
+  }
+
+  return "none";
+}
+
+function looksLikeClaudeBinary(path: string): boolean {
+  // Cheap heuristic. We don't want to spawn for the check.
+  return path.endsWith("/claude") || path.endsWith("\\claude") || path.endsWith("/claude.exe");
+}
+
+/** Keep old name as an alias so callers stay compatible. */
+export function shouldEnterWireCompat(argv: ReadonlyArray<string>): boolean {
+  return detectWireCompatShape(argv) !== "none";
+}
+
+async function readStdin(timeoutMs = 100): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  // Read with a short timeout: VSCode extension probes (auth status etc.)
+  // don't pipe anything; we don't want to hang waiting for stdin.
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    const finish = (): void => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    process.stdin.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      clearTimeout(timer);
+    });
+    process.stdin.on("end", () => {
+      clearTimeout(timer);
+      finish();
+    });
+    process.stdin.on("error", () => {
+      clearTimeout(timer);
+      finish();
+    });
+  });
+}
+
 function resolveRealClaude(): string | null {
   const selfPath = (() => {
     try {
@@ -88,24 +161,17 @@ function resolveRealClaude(): string | null {
       return "";
     }
   })();
-
-  const PATH = process.env.PATH ?? "";
-  const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE").split(";") : [""];
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const candidate = `${dir}${sep}claude${ext}`;
-      try {
-        const real = realpathSync(candidate);
-        if (real === selfPath) continue;
-        // verify by attempting --version
-        const res = spawnSync(candidate, ["--version"], { encoding: "utf8" });
-        if (res.status === 0 && typeof res.stdout === "string" && res.stdout.includes("Claude")) {
-          return candidate;
-        }
-      } catch {
-        // not present at this path
-      }
+  const candidates = [
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
+  ];
+  for (const c of candidates) {
+    try {
+      const real = realpathSync(c);
+      if (real !== selfPath) return c;
+    } catch {
+      // not present
     }
   }
   return null;
@@ -147,37 +213,66 @@ function applyRouting(
     filtered.push("--bare");
   }
 
-  // S8/S9 — we deliberately do NOT override --tools or --mcp-config here.
-  // VSCode (or whatever caller wrapped us) may have configured these for the
-  // user's actual session; clobbering would break tools they rely on.
-  // `maestro run` applies S8/S9 explicitly. Wrapper mode trusts the caller.
-
   return filtered;
 }
 
 export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<number> {
-  const inboundArgs = argv.slice(2);
+  const shape = detectWireCompatShape(argv);
+  if (shape === "none") return 0;
 
-  const pre = preflight();
-  if (!pre.ok) {
-    process.stderr.write(`maestro (wire-compat): ${pre.reason}\n`);
-    return 1;
+  // Determine real claude binary and the args we'll pass to it.
+  let realClaude: string | null = null;
+  let claudeArgs: ReadonlyArray<string> = [];
+  if (shape === "process-wrapper") {
+    realClaude = argv[2] ?? null;
+    claudeArgs = argv.slice(3);
+  } else {
+    realClaude = resolveRealClaude();
+    claudeArgs = argv.slice(2);
   }
 
-  const realClaude = resolveRealClaude();
   if (!realClaude) {
     process.stderr.write(
-      "maestro (wire-compat): could not locate real `claude` binary on PATH (excluding the maestro symlink).\n",
+      "maestro (wire-compat): could not locate real `claude` binary.\n",
     );
     return 1;
   }
 
-  const prompt = (await readStdin()).trim();
-  if (!prompt) {
-    // No prompt: nothing to classify. Passthrough unmodified.
+  // Passthrough management subcommands and probe flags untouched.
+  const firstArg = claudeArgs[0];
+  if (firstArg !== undefined && PASSTHROUGH_FIRST_ARGS.has(firstArg)) {
     const res = await streamClaude({
       binary: realClaude,
-      args: inboundArgs,
+      args: claudeArgs,
+      prompt: "",
+      stdout: process.stdout,
+      stderr: process.stderr,
+      forwardSigint: true,
+    });
+    return res.exitCode ?? 0;
+  }
+
+  // stream-json input is opaque (system / user / tool messages mixed). v0.2
+  // doesn't classify these — passthrough unmodified.
+  if (argsContainStreamJsonInput(claudeArgs)) {
+    const res = await streamClaude({
+      binary: realClaude,
+      args: claudeArgs,
+      prompt: "",
+      stdout: process.stdout,
+      stderr: process.stderr,
+      forwardSigint: true,
+    });
+    return res.exitCode ?? 0;
+  }
+
+  // Text-input --print mode: read stdin, classify, modify args, exec real claude.
+  const pre = preflight();
+  const prompt = (await readStdin()).trim();
+  if (!prompt) {
+    const res = await streamClaude({
+      binary: realClaude,
+      args: claudeArgs,
       prompt: "",
       stdout: process.stdout,
       stderr: process.stderr,
@@ -199,13 +294,11 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     classifiers: [overrideClassifier, turnTypeClassifier, heuristic],
     profile,
   });
-
   const decision = await pipeline.route({ prompt });
-
   const modifiedArgs = applyRouting(
-    inboundArgs,
+    claudeArgs,
     decision,
-    pre.bareSupported,
+    pre.ok && pre.bareSupported,
     cli.userConfig.excludeDynamicSections,
   );
 
@@ -218,7 +311,6 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     forwardSigint: true,
   });
 
-  // Best-effort telemetry. Don't block on failure.
   try {
     const parsed = parseOutput(result.capturedStdout, cli.userConfig);
     if (parsed) {
@@ -237,4 +329,11 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   }
 
   return result.exitCode ?? 0;
+}
+
+function argsContainStreamJsonInput(args: ReadonlyArray<string>): boolean {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--input-format" && args[i + 1] === "stream-json") return true;
+  }
+  return false;
 }

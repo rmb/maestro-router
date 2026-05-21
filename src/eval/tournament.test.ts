@@ -10,6 +10,7 @@ import {
   DOWNGRADE,
   JUDGE_JSON_SCHEMA,
   JUDGE_PROMPT_TEMPLATE,
+  JUDGE_SYSTEM_PROMPT,
   runTournament,
   type TournamentInput,
   type TournamentSpawn,
@@ -373,10 +374,9 @@ describe("runTournament — judge input shape", () => {
     expect(judgeCall.input).toContain("<TASK>what is 2+2</TASK>");
     expect(judgeCall.input).toContain("<RESPONSE_A>This is A's response</RESPONSE_A>");
     expect(judgeCall.input).toContain("<RESPONSE_B>This is B's response</RESPONSE_B>");
-    expect(judgeCall.input).toContain("Respond with JSON only");
   });
 
-  test("judge args include --json-schema and --model sonnet by default", async () => {
+  test("judge args include --json-schema, --system-prompt, and --model sonnet by default", async () => {
     const spawn = makeMockSpawn([
       ok(envelope("A")),
       ok(envelope("B")),
@@ -388,6 +388,7 @@ describe("runTournament — judge input shape", () => {
     );
     const judgeArgs = spawn.calls[2]!.args;
     expect(judgeArgs).toContain("--json-schema");
+    expect(judgeArgs).toContain("--system-prompt");
     expect(judgeArgs[judgeArgs.indexOf("--model") + 1]).toBe("sonnet");
     expect(judgeArgs[judgeArgs.indexOf("--output-format") + 1]).toBe("json");
   });
@@ -430,7 +431,7 @@ describe("buildResponseArgs", () => {
 
 describe("buildJudgeArgs", () => {
   test("contains --print, --output-format json, --json-schema, --max-budget-usd", () => {
-    const args = buildJudgeArgs("sonnet");
+    const args = buildJudgeArgs({ model: "sonnet", systemPrompt: "any text" });
     expect(args).toContain("--print");
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
     expect(args).toContain("--json-schema");
@@ -438,16 +439,25 @@ describe("buildJudgeArgs", () => {
   });
 
   test("includes the frozen JSON schema string", () => {
-    const args = buildJudgeArgs("sonnet");
+    const args = buildJudgeArgs({ model: "sonnet", systemPrompt: "any text" });
     expect(args[args.indexOf("--json-schema") + 1]).toBe(JUDGE_JSON_SCHEMA);
+  });
+
+  test("contains --system-prompt followed by the system prompt text", () => {
+    const args = buildJudgeArgs({ model: "sonnet", systemPrompt: "RUBRIC" });
+    const idx = args.indexOf("--system-prompt");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe("RUBRIC");
   });
 });
 
 describe("JUDGE_PROMPT_TEMPLATE", () => {
-  test("wraps prompt + responses in the expected tags", () => {
+  test("wraps prompt + responses in the expected tags, omits rubric", () => {
     const out = JUDGE_PROMPT_TEMPLATE("the task", "a-text", "b-text");
     expect(out).toContain("<TASK>the task</TASK>");
     expect(out).toContain("<RESPONSE_A>a-text</RESPONSE_A>");
     expect(out).toContain("<RESPONSE_B>b-text</RESPONSE_B>");
+    expect(out).not.toContain("evaluating");
+    expect(out).not.toContain("Respond with JSON");
   });
 });

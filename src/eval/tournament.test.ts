@@ -1,5 +1,8 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { balancedProfile } from "../core/profile.js";
 import type { Class, ClassSpec } from "../core/types.js";
@@ -13,6 +16,7 @@ import {
   JUDGE_SYSTEM_PROMPT,
   runTournament,
   type TournamentInput,
+  type TournamentRowResult,
   type TournamentSpawn,
   type TournamentSpawnResult,
 } from "./tournament.js";
@@ -460,5 +464,105 @@ describe("JUDGE_PROMPT_TEMPLATE", () => {
     expect(out).toContain("<RESPONSE_B>b-text</RESPONSE_B>");
     expect(out).not.toContain("evaluating");
     expect(out).not.toContain("Respond with JSON");
+  });
+});
+
+describe("runTournament resume", () => {
+  const SAMPLE_SPEC = getSpec("standard");
+
+  test("skips prompts already present in the resume file", async () => {
+    const tmpFile = join(tmpdir(), `tournament-resume-${Date.now()}.jsonl`);
+    const prior: TournamentRowResult = {
+      prompt: "already-done",
+      currentClass: "standard",
+      downgradedClass: "simple",
+      skipped: false,
+      costAUsd: 0.001,
+      costBUsd: 0.001,
+      costJudgeUsd: 0.001,
+      judgeVerdict: "B_wins",
+      judgeReason: "prior verdict",
+      recommendDowngrade: true,
+    };
+    writeFileSync(tmpFile, JSON.stringify(prior) + "\n");
+
+    try {
+      let spawnCallCount = 0;
+      const spawn: TournamentSpawn = async () => {
+        spawnCallCount++;
+        return {
+          stdout: JSON.stringify({
+            type: "result",
+            total_cost_usd: 0,
+            result: JSON.stringify({ winner: "tie", reason: "fake" }),
+          }),
+          exitCode: 0,
+          timedOut: false,
+        };
+      };
+
+      const inputs: TournamentInput[] = [
+        { prompt: "already-done", currentClass: "standard", currentSpec: SAMPLE_SPEC },
+        { prompt: "fresh", currentClass: "standard", currentSpec: SAMPLE_SPEC },
+      ];
+
+      const report = await runTournament(inputs, {
+        spawn,
+        getSpec,
+        resumePath: tmpFile,
+      });
+
+      // Only "fresh" should have been spawned (3 calls: A, B, judge)
+      expect(spawnCallCount).toBe(3);
+      // Only "fresh" appears in this run's rows (already-done was skipped, not re-judged)
+      expect(report.rows.map((r) => r.prompt)).toEqual(["fresh"]);
+    } finally {
+      try {
+        unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  test("appends rows to the resume file as they complete", async () => {
+    const tmpFile = join(tmpdir(), `tournament-append-${Date.now()}.jsonl`);
+
+    try {
+      const spawn: TournamentSpawn = async () => ({
+        stdout: JSON.stringify({
+          type: "result",
+          total_cost_usd: 0,
+          result: JSON.stringify({ winner: "B", reason: "fake" }),
+        }),
+        exitCode: 0,
+        timedOut: false,
+      });
+
+      const inputs: TournamentInput[] = [
+        { prompt: "p1", currentClass: "standard", currentSpec: SAMPLE_SPEC },
+        { prompt: "p2", currentClass: "standard", currentSpec: SAMPLE_SPEC },
+      ];
+
+      await runTournament(inputs, {
+        spawn,
+        getSpec,
+        resumePath: tmpFile,
+      });
+
+      const written = readFileSync(tmpFile, "utf8")
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as TournamentRowResult);
+      expect(written).toHaveLength(2);
+      expect(written.map((r) => r.prompt)).toEqual(["p1", "p2"]);
+      expect(written.every((r) => r.judgeVerdict === "B_wins")).toBe(true);
+    } finally {
+      try {
+        unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
+    }
   });
 });

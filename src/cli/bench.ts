@@ -68,6 +68,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--tournament-sample <n>", "tournament: number of prompts to run", "10")
     .option("--tournament-budget <usd>", "tournament: cost cap before aborting", "5")
     .option("--tournament-seed <n>", "tournament: deterministic sample seed (default: input order)")
+    .option("--tournament-resume <path>", "tournament: resume from a partial-result JSONL")
     .option("--confirm-cost", "tournament: required to actually spend money")
     .option("--tournament-output <path>", "tournament: write proposed overrides + heuristics here")
     .option("--update-baseline", "write the new report as the baseline")
@@ -83,6 +84,7 @@ export function registerBenchCommand(program: Command): void {
         tournamentSample?: string;
         tournamentBudget?: string;
         tournamentSeed?: string;
+        tournamentResume?: string;
         confirmCost?: boolean;
         tournamentOutput?: string;
         updateBaseline?: boolean;
@@ -217,6 +219,7 @@ type TournamentModeArgs = {
     tournamentSample?: string;
     tournamentBudget?: string;
     tournamentSeed?: string;
+    tournamentResume?: string;
     confirmCost?: boolean;
     tournamentOutput?: string;
   };
@@ -336,10 +339,16 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
     }
   };
 
+  const resumePath =
+    args.cmdOpts.tournamentResume !== undefined
+      ? resolve(args.cmdOpts.tournamentResume)
+      : undefined;
+
   const report = await runTournament(inputs, {
     getSpec: (c) => args.profile.classes[c],
     budgetCapUsd: budget,
     ...(args.parent.quiet ? {} : { onProgress }),
+    ...(resumePath !== undefined ? { resumePath } : {}),
   });
 
   if (args.parent.json) {

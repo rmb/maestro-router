@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { spawn as nodeSpawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractJSON } from "../core/extract.js";
@@ -102,6 +102,13 @@ export type TournamentRunOptions = {
   getSpec: (cls: Class) => ClassSpec;
   /** Per-event progress callback. Fires once per row stage so CLIs can render live. */
   onProgress?: (event: TournamentProgress) => void;
+  /**
+   * Path to a JSONL where each completed row is appended as it lands. If the
+   * file already exists, prompts already present are skipped on this run.
+   * Lets long tournaments recover from Ctrl-C / network errors without
+   * re-spending budget on rows that already have verdicts.
+   */
+  resumePath?: string;
 };
 
 export type TournamentProgress =
@@ -353,6 +360,20 @@ export async function runTournament(
   const judgeModel = opts.judgeModel ?? DEFAULT_JUDGE_MODEL;
   const budgetCap = opts.budgetCapUsd;
 
+  const completed = new Set<string>();
+  if (opts.resumePath !== undefined && existsSync(opts.resumePath)) {
+    const raw = readFileSync(opts.resumePath, "utf8");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const r = JSON.parse(line) as { prompt?: unknown };
+        if (typeof r.prompt === "string") completed.add(r.prompt);
+      } catch {
+        // ignore malformed lines — they'll just be re-run
+      }
+    }
+  }
+
   const rows: TournamentRowResult[] = [];
   const perClassWinRates = emptyWinRates();
   let totalCost = 0;
@@ -364,6 +385,10 @@ export async function runTournament(
 
   for (let index = 0; index < inputs.length; index++) {
     const input = inputs[index]!;
+    if (completed.has(input.prompt)) {
+      // Already judged in a prior run — don't re-spawn anything.
+      continue;
+    }
     if (budgetReached) {
       rows.push({
         prompt: input.prompt,
@@ -514,6 +539,13 @@ export async function runTournament(
       row.recommendDowngrade = judgeVerdict === "B_wins" || judgeVerdict === "tie";
     }
     rows.push(row);
+    if (opts.resumePath !== undefined) {
+      try {
+        appendFileSync(opts.resumePath, JSON.stringify(row) + "\n");
+      } catch {
+        // never block the tournament on a debug-write failure
+      }
+    }
 
     // Per-class win-rate aggregation only counts rows where the judge ruled.
     if (!judgeFailed) {

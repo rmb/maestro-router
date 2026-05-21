@@ -29,7 +29,7 @@ const RECOMMENDED_PATTERN_CONFIDENCE = 0.85;
 const DEBUG_LOG_PATH = join(tmpdir(), "maestro-tournament-debug.log");
 
 /**
- * Frozen judge system prompt. Tournament determinism depends on this being
+ * Frozen judge system prompt (~60 tokens). Tournament determinism depends on this being
  * stable — extending it invalidates prior baselines. Mirrors the LLM
  * classifier's anti-injection pattern: rubric here, data wrapped in tags via
  * stdin user message.
@@ -196,7 +196,9 @@ export function buildResponseArgs(spec: ClassSpec): string[] {
   return args;
 }
 
-/** Build argv for the judge call. */
+/**
+ * Build argv for the judge call. Pulled out for test inspection.
+ */
 export function buildJudgeArgs(args: {
   model: string;
   systemPrompt: string;

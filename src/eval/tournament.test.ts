@@ -389,6 +389,7 @@ describe("runTournament — judge input shape", () => {
     const judgeArgs = spawn.calls[2]!.args;
     expect(judgeArgs).toContain("--json-schema");
     expect(judgeArgs).toContain("--system-prompt");
+    expect(judgeArgs[judgeArgs.indexOf("--system-prompt") + 1]).toBe(JUDGE_SYSTEM_PROMPT);
     expect(judgeArgs[judgeArgs.indexOf("--model") + 1]).toBe("sonnet");
     expect(judgeArgs[judgeArgs.indexOf("--output-format") + 1]).toBe("json");
   });

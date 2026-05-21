@@ -120,6 +120,35 @@ Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003
        └──────────────────────────────────────────────────────────────┘
 ```
 
+## Tournament
+
+`maestro bench --tournament` empirically validates which classification
+downgrades are safe. For each sampled prompt the tournament:
+
+1. **A spawn** — runs the prompt at the class the pipeline currently
+   assigns, capturing the response and `total_cost_usd` from
+   `--output-format json`.
+2. **B spawn** — runs the same prompt one tier cheaper (using the
+   `DOWNGRADE` map: simple → trivial, standard → simple, hard → standard,
+   …). Trivial has no cheaper tier and is skipped.
+3. **Judge spawn** — Sonnet (default) with `--json-schema` returns
+   `{ winner: "A" | "B" | "tie", reason: … }` after seeing both responses
+   wrapped in `<RESPONSE_A>` / `<RESPONSE_B>` tags.
+
+Calls are sequential (controllable budget, clean ctrl-C). When total cost
+exceeds `--tournament-budget` the engine aborts and marks the remaining
+rows `budget_cap_reached`. Pattern mining over winning rows surfaces
+heuristic candidates (≥3 occurrences of a ≥4-char token in the same
+`from → to` group → `\\btoken\\b` rule at confidence 0.85).
+
+The default behavior requires `--confirm-cost` to actually spend money;
+without it the command only prints a cost estimate. Output can be written
+as JSON (`--tournament-output`) and validated against the eval baseline
+with `bench --propose` before applying.
+
+See `src/eval/tournament.ts` for the engine; `src/cli/bench.ts` for the
+CLI wiring.
+
 ## Module organization
 
 ```

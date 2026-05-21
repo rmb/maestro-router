@@ -26,6 +26,14 @@ Anti-injection wrapping via `<PROMPT_TO_CLASSIFY>` tags. Opt out with
 83.94% → 91.24% (upper bound; live Haiku will be lower).
 See `src/classifiers/llm.ts`.
 
+### ~~Tournament with real Claude (S4 single-axis)~~ — Shipped in v0.2.1
+`maestro bench --tournament --confirm-cost` runs the single-axis model-tier
+downgrade tournament with real Claude calls and a Sonnet judge. For each
+sampled prompt it spawns A (current tier) + B (one tier cheaper) + judge,
+aggregates per-class win rates, and mines token patterns from winning
+prompts. Sequential, budget-capped, and `--tournament-output` writes a
+proposal validatable via `bench --propose`. See `src/eval/tournament.ts`.
+
 ### Tournament matrix (S4, C6 expansion)
 Expand `bench --tournament` from single-axis model-tier downgrade to a model
 × effort matrix per class. Surfaces wins from budget reduction independent

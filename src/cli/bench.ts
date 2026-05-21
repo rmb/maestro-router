@@ -10,7 +10,15 @@ import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
-import type { Class, Classifier, HeuristicRule, Message, ProfileOverride, Request } from "../core/types.js";
+import type { Class, Classifier, HeuristicRule, Message, Profile, ProfileOverride, Request } from "../core/types.js";
+import {
+  buildProposedHeuristics,
+  DOWNGRADE,
+  runTournament,
+  type TournamentInput,
+  type TournamentReport,
+  type TournamentRowResult,
+} from "../eval/tournament.js";
 import { format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -39,7 +47,11 @@ export function registerBenchCommand(program: Command): void {
     .option("--baseline <path>", "baseline JSON for regression check", "evals/baseline.json")
     .option("--gate <pct>", "regression gate (0-1)", "0.02")
     .option("--propose <path>", "validate a proposed profile-overrides.json before applying")
-    .option("--tournament", "run model-tier downgrade tournament (v0.2 single-axis)")
+    .option("--tournament", "run model-tier downgrade tournament with real Claude calls (S4)")
+    .option("--tournament-sample <n>", "tournament: number of prompts to run", "10")
+    .option("--tournament-budget <usd>", "tournament: cost cap before aborting", "5")
+    .option("--confirm-cost", "tournament: required to actually spend money")
+    .option("--tournament-output <path>", "tournament: write proposed overrides + heuristics here")
     .option("--update-baseline", "write the new report as the baseline")
     .option("--llm", "include the LLM classifier (costs ~$0.001 per uncertain prompt; default off)")
     .action(
@@ -49,6 +61,10 @@ export function registerBenchCommand(program: Command): void {
         gate: string;
         propose?: string;
         tournament?: boolean;
+        tournamentSample?: string;
+        tournamentBudget?: string;
+        confirmCost?: boolean;
+        tournamentOutput?: string;
         updateBaseline?: boolean;
         llm?: boolean;
       }) => {
@@ -102,6 +118,17 @@ export function registerBenchCommand(program: Command): void {
           profile,
         });
 
+        if (cmdOpts.tournament) {
+          await runTournamentMode({
+            entries,
+            pipeline,
+            profile,
+            cmdOpts,
+            parent,
+          });
+          return;
+        }
+
         const report = await runEval(entries, pipeline);
         if (parent.json) {
           process.stdout.write(format(report, { json: true }) + "\n");
@@ -137,16 +164,157 @@ export function registerBenchCommand(program: Command): void {
             process.stdout.write(`Baseline updated at ${cmdOpts.baseline}\n`);
           }
         }
-
-        if (cmdOpts.tournament) {
-          if (!parent.quiet) {
-            process.stdout.write(
-              "\nTournament mode (v0.2 single-axis): real-Claude tournament is opt-in and costs tokens; not run by default.\n  Enable in v0.2.1 when budget guardrails are wired in.\n",
-            );
-          }
-        }
       },
     );
+}
+
+/**
+ * Conservative per-claude-call cost estimate used in the upfront preview
+ * (`bench --tournament` without `--confirm-cost`). Real cost depends on
+ * model, prompt length, and output length — this number is intentionally
+ * on the high side so users don't get surprised.
+ */
+const TOURNAMENT_COST_PER_CALL_ESTIMATE_USD = 0.05;
+const TOURNAMENT_CALLS_PER_ROW = 3;
+const DEFAULT_TOURNAMENT_SAMPLE = 10;
+const DEFAULT_TOURNAMENT_BUDGET_USD = 5;
+
+type TournamentModeArgs = {
+  entries: LabeledEntry[];
+  pipeline: ReturnType<typeof createPipeline>;
+  profile: Profile;
+  cmdOpts: {
+    tournamentSample?: string;
+    tournamentBudget?: string;
+    confirmCost?: boolean;
+    tournamentOutput?: string;
+  };
+  parent: ParentOptions;
+};
+
+async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
+  const sample = Math.max(
+    1,
+    parseInt(args.cmdOpts.tournamentSample ?? "", 10) || DEFAULT_TOURNAMENT_SAMPLE,
+  );
+  const budget = (() => {
+    const raw = parseFloat(args.cmdOpts.tournamentBudget ?? "");
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TOURNAMENT_BUDGET_USD;
+  })();
+  const estimatedCost =
+    sample * TOURNAMENT_CALLS_PER_ROW * TOURNAMENT_COST_PER_CALL_ESTIMATE_USD;
+
+  if (!args.cmdOpts.confirmCost) {
+    if (!args.parent.quiet) {
+      process.stdout.write(
+        `Tournament estimate: ${sample} prompts × ${TOURNAMENT_CALLS_PER_ROW} calls = ${sample * TOURNAMENT_CALLS_PER_ROW} claude invocations\n`,
+      );
+      process.stdout.write(
+        `Estimated cost: ~$${estimatedCost.toFixed(2)} (conservative @ $${TOURNAMENT_COST_PER_CALL_ESTIMATE_USD.toFixed(2)}/call). Hard cap: $${budget.toFixed(2)}.\n`,
+      );
+      process.stdout.write("Use --confirm-cost to proceed.\n");
+    }
+    return;
+  }
+
+  if (estimatedCost > budget) {
+    process.stderr.write(
+      `Tournament estimated cost $${estimatedCost.toFixed(2)} exceeds budget cap $${budget.toFixed(2)}. ` +
+        `Raise --tournament-budget or lower --tournament-sample.\n`,
+    );
+    process.exit(1);
+  }
+
+  // Sample the labeled set deterministically (head). Tournament is a
+  // measurement, not a stochastic test — reproducibility matters.
+  const sampled = args.entries.slice(0, sample);
+
+  // Pre-classify each prompt through the current pipeline to get its assigned class.
+  const inputs: TournamentInput[] = [];
+  for (const entry of sampled) {
+    const req = buildRequest(entry);
+    const d = await args.pipeline.route(req);
+    inputs.push({
+      prompt: entry.prompt,
+      currentClass: d.class,
+      currentSpec: d.spec,
+    });
+  }
+
+  if (!args.parent.quiet) {
+    process.stderr.write(
+      `Tournament: ${inputs.length} prompts sampled, budget cap $${budget.toFixed(2)}, sequential calls.\n`,
+    );
+  }
+
+  const report = await runTournament(inputs, {
+    getSpec: (c) => args.profile.classes[c],
+    budgetCapUsd: budget,
+  });
+
+  if (args.parent.json) {
+    process.stdout.write(format(report, { json: true }) + "\n");
+  } else if (!args.parent.quiet) {
+    process.stdout.write(renderTournamentHuman(report) + "\n");
+  }
+
+  if (args.cmdOpts.tournamentOutput) {
+    const proposal = {
+      overrides: {} as ProfileOverride,
+      heuristics: buildProposedHeuristics(report.recommendedDowngrades),
+    };
+    await writeFile(
+      resolve(args.cmdOpts.tournamentOutput),
+      JSON.stringify(proposal, null, 2),
+      "utf8",
+    );
+    if (!args.parent.quiet) {
+      process.stdout.write(
+        `\nWrote tournament proposal to ${args.cmdOpts.tournamentOutput}\n` +
+          `Validate with: maestro bench --propose ${args.cmdOpts.tournamentOutput}\n`,
+      );
+    }
+  }
+}
+
+function renderTournamentHuman(report: TournamentReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `Tournament results (${report.ran}/${report.totalPrompts} prompts ran, $${report.totalCostUsd.toFixed(4)} spent)`,
+  );
+  for (const cls of ALL_CLASSES) {
+    const target = DOWNGRADE[cls];
+    if (target === null) {
+      lines.push(`  ${cls}: skipped (no cheaper tier)`);
+      continue;
+    }
+    const wr = report.perClassWinRates[cls];
+    if (wr.ran === 0) {
+      lines.push(`  ${cls} → ${target}: not sampled`);
+      continue;
+    }
+    const wins = wr.downgradeWins + wr.ties;
+    const recommend = wins > wr.aLosses;
+    const tag = recommend
+      ? `recommend downgrade${wr.ran < 3 ? ` (n=${wr.ran}, low confidence)` : ""}`
+      : "keep current";
+    lines.push(`  ${cls} → ${target}: ${wins}/${wr.ran} wins → ${tag}`);
+    const suggested = report.recommendedDowngrades.find(
+      (r) => r.from === cls && r.to === target,
+    );
+    if (suggested) {
+      lines.push(
+        `    suggested pattern: ${suggested.promptPattern} → ${target} (confidence 0.85)`,
+      );
+    }
+  }
+  const skippedBudget = report.rows.filter(
+    (r: TournamentRowResult) => r.skipReason === "budget_cap_reached",
+  ).length;
+  if (skippedBudget > 0) {
+    lines.push(`  budget cap reached — ${skippedBudget} prompt(s) not run`);
+  }
+  return lines.join("\n");
 }
 
 async function readBaseline(path: string): Promise<{ accuracy: number } | null> {

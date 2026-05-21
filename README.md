@@ -95,7 +95,15 @@ maestro tune --learn          # focus on heuristic mining from override events
 maestro tune --apply          # write learned patterns to ~/.maestro/heuristics.json
 maestro bench                 # run the eval suite against your current pipeline
 maestro bench --propose <file>    # validate a proposed overrides file (rejects on >2% regression)
+maestro bench --tournament --confirm-cost   # spend real $ to test which classes can be downgraded
 ```
+
+The tournament samples labeled prompts, spawns the current tier (A), the
+next cheaper tier (B), and a Sonnet judge per prompt, then aggregates per-class
+win rates. Use `--tournament-sample <n>` (default 10) and `--tournament-budget
+<usd>` (default 5) to size the run; without `--confirm-cost` it only prints
+the estimate. Pipe to `--tournament-output proposed.json` then feed that to
+`maestro bench --propose proposed.json` to gate against eval regression.
 
 ## Override hints (inline)
 

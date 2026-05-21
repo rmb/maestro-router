@@ -102,7 +102,8 @@ backlog of deferred ideas.
 - Remote PostHog telemetry → v0.3 (S1)
 - Embedding classifier (`@xenova/transformers`) → v0.3 (S2)
 - Session token ceiling — free via `--max-budget-usd` (C11 → essentially shipped)
-- Tournament matrix (model × effort) — v0.3 (S4)
+- Tournament (single-axis, S4) — shipped in v0.2.1 via `bench --tournament`
+- Tournament matrix (model × effort) — v0.3 (S4 expansion)
 - Per-tool profile overrides → v0.3 (C12)
 - Per-project config discovery → v0.3
 - Interactive feedback Stop-hook → v0.3 (F7)

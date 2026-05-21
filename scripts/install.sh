@@ -73,6 +73,9 @@ echo "  binary: $(which maestro)"
 echo "→ Wiring VSCode (claudeProcessWrapper)…"
 maestro install-vscode
 
+echo "→ Installing Claude Code slash commands…"
+maestro install-commands
+
 maestro guide
 echo ""
 echo "Uninstall any time with:  bash scripts/install.sh --uninstall"

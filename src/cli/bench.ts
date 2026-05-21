@@ -19,6 +19,7 @@ import {
   DOWNGRADE,
   runTournament,
   type TournamentInput,
+  type TournamentProgress,
   type TournamentReport,
   type TournamentRowResult,
 } from "../eval/tournament.js";
@@ -269,13 +270,55 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
 
   if (!args.parent.quiet) {
     process.stderr.write(
-      `Tournament: ${inputs.length} prompts sampled, budget cap $${budget.toFixed(2)}, sequential calls.\n`,
+      `\n${bold("Tournament")} ${dim(`${inputs.length} prompts × 3 calls (A + B + judge), cap ${"$" + budget.toFixed(2)}, sequential`)}\n\n`,
     );
   }
+
+  const startedAt = Date.now();
+  const verdictGlyph: Record<string, string> = {
+    A_wins: gray("• keep"),
+    B_wins: cyan("✓ downgrade"),
+    tie: cyan("≈ downgrade"),
+    judge_failed: yellow("? judge failed"),
+  };
+
+  const onProgress = (e: TournamentProgress): void => {
+    const i = `[${(e.index + 1).toString().padStart(2)}/${e.total}]`;
+    switch (e.type) {
+      case "row_start": {
+        const tgt = e.downgradedClass ?? "—";
+        const elapsed = Math.round((Date.now() - startedAt) / 1000);
+        process.stderr.write(
+          `${dim(i)} ${e.currentClass.padEnd(10)} ${dim("→")} ${cyan(tgt.padEnd(10))} ${dim(`(${elapsed}s elapsed) `)} ${dim(e.prompt.slice(0, 50))}${e.prompt.length > 50 ? dim("…") : ""}\n`,
+        );
+        break;
+      }
+      case "a_done":
+        process.stderr.write(`        ${dim("A")} ${gray(`$${e.costUsd.toFixed(4)}`)}\n`);
+        break;
+      case "b_done":
+        process.stderr.write(`        ${dim("B")} ${gray(`$${e.costUsd.toFixed(4)}`)}\n`);
+        break;
+      case "judge_done":
+        process.stderr.write(
+          `        ${dim("J")} ${gray(`$${e.costUsd.toFixed(4)}`)}  ${verdictGlyph[e.verdict] ?? e.verdict}  ${dim(`spent $${e.totalSpent.toFixed(4)}`)}\n`,
+        );
+        break;
+      case "skipped":
+        process.stderr.write(`        ${yellow("⤬ skip")} ${dim(e.reason)}\n`);
+        break;
+      case "budget_reached":
+        process.stderr.write(
+          `\n${yellow("⚠ budget cap reached")} ${dim(`at $${e.totalSpent.toFixed(2)}; remaining rows skipped`)}\n`,
+        );
+        break;
+    }
+  };
 
   const report = await runTournament(inputs, {
     getSpec: (c) => args.profile.classes[c],
     budgetCapUsd: budget,
+    ...(args.parent.quiet ? {} : { onProgress }),
   });
 
   if (args.parent.json) {

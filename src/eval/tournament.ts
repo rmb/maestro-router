@@ -88,7 +88,17 @@ export type TournamentRunOptions = {
    * without the engine reaching into Profile directly.
    */
   getSpec: (cls: Class) => ClassSpec;
+  /** Per-event progress callback. Fires once per row stage so CLIs can render live. */
+  onProgress?: (event: TournamentProgress) => void;
 };
+
+export type TournamentProgress =
+  | { type: "row_start"; index: number; total: number; prompt: string; currentClass: Class; downgradedClass: Class | null }
+  | { type: "a_done"; index: number; total: number; costUsd: number }
+  | { type: "b_done"; index: number; total: number; costUsd: number }
+  | { type: "judge_done"; index: number; total: number; verdict: TournamentDecision; costUsd: number; totalSpent: number }
+  | { type: "skipped"; index: number; total: number; reason: string }
+  | { type: "budget_reached"; index: number; total: number; totalSpent: number };
 
 export type TournamentDecision = "A_wins" | "B_wins" | "tie" | "judge_failed";
 
@@ -317,8 +327,11 @@ export async function runTournament(
   let ran = 0;
   let skipped = 0;
   let budgetReached = false;
+  const total = inputs.length;
+  const emit = (e: TournamentProgress): void => opts.onProgress?.(e);
 
-  for (const input of inputs) {
+  for (let index = 0; index < inputs.length; index++) {
+    const input = inputs[index]!;
     if (budgetReached) {
       rows.push({
         prompt: input.prompt,
@@ -328,10 +341,20 @@ export async function runTournament(
         skipReason: "budget_cap_reached",
       });
       skipped++;
+      emit({ type: "budget_reached", index, total, totalSpent: totalCost });
       continue;
     }
 
     const target = DOWNGRADE[input.currentClass];
+    emit({
+      type: "row_start",
+      index,
+      total,
+      prompt: input.prompt,
+      currentClass: input.currentClass,
+      downgradedClass: target,
+    });
+
     if (target === null) {
       rows.push({
         prompt: input.prompt,
@@ -341,6 +364,7 @@ export async function runTournament(
         skipReason: "no cheaper tier",
       });
       skipped++;
+      emit({ type: "skipped", index, total, reason: "no cheaper tier" });
       continue;
     }
 
@@ -357,6 +381,7 @@ export async function runTournament(
         skipReason: "a_failed",
       });
       skipped++;
+      emit({ type: "skipped", index, total, reason: "a_failed" });
       continue;
     }
     const aResp =
@@ -370,8 +395,10 @@ export async function runTournament(
         skipReason: "a_failed",
       });
       skipped++;
+      emit({ type: "skipped", index, total, reason: "a_failed" });
       continue;
     }
+    emit({ type: "a_done", index, total, costUsd: aResp.costUsd });
 
     const bSpec = opts.getSpec(target);
     const bArgs = buildResponseArgs(bSpec);
@@ -390,6 +417,7 @@ export async function runTournament(
       skipped++;
       totalCost += aResp.costUsd;
       if (budgetCap !== undefined && totalCost > budgetCap) budgetReached = true;
+      emit({ type: "skipped", index, total, reason: "b_failed" });
       continue;
     }
     const bResp =
@@ -406,8 +434,10 @@ export async function runTournament(
       skipped++;
       totalCost += aResp.costUsd;
       if (budgetCap !== undefined && totalCost > budgetCap) budgetReached = true;
+      emit({ type: "skipped", index, total, reason: "b_failed" });
       continue;
     }
+    emit({ type: "b_done", index, total, costUsd: bResp.costUsd });
 
     const judgeArgs = buildJudgeArgs(judgeModel);
     const judgeInput = JUDGE_PROMPT_TEMPLATE(input.prompt, aResp.text, bResp.text);
@@ -462,6 +492,15 @@ export async function runTournament(
       else if (judgeVerdict === "A_wins") wr.aLosses++;
     }
     ran++;
+
+    emit({
+      type: "judge_done",
+      index,
+      total,
+      verdict: judgeFailed ? "judge_failed" : judgeVerdict,
+      costUsd: judgeCost,
+      totalSpent: totalCost,
+    });
 
     if (budgetCap !== undefined && totalCost > budgetCap) budgetReached = true;
   }

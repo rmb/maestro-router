@@ -56,7 +56,10 @@ const VALID_CLASSES: ReadonlySet<Class> = new Set<Class>([
 ]);
 
 const MAX_INPUT_CHARS = 2000;
-const DEFAULT_TIMEOUT_MS = 2000;
+// Cold Claude CLI startup + Haiku response on a fresh session averages
+// 3-5s in real measurements (cache_creation pays ~37k system prompt tokens).
+// 10s is comfortable headroom; the AbortSignal kills it cleanly on user ctrl-c.
+const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_BUDGET_USD = 0.01;
 const DEFAULT_MODEL = "haiku";
 const DEFAULT_WEIGHT = 0.7;

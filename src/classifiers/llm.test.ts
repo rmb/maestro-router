@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  LLM_CLASSIFIER_JSON_SCHEMA,
   LLM_CLASSIFIER_SYSTEM_PROMPT,
   createLLMClassifier,
   type LLMClassifierSpawn,
@@ -407,5 +408,44 @@ describe("llmClassifier — classifier shape", () => {
   test("custom weight is honored", () => {
     const c = createLLMClassifier({ weight: 0.55 });
     expect(c.weight).toBe(0.55);
+  });
+});
+
+describe("LLM_CLASSIFIER_SYSTEM_PROMPT", () => {
+  test("contains 12 few-shot examples, 2 per class", () => {
+    const counts = new Map<string, number>();
+    for (const m of LLM_CLASSIFIER_SYSTEM_PROMPT.matchAll(/<example class="(\w+)">/g)) {
+      counts.set(m[1]!, (counts.get(m[1]!) ?? 0) + 1);
+    }
+    for (const cls of ["trivial", "simple", "standard", "hard", "reasoning", "max"]) {
+      expect(counts.get(cls)).toBe(2);
+    }
+  });
+
+  test("includes the asymmetric-cost instruction", () => {
+    expect(LLM_CLASSIFIER_SYSTEM_PROMPT).toMatch(/classify HIGHER/i);
+  });
+
+  test("includes all six class names in the class definitions block", () => {
+    for (const cls of ["trivial", "simple", "standard", "hard", "reasoning", "max"]) {
+      expect(LLM_CLASSIFIER_SYSTEM_PROMPT).toContain(`- ${cls}:`);
+    }
+  });
+});
+
+describe("LLM_CLASSIFIER_JSON_SCHEMA", () => {
+  test("includes verb, scope, needsContext intermediate fields", () => {
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toContain('"verb"');
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toContain('"scope"');
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toContain('"needsContext"');
+  });
+
+  test("still includes class and confidence (the consumer reads these)", () => {
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toContain('"class"');
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toContain('"confidence"');
+  });
+
+  test("requires all five fields", () => {
+    expect(LLM_CLASSIFIER_JSON_SCHEMA).toMatch(/"required":\["verb","scope","needsContext","class","confidence"\]/);
   });
 });

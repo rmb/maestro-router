@@ -1,6 +1,9 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { spawn as nodeSpawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { extractJSON } from "../core/extract.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, ClassSpec, HeuristicRule } from "../core/types.js";
@@ -23,6 +26,7 @@ const DEFAULT_JUDGE_MODEL = "sonnet";
 const DEFAULT_JUDGE_BUDGET_USD = 0.5;
 const MIN_PATTERN_OCCURRENCES = 3;
 const RECOMMENDED_PATTERN_CONFIDENCE = 0.85;
+const DEBUG_LOG_PATH = join(tmpdir(), "maestro-tournament-debug.log");
 
 /**
  * Frozen judge prompt. Tournament determinism depends on this being stable —
@@ -213,9 +217,22 @@ const defaultSpawn: TournamentSpawn = (args, opts) => {
     });
     // stderr is discarded — tournament rows are not interactive.
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", () => {
-      /* swallow */
-    });
+    if (process.env.MAESTRO_TOURNAMENT_DEBUG === "1") {
+      child.stderr.on("data", (chunk: Buffer) => {
+        try {
+          appendFileSync(
+            DEBUG_LOG_PATH,
+            `--- ${new Date().toISOString()} ${args[args.indexOf("--model") + 1] ?? "unknown"} ---\n${chunk.toString("utf8")}\n`,
+          );
+        } catch {
+          /* never block tournament on debug write failure */
+        }
+      });
+    } else {
+      child.stderr.on("data", () => {
+        /* swallow */
+      });
+    }
 
     const timer = setTimeout(() => {
       timedOut = true;

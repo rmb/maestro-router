@@ -17,10 +17,11 @@
 //   3. For real prompt invocations (--print with stdin), it classifies the
 //      prompt and overrides --model / --effort / --max-budget-usd, then
 //      exec's the real claude.
-//   4. stream-json input from the VSCode panel is opaque (multiple JSON
-//      messages with system / user / etc. fields). For v0.2 we passthrough
-//      stream-json invocations unmodified — classification of streaming
-//      multi-turn input is deferred until we have a tested parser.
+//   4. stream-json input from the VSCode panel: Maestro peeks at the first
+//      user message on stdin, classifies it, applies routing flags, then
+//      spawns claude with pipeStdin to replay the buffered bytes and forward
+//      the rest. Session-start routing: all turns use the same model decision.
+//      Per-turn model changes are not possible without restarting claude.
 
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -33,7 +34,7 @@ import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { createTelemetry } from "../core/telemetry.js";
 import type { Classifier, Decision } from "../core/types.js";
-import { parseOutput } from "../wrapper/output.js";
+import { parseOutput, parseStreamJsonOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
 import { loadCliConfig } from "./utils.js";
@@ -218,6 +219,76 @@ function applyRouting(
   return filtered;
 }
 
+/**
+ * Scan a chunk of accumulated stream-json stdin text for the first user
+ * turn and return its text content. The stream-json protocol is NDJSON;
+ * each line is a self-contained JSON object. We look for
+ * `{"type":"user","message":{"content":[{"type":"text","text":"..."}]}}`.
+ * Exported so it can be unit-tested without touching stdin.
+ */
+export function extractFirstUserPrompt(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const msg = JSON.parse(trimmed) as {
+        type?: string;
+        message?: { content?: Array<{ type?: string; text?: string }> };
+      };
+      if (msg.type !== "user") continue;
+      const content = msg.message?.content;
+      if (!Array.isArray(content)) continue;
+      const textBlock = content.find((c) => c.type === "text" && typeof c.text === "string");
+      if (textBlock?.text) return textBlock.text;
+    } catch {
+      /* not valid JSON on this line */
+    }
+  }
+  return null;
+}
+
+type PeekedStdin = { firstPrompt: string | null; buffered: string };
+
+/**
+ * Read from process.stdin for up to `timeoutMs` milliseconds looking for the
+ * first stream-json user message. Returns the accumulated bytes (to replay to
+ * the child) and the extracted prompt text (or null if not found in time).
+ * Pauses stdin before returning so the caller can pipe the rest to the child.
+ */
+async function peekStreamJsonStdin(timeoutMs = 250): Promise<PeekedStdin> {
+  if (process.stdin.isTTY) return { firstPrompt: null, buffered: "" };
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let accumulated = "";
+    let resolved = false;
+
+    const finish = (firstPrompt: string | null): void => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      process.stdin.pause();
+      process.stdin.removeListener("data", onData);
+      process.stdin.removeListener("end", onEnd);
+      resolve({ firstPrompt, buffered: Buffer.concat(chunks).toString("utf8") });
+    };
+
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    const onData = (chunk: Buffer): void => {
+      chunks.push(chunk);
+      accumulated += chunk.toString("utf8");
+      const prompt = extractFirstUserPrompt(accumulated);
+      if (prompt !== null) finish(prompt);
+    };
+
+    const onEnd = (): void => finish(extractFirstUserPrompt(accumulated));
+
+    process.stdin.on("data", onData);
+    process.stdin.on("end", onEnd);
+    process.stdin.resume();
+  });
+}
+
 export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<number> {
   const shape = detectWireCompatShape(argv);
   if (shape === "none") return 0;
@@ -254,18 +325,62 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     return res.exitCode ?? 0;
   }
 
-  // stream-json input is a long-lived JSON message stream from the VSCode
-  // panel — child inherits parent stdin so the extension's writes flow
-  // through. v0.2 doesn't classify these turn-by-turn yet; just passthrough.
+  // stream-json input from the VSCode panel. Peek at the first user message
+  // to get a routing decision, apply it at session start, then pipe buffered
+  // + remaining stdin through. All turns in the session run on the same model.
   if (argsContainStreamJsonInput(claudeArgs)) {
+    const peeked = await peekStreamJsonStdin(250);
+
+    const cli = await loadCliConfig();
+    const { profile } = loadProfile({ userConfig: cli.userConfig, overrides: cli.profileOverrides });
+    const heuristic =
+      cli.userHeuristics.length > 0
+        ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
+        : heuristicClassifier;
+    const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+    if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
+    if (cli.userConfig.useLlmClassifier !== false) classifiers.push(llmClassifier);
+    const pipeline = createPipeline({ classifiers, profile });
+
+    const t0 = Date.now();
+    const decision = peeked.firstPrompt
+      ? await pipeline.route({ prompt: peeked.firstPrompt })
+      : await pipeline.route({ prompt: "" }); // fallback: routes to standard via default
+
+    // Never add --bare for stream-json: panel needs full structured output.
+    const modifiedArgs = applyRouting(
+      claudeArgs,
+      decision,
+      false /* bareSupported */,
+      cli.userConfig.excludeDynamicSections,
+    );
+
     const res = await streamClaude({
       binary: realClaude,
-      args: claudeArgs,
-      inheritStdin: true,
+      args: modifiedArgs,
+      stdinBuffer: peeked.buffered,
+      pipeStdin: true,
       stdout: process.stdout,
       stderr: process.stderr,
       forwardSigint: true,
     });
+
+    try {
+      const parsed = parseStreamJsonOutput(res.capturedStdout);
+      if (parsed) {
+        const telemetry = createTelemetry(
+          cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+        );
+        await telemetry.log({
+          type: "decision",
+          ts: new Date().toISOString(),
+          decision: { ...decision, latencyMs: Date.now() - t0 },
+          cost: parsed.cost,
+        });
+      }
+    } catch {
+      /* never blocks routing */
+    }
     return res.exitCode ?? 0;
   }
 

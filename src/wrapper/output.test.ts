@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test } from "vitest";
-import { parseOutput } from "./output.js";
+import { parseOutput, parseStreamJsonOutput } from "./output.js";
 
 // Real envelope captured in planning spike 2 (see docs/router-observations.md)
 const SPIKE_JSON = `{"type":"result","subtype":"success","is_error":false,"api_error_status":null,"duration_ms":3828,"duration_api_ms":3807,"num_turns":1,"result":"hi","stop_reason":"end_turn","session_id":"89274142-7508-42b0-acb4-957a8363c389","total_cost_usd":0.04850775,"usage":{"input_tokens":9,"cache_creation_input_tokens":37863,"cache_read_input_tokens":0,"output_tokens":234,"service_tier":"standard"},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":9,"outputTokens":234,"cacheReadInputTokens":0,"cacheCreationInputTokens":37863,"costUSD":0.04850775}}}`;
@@ -119,5 +119,73 @@ describe("parseOutput", () => {
     });
     const r = parseOutput(multi);
     expect(r!.cost.modelUsed).toBe("claude-sonnet");
+  });
+});
+
+describe("parseStreamJsonOutput", () => {
+  const turn1 = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    total_cost_usd: 0.05,
+    duration_ms: 1000,
+    duration_api_ms: 900,
+    stop_reason: "end_turn",
+    session_id: "abc-123",
+    usage: { input_tokens: 10, output_tokens: 100, cache_creation_input_tokens: 500, cache_read_input_tokens: 0, service_tier: "standard" },
+    modelUsage: { "claude-sonnet-4-6": { inputTokens: 10, outputTokens: 100, cacheCreationInputTokens: 500, cacheReadInputTokens: 0, costUSD: 0.05 } },
+  });
+  const turn2 = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    total_cost_usd: 0.02,
+    duration_ms: 500,
+    duration_api_ms: 480,
+    stop_reason: "end_turn",
+    session_id: "abc-123",
+    usage: { input_tokens: 5, output_tokens: 40, cache_creation_input_tokens: 0, cache_read_input_tokens: 400, service_tier: "standard" },
+    modelUsage: { "claude-sonnet-4-6": { inputTokens: 5, outputTokens: 40, cacheCreationInputTokens: 0, cacheReadInputTokens: 400, costUSD: 0.02 } },
+  });
+  const nonResult = JSON.stringify({ type: "assistant", message: { content: "hello" } });
+
+  test("returns null for empty string", () => {
+    expect(parseStreamJsonOutput("")).toBeNull();
+  });
+
+  test("returns null when no result lines present", () => {
+    const raw = [nonResult, nonResult].join("\n");
+    expect(parseStreamJsonOutput(raw)).toBeNull();
+  });
+
+  test("parses single result turn", () => {
+    const raw = [nonResult, turn1, nonResult].join("\n");
+    const r = parseStreamJsonOutput(raw);
+    expect(r).not.toBeNull();
+    expect(r!.cost.totalCostUsd).toBeCloseTo(0.05);
+    expect(r!.cost.inputTokens).toBe(10);
+    expect(r!.cost.outputTokens).toBe(100);
+    expect(r!.cost.cacheCreationInputTokens).toBe(500);
+    expect(r!.cost.cacheReadInputTokens).toBe(0);
+    expect(r!.cost.durationMs).toBe(1000);
+    expect(r!.cost.modelUsed).toBe("claude-sonnet-4-6");
+    expect(r!.sessionId).toBe("abc-123");
+  });
+
+  test("accumulates cost and tokens across multiple turns", () => {
+    const raw = [nonResult, turn1, nonResult, turn2].join("\n");
+    const r = parseStreamJsonOutput(raw);
+    expect(r).not.toBeNull();
+    expect(r!.cost.totalCostUsd).toBeCloseTo(0.07);
+    expect(r!.cost.inputTokens).toBe(15);
+    expect(r!.cost.outputTokens).toBe(140);
+    expect(r!.cost.cacheCreationInputTokens).toBe(500);
+    expect(r!.cost.cacheReadInputTokens).toBe(400);
+    expect(r!.cost.durationMs).toBe(1500);
+  });
+
+  test("skips non-JSON and non-result lines without throwing", () => {
+    const raw = ["not json", turn1, "{bad json", turn2].join("\n");
+    const r = parseStreamJsonOutput(raw);
+    expect(r).not.toBeNull();
+    expect(r!.cost.totalCostUsd).toBeCloseTo(0.07);
   });
 });

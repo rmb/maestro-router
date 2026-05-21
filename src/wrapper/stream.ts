@@ -20,6 +20,16 @@ export type StreamClaudeOptions = {
    * keeps writing JSON messages over the lifetime of the call (VSCode panel UI).
    */
   inheritStdin?: boolean;
+  /**
+   * When true, pipe process.stdin to the child after optionally writing
+   * `stdinBuffer`. Use for stream-json sessions where Maestro has already
+   * consumed some initial stdin bytes (for peeking / classifying the first
+   * user message) and needs to replay them before handing control back.
+   * Mutually exclusive with `inheritStdin` and `prompt`.
+   */
+  pipeStdin?: boolean;
+  /** Initial bytes to write to child stdin before piping. Used with `pipeStdin`. */
+  stdinBuffer?: string;
   signal?: AbortSignal;
   /** Where to pipe live subprocess stdout. Defaults to process.stdout. */
   stdout?: Writable;
@@ -105,7 +115,12 @@ export function streamClaude(opts: StreamClaudeOptions): Promise<StreamResult> {
       resolve({ exitCode: code, capturedStdout });
     });
 
-    if (!opts.inheritStdin) {
+    if (opts.pipeStdin) {
+      if (child.stdin) {
+        if (opts.stdinBuffer) child.stdin.write(opts.stdinBuffer);
+        process.stdin.pipe(child.stdin);
+      }
+    } else if (!opts.inheritStdin) {
       try {
         if (child.stdin) {
           child.stdin.write(opts.prompt ?? "");

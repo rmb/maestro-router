@@ -125,6 +125,77 @@ export function parseOutput(raw: string, userConfig: UserConfig = {}): ParsedOut
   };
 }
 
+/**
+ * Parse a stream-json session's captured stdout. The panel emits one JSON
+ * event per line; each turn ends with a `{"type":"result",...}` line. This
+ * accumulates costs across all turns in the session and returns a single
+ * aggregate CostBreakdown. Returns null if no result lines were found (e.g.
+ * output was text-format or the session produced no cost events).
+ */
+export function parseStreamJsonOutput(raw: string): ParsedOutput | null {
+  let totalCostUsd = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let cacheReadInputTokens = 0;
+  let durationMs = 0;
+  let durationApiMs = 0;
+  let stopReason = "unknown";
+  let sessionId: string | null = null;
+  let modelUsed = "unknown";
+  let serviceTier = "unknown";
+  let found = false;
+
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let obj: ClaudeJsonOutput;
+    try {
+      obj = JSON.parse(trimmed) as ClaudeJsonOutput;
+    } catch {
+      continue;
+    }
+    if (obj.type !== "result") continue;
+    found = true;
+    totalCostUsd += obj.total_cost_usd ?? 0;
+    durationMs += obj.duration_ms ?? 0;
+    durationApiMs += obj.duration_api_ms ?? 0;
+    stopReason = obj.stop_reason ?? stopReason;
+    if (typeof obj.session_id === "string") sessionId = obj.session_id;
+
+    const modelEntry = pickModelEntry(obj.modelUsage);
+    const usage = obj.usage ?? {};
+    const inp = usage.input_tokens && usage.input_tokens > 0 ? usage.input_tokens : (modelEntry?.inputTokens ?? 0);
+    const out = usage.output_tokens && usage.output_tokens > 0 ? usage.output_tokens : (modelEntry?.outputTokens ?? 0);
+    const cw = usage.cache_creation_input_tokens && usage.cache_creation_input_tokens > 0 ? usage.cache_creation_input_tokens : (modelEntry?.cacheCreationInputTokens ?? 0);
+    const cr = usage.cache_read_input_tokens && usage.cache_read_input_tokens > 0 ? usage.cache_read_input_tokens : (modelEntry?.cacheReadInputTokens ?? 0);
+    inputTokens += inp;
+    outputTokens += out;
+    cacheCreationInputTokens += cw;
+    cacheReadInputTokens += cr;
+    if (modelUsed === "unknown") modelUsed = pickModelName(obj.modelUsage);
+    if (serviceTier === "unknown") serviceTier = usage.service_tier ?? "unknown";
+  }
+
+  if (!found) return null;
+  return {
+    cost: {
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+      cacheCreationInputTokens,
+      cacheReadInputTokens,
+      durationMs,
+      durationApiMs,
+      stopReason,
+      modelUsed,
+      serviceTier,
+    },
+    diagnostics: [],
+    sessionId,
+  };
+}
+
 function pickModelName(modelUsage: ClaudeJsonOutput["modelUsage"]): string {
   if (!modelUsage) return "unknown";
   const keys = Object.keys(modelUsage);

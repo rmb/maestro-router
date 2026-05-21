@@ -41,6 +41,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--propose <path>", "validate a proposed profile-overrides.json before applying")
     .option("--tournament", "run model-tier downgrade tournament (v0.2 single-axis)")
     .option("--update-baseline", "write the new report as the baseline")
+    .option("--llm", "include the LLM classifier (costs ~$0.001 per uncertain prompt; default off)")
     .action(
       async (cmdOpts: {
         eval: string;
@@ -49,6 +50,7 @@ export function registerBenchCommand(program: Command): void {
         propose?: string;
         tournament?: boolean;
         updateBaseline?: boolean;
+        llm?: boolean;
       }) => {
         const parent = program.opts<ParentOptions>();
         const cli = await loadCliConfig(parent.config);
@@ -89,7 +91,10 @@ export function registerBenchCommand(program: Command): void {
           extraHeuristics.length > 0
             ? createHeuristicClassifier({ extraRules: extraHeuristics })
             : heuristicClassifier;
-        const useLlm = cli.userConfig.useLlmClassifier !== false;
+        // bench excludes the LLM classifier by default — running 100+ live
+        // Claude calls per `pnpm eval` costs real money and is slow. Use
+        // --llm to opt in (and ensure your subscription tolerates the cost).
+        const useLlm = cmdOpts.llm === true && cli.userConfig.useLlmClassifier !== false;
         const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
         if (useLlm) classifiers.push(llmClassifier);
         const pipeline = createPipeline({

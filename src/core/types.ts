@@ -62,6 +62,8 @@ export type UserConfig = {
   disabledModels?: ReadonlyArray<string>;
   dailyCostCapUsd?: number;
   feedbackPrompts?: "never" | "occasional" | "always";
+  /** Probability (0..1) of prompting on each Stop event when feedbackPrompts="occasional". */
+  feedbackSampleRate?: number;
   autoLearn?: boolean;
   /** Global default for S7. Per-class can override via ClassSpec. */
   excludeDynamicSections?: boolean;
@@ -75,6 +77,13 @@ export type UserConfig = {
    * uncertain prompt on Haiku. Set false to disable entirely (S12).
    */
   useLlmClassifier?: boolean;
+  /**
+   * When true (default if `@xenova/transformers` peer is installed), run
+   * an in-process ONNX embedding classifier between `heuristic` and `llm`.
+   * Returns null gracefully if the peer is missing, so this flag is mostly
+   * an explicit opt-out (S2).
+   */
+  useEmbeddingClassifier?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */
@@ -152,4 +161,12 @@ export type CostBreakdown = {
 export type TelemetryEvent =
   | { type: "decision"; ts: string; decision: Decision; cost?: CostBreakdown }
   | { type: "override"; ts: string; from: Class; to: Class; prompt: string }
-  | { type: "feedback"; ts: string; sessionId: string; rating: 1 | 2 | 3 | 4 | 5; note?: string };
+  | {
+      type: "feedback";
+      ts: string;
+      sessionId: string;
+      rating: 1 | 2 | 3 | 4 | 5;
+      note?: string;
+      /** "auto" = via Stop-hook sampling; "manual" = user invoked CLI directly. */
+      source?: "auto" | "manual";
+    };

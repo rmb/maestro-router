@@ -14,7 +14,7 @@ or local tarball (see below).
 For every prompt you send to Claude Code, Maestro:
 
 1. Detects turn type (new prompt vs tool result vs error recovery)
-2. Classifies complexity (override → turn-type → heuristic → LLM, short-circuit at 0.6 confidence). The LLM stage is a `claude --print --json-schema` call to Haiku (~$0.001 per uncertain prompt). Opt out with `useLlmClassifier: false` in `~/.maestro/config.json`.
+2. Classifies complexity (override → turn-type → heuristic → embedding → LLM, short-circuit at 0.6 confidence). The embedding stage is a local ONNX call to a frozen exemplar set (no network, optional peer). The LLM stage is a `claude --print --json-schema` call to Haiku (~$0.001 per uncertain prompt). Opt out of either stage via `useEmbeddingClassifier: false` / `useLlmClassifier: false` in `~/.maestro/config.json`.
 3. Picks the right `--model`, `--effort`, and `--max-budget-usd` from your profile
 4. Applies Claude-specific savings: `--exclude-dynamic-system-prompt-sections` (cache reuse), per-class `--tools` and `--mcp-config` restriction for low-class prompts, and `--bare` for definite-trivial patterns *when authenticated by `ANTHROPIC_API_KEY`* (Pro/Team OAuth skips `--bare` because Claude CLI doesn't read keychain credentials in bare mode)
 5. Spawns `claude --print --session-id <uuid> --resume ...` so conversation continuity is preserved across model swaps
@@ -65,6 +65,32 @@ maestro install-vscode      # --dry-run to preview, --uninstall to remove
 
 > `--ignore-scripts` is required because pnpm 11 gates esbuild's postinstall
 > behind interactive approval. Vitest works without it.
+
+### Optional: embedding classifier
+
+The embedding classifier (S2) is a local ONNX feature-extraction stage that
+catches prompts the regex heuristic misses but that are semantically close to
+a frozen exemplar set. It runs between `heuristic` and `llm` so it can
+short-circuit before the LLM costs ~$0.001 per uncertain prompt.
+
+```bash
+# Install the optional peer (~22MB ONNX model on first use)
+pnpm add -D @xenova/transformers     # or: npm install -g @xenova/transformers
+
+# Regenerate exemplars.json (only when src/classifiers/exemplars-seeds.ts changes)
+pnpm embed
+pnpm build      # checksum gate verifies exemplars.json matches the seeds
+```
+
+Disable explicitly via `~/.maestro/config.json`:
+
+```json
+{ "useEmbeddingClassifier": false }
+```
+
+Without the peer installed, the classifier returns null on every call and the
+pipeline continues to LLM (or the weighted vote). No regressions, just no
+uplift.
 
 ## How to use it
 
@@ -145,6 +171,37 @@ Example `config.json`:
 
 Built-in profiles: `balanced` (default), `cheap`, `quality`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full spec.
+
+## Continuous improvement via feedback
+
+Maestro can ask for a quick 1-5 rating after each Claude Code response and
+log it as a telemetry event, feeding future `tune` cycles.
+
+```bash
+maestro install-hook                # writes Stop hook into ~/.claude/settings.json
+maestro install-hook --dry-run      # preview without writing
+maestro install-hook --uninstall    # remove only Maestro's entry
+```
+
+Opt in via `~/.maestro/config.json`:
+
+```json
+{
+  "feedbackPrompts": "occasional",
+  "feedbackSampleRate": 0.2
+}
+```
+
+Modes:
+
+- `never` (default) — never prompt; the hook exits silently.
+- `occasional` — sample with probability `feedbackSampleRate` (default 0.2 = 1-in-5).
+- `always` — prompt every turn.
+
+The prompt opens on `/dev/tty` so it doesn't interfere with the Stop-hook
+JSON contract. Press `1`-`5` to record; anything else (including `q` or
+Enter) skips. Auto-sampled events carry `source: "auto"` so they can be
+distinguished from explicit `maestro telemetry feedback` invocations.
 
 ## Troubleshooting
 

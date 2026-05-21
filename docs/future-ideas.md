@@ -49,9 +49,13 @@ as a Claude Code hook integration in v0.3.
 `<cwd>/.maestro/config.json` discovered by walking up from cwd. Config
 loader has the hook in v0.2 but discovery is disabled until v0.3.
 
-### Interactive feedback Stop-hook (F7)
-Automated 👍/👎/skip prompt after each response, recorded as feedback events.
-Hook script shipped in `hooks/` in v0.2 but not enabled by default.
+### ~~Interactive feedback Stop-hook (F7)~~ — Shipped in v0.2.1
+`hooks/stop-feedback.sh` runs on Claude Code's Stop event; sampling controlled
+by `feedbackPrompts` (`never` | `occasional` | `always`) and `feedbackSampleRate`
+in `~/.maestro/config.json` (default 0.2 = 1-in-5). Recorded via
+`maestro telemetry feedback <sid> --rating <n> --auto`, distinguishable from
+manual ratings by `source: "auto"`. Install with `maestro install-hook`
+(idempotent; `--uninstall` removes only Maestro's entry).
 
 ### `maestro init` and `maestro doctor` commands
 Convention setup + environment diagnostics. Manual setup works in v0.2 via

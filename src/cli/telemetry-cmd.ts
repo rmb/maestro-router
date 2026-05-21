@@ -71,8 +71,12 @@ export function registerTelemetryCommand(program: Command): void {
     .description("Record a 1-5 quality rating for a session")
     .requiredOption("--rating <n>", "rating (1-5)")
     .option("--note <text>", "free-text note")
+    .option("--auto", "mark this feedback as auto-sampled (from Stop-hook)")
     .action(
-      async (sessionId: string, cmdOpts: { rating: string; note?: string }) => {
+      async (
+        sessionId: string,
+        cmdOpts: { rating: string; note?: string; auto?: boolean },
+      ) => {
         const parent = program.opts<ParentOptions>();
         const cli = await loadCliConfig(parent.config);
         const ratingRaw = parseInt(cmdOpts.rating, 10);
@@ -89,6 +93,7 @@ export function registerTelemetryCommand(program: Command): void {
           sessionId,
           rating,
           ...(cmdOpts.note ? { note: cmdOpts.note } : {}),
+          source: cmdOpts.auto ? "auto" : "manual",
         };
         await t.log(event);
         if (!parent.quiet) {

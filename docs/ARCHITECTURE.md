@@ -233,6 +233,16 @@ The intended user feedback loop:
 Manual `maestro telemetry feedback <session-id> --rating 1-5` records
 explicit quality ratings that future `tune` versions will weight.
 
+F7 adds an automated path: `hooks/stop-feedback.sh` runs on Claude Code's
+Stop event and, depending on `userConfig.feedbackPrompts`
+(`never` / `occasional` / `always`) and `feedbackSampleRate` (default 0.2),
+prompts via `/dev/tty` for a 1-5 rating, then calls
+`maestro telemetry feedback <sid> --rating <n> --auto`. Auto-sampled
+events carry `source: "auto"` so the analyzer can weight them differently
+from explicit manual ratings. Install with `maestro install-hook`, which
+writes Maestro's entry into `~/.claude/settings.json` `hooks.Stop` —
+idempotent and uninstallable without touching other hooks.
+
 ## Decision register
 
 Maestro's plan tracks cross-cutting decisions by tag. Three families:

@@ -106,7 +106,6 @@ backlog of deferred ideas.
 - Tournament matrix (model × effort) — v0.3 (S4 expansion)
 - Per-tool profile overrides → v0.3 (C12)
 - Per-project config discovery → v0.3
-- Interactive feedback Stop-hook → v0.3 (F7)
 - `maestro init` / `maestro doctor` → v0.3
 - CCR + adapters + providers + translator + gateway + Bedrock + Codex → out of scope
 

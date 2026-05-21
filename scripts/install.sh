@@ -76,6 +76,9 @@ maestro install-vscode
 echo "→ Installing Claude Code slash commands…"
 maestro install-commands
 
+echo "→ Writing cost-saving defaults (idempotent)…"
+maestro install-defaults
+
 maestro guide
 echo ""
 echo "Uninstall any time with:  bash scripts/install.sh --uninstall"

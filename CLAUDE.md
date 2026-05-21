@@ -156,6 +156,34 @@ Stop-loss:
 - Feature not in spec → log to [docs/future-ideas.md](docs/future-ideas.md), continue.
 - Spec looks wrong → stop and ask.
 
+## Cost discipline (non-negotiable)
+
+Maestro's value pitch is cost reduction. Every change to the routing
+pipeline, classifier, or wrapper must:
+
+1. Preserve `bench --propose <new>` against the locked baseline (gate 2%).
+2. Maintain measured savings ≥ 60% in `maestro stats` on real workloads.
+3. Document expected `Δ cost/call` in the commit message for any change
+   that adds a model spawn.
+
+Rules of thumb:
+
+- Each model spawn costs $0.0003–$0.05. Prefer extending the heuristic
+  classifier (zero per-call cost) over adding LLM stages.
+- Cache-friendly: don't churn the system prompt of any LLM stage; stability
+  = cache hits = ~10× cheaper repeat calls. Examples and class definitions
+  live in `src/classifiers/fewshot.ts` — never inline duplicates.
+- Multi-call evals (`bench --tournament`, `--propose`, `tune --learn`)
+  MUST estimate cost upfront and require `--confirm-cost` if estimate > $1.
+- New pipeline stages default OFF; user opts in. Existing default-on stages
+  (heuristic, turn-type, override) are the floor — no new default-on LLM
+  stage without an ADR + bench evidence.
+- LLM classifier prompts are asymmetric: misroute UP costs ~$0.05; misroute
+  DOWN to Haiku-on-Opus-task can cost ~$0.50 (the prompt fails). Bias the
+  prompt toward upgrading on uncertainty.
+- Every LLM call site must accept an injected `spawn` so the unit suite
+  never spawns real `claude` — CI bill safety is mandatory.
+
 ## Communication rules
 
 - State decisions, build, move on.

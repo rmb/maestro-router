@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { registerBenchCommand } from "./bench.js";
 import { registerGuideCommand } from "./guide.js";
 import { registerInstallCommandsCommand } from "./install-commands.js";
+import { registerInstallDefaultsCommand } from "./install-defaults.js";
 import { registerInstallHookCommand } from "./install-hook.js";
 import { registerInstallVscodeCommand } from "./install-vscode.js";
 import { registerReplayCommand } from "./replay.js";
@@ -67,6 +68,7 @@ export async function buildProgram(): Promise<Command> {
   registerInstallVscodeCommand(program);
   registerInstallHookCommand(program);
   registerInstallCommandsCommand(program);
+  registerInstallDefaultsCommand(program);
   registerGuideCommand(program);
 
   return program;

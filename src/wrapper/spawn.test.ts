@@ -1,0 +1,276 @@
+// Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, test } from "vitest";
+import { buildClaudeArgs, spawnClaude } from "./spawn.js";
+import { balancedProfile } from "../core/profile.js";
+import type { Decision, Diagnostic, UserConfig } from "../core/types.js";
+
+const baseDecision = (
+  cls: keyof typeof balancedProfile.classes,
+  diagnostics: Diagnostic[] = [],
+): Decision => ({
+  class: cls,
+  classifier: "test",
+  confidence: 1.0,
+  spec: balancedProfile.classes[cls],
+  latencyMs: 0,
+  diagnostics,
+});
+
+const emptyConfig: UserConfig = {};
+
+describe("buildClaudeArgs — base shape", () => {
+  test("always includes --print --output-format json", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "abc",
+      isResume: false,
+    });
+    expect(args).toContain("--print");
+    expect(args).toContain("--output-format");
+    expect(args[args.indexOf("--output-format") + 1]).toBe("json");
+  });
+
+  test("uses --session-id when isResume=false", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "abc-123",
+      isResume: false,
+    });
+    expect(args).toContain("--session-id");
+    expect(args[args.indexOf("--session-id") + 1]).toBe("abc-123");
+    expect(args).not.toContain("--resume");
+  });
+
+  test("uses --resume when isResume=true", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "abc-123",
+      isResume: true,
+    });
+    expect(args).toContain("--resume");
+    expect(args[args.indexOf("--resume") + 1]).toBe("abc-123");
+    expect(args).not.toContain("--session-id");
+  });
+
+  test("includes --model, --effort, --max-budget-usd from spec", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("hard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
+    expect(args[args.indexOf("--effort") + 1]).toBe("high");
+    expect(args[args.indexOf("--max-budget-usd") + 1]).toBe("3");
+  });
+});
+
+describe("buildClaudeArgs — S7 excludeDynamicSections", () => {
+  test("defaults to enabling --exclude-dynamic-system-prompt-sections", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--exclude-dynamic-system-prompt-sections");
+  });
+
+  test("respects userConfig.excludeDynamicSections=false", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: { excludeDynamicSections: false },
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--exclude-dynamic-system-prompt-sections");
+  });
+
+  test("per-class explicit overrides global", () => {
+    const decision = {
+      ...baseDecision("standard"),
+      spec: { ...balancedProfile.classes.standard, excludeDynamicSections: false },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: { excludeDynamicSections: true },
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--exclude-dynamic-system-prompt-sections");
+  });
+});
+
+describe("buildClaudeArgs — S8 tools", () => {
+  test("includes --tools when restricted", () => {
+    // trivial in balanced profile sets tools: "Read,Edit"
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--tools");
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read,Edit");
+  });
+
+  test("omits --tools when value is 'default'", () => {
+    // standard in balanced profile sets tools: "default"
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--tools");
+  });
+});
+
+describe("buildClaudeArgs — S9 MCP isolation", () => {
+  test("includes --strict-mcp-config --mcp-config when mcpConfig set", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--strict-mcp-config");
+    const mcpIdx = args.indexOf("--mcp-config");
+    expect(args[mcpIdx + 1]).toBe("{}");
+  });
+
+  test("omits MCP flags when mcpConfig undefined", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--strict-mcp-config");
+    expect(args).not.toContain("--mcp-config");
+  });
+});
+
+describe("buildClaudeArgs — S6 --bare", () => {
+  test("includes --bare when class supports bare AND bare_safe AND not disabled", () => {
+    const decision = baseDecision("trivial", [
+      { severity: "info", code: "heuristic.bare_safe", message: "" },
+    ]);
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--bare");
+  });
+
+  test("omits --bare when bare_safe diagnostic absent", () => {
+    const decision = baseDecision("trivial");
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--bare");
+  });
+
+  test("omits --bare when override.disable_bare present (S6 escape)", () => {
+    const decision = baseDecision("trivial", [
+      { severity: "info", code: "heuristic.bare_safe", message: "" },
+      { severity: "info", code: "override.disable_bare", message: "" },
+    ]);
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--bare");
+  });
+
+  test("omits --bare for classes without spec.bare=true", () => {
+    const decision = baseDecision("standard", [
+      { severity: "info", code: "heuristic.bare_safe", message: "" },
+    ]);
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--bare");
+  });
+});
+
+describe("spawnClaude", () => {
+  test("captures stdout from a fake binary", async () => {
+    const result = await spawnClaude({
+      binary: "node",
+      args: ["-e", "process.stdin.on('data', d => process.stdout.write(d))"],
+      prompt: "hello world",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("hello world");
+  });
+
+  test("captures non-zero exit code without rejecting", async () => {
+    const result = await spawnClaude({
+      binary: "node",
+      args: ["-e", "process.exit(7)"],
+      prompt: "",
+    });
+    expect(result.exitCode).toBe(7);
+  });
+
+  test("captures stderr separately", async () => {
+    const result = await spawnClaude({
+      binary: "node",
+      args: ["-e", "process.stderr.write('oops')"],
+      prompt: "",
+    });
+    expect(result.stderr).toBe("oops");
+    expect(result.stdout).toBe("");
+  });
+
+  test("rejects when binary is missing", async () => {
+    await expect(
+      spawnClaude({
+        binary: "/definitely-not-a-real-binary-aiosjdf",
+        args: [],
+        prompt: "",
+      }),
+    ).rejects.toBeInstanceOf(Error);
+  });
+
+  test("honors AbortSignal", async () => {
+    const ac = new AbortController();
+    const promise = spawnClaude({
+      binary: "node",
+      args: ["-e", "setTimeout(() => {}, 30000)"],
+      prompt: "",
+      signal: ac.signal,
+    });
+    // Abort after a tick so the process is running
+    setTimeout(() => ac.abort(), 50);
+    const result = await promise;
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  test("respects pre-aborted signal", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const result = await spawnClaude({
+      binary: "node",
+      args: ["-e", "setTimeout(() => {}, 10000)"],
+      prompt: "",
+      signal: ac.signal,
+    });
+    expect(result.exitCode).not.toBe(0);
+  });
+});

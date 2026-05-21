@@ -4,6 +4,19 @@ import type { Command } from "commander";
 import { createTelemetry } from "../core/telemetry.js";
 import { ALL_CLASSES, balancedProfile } from "../core/profile.js";
 import type { Class, TelemetryEvent } from "../core/types.js";
+import {
+  bar,
+  bold,
+  cyan,
+  dim,
+  gray,
+  green,
+  header,
+  pct,
+  savingsColor,
+  usd,
+  yellow,
+} from "./render.js";
 import { DEFAULT_TELEMETRY_PATH, format, loadCliConfig } from "./utils.js";
 
 const DEFAULT_WINDOW_DAYS = 7;
@@ -190,32 +203,53 @@ function baselineFactor(cls: Class): number {
 
 function renderHuman(s: Summary): string {
   const lines: string[] = [];
-  lines.push(`Maestro stats (last ${s.windowDays}d)`);
-  lines.push(`  requests:      ${s.totalRequests}`);
-  lines.push(`  spent:         $${s.totalCostUsd.toFixed(4)}`);
-  lines.push(`  if Opus-everywhere: ~$${s.baselineOpusEverywhereUsd.toFixed(4)}`);
-  lines.push(
-    `  estimated savings: $${s.estimatedSavings.toFixed(4)} (${(s.savingsRatio * 100).toFixed(1)}%)`,
-  );
-  lines.push(`  cache hit rate: ${(s.cacheHitRate * 100).toFixed(1)}%`);
-  lines.push(`  cache-creation cost: $${s.cacheCreationCostUsd.toFixed(4)} (session bootstraps)`);
+  const savColor = savingsColor(s.savingsRatio);
+
   lines.push("");
-  lines.push("Per-class:");
+  lines.push(header(`Maestro stats — last ${s.windowDays}d`));
+
+  if (s.totalRequests === 0) {
+    lines.push("");
+    lines.push(`  ${dim("no requests yet — try `maestro run \"hello\"` to start collecting data")}`);
+    return lines.join("\n");
+  }
+
+  lines.push(`  ${bold("requests")}        ${cyan(s.totalRequests)}`);
+  lines.push(`  ${bold("spent")}           ${yellow(usd(s.totalCostUsd))}`);
+  lines.push(
+    `  ${bold("would-be opus")}   ${gray("~" + usd(s.baselineOpusEverywhereUsd))}`,
+  );
+  lines.push(
+    `  ${bold("saved")}           ${savColor(usd(s.estimatedSavings))}  ${savColor(`(${pct(s.savingsRatio, 1)})`)}  ${dim(bar(s.savingsRatio, 20))}`,
+  );
+  lines.push(
+    `  ${bold("cache hit")}       ${cyan(pct(s.cacheHitRate, 1))}  ${dim(bar(s.cacheHitRate, 20))}`,
+  );
+  lines.push(
+    `  ${bold("session boot")}    ${gray(usd(s.cacheCreationCostUsd))}  ${dim("(cache_creation cost)")}`,
+  );
+
+  lines.push("");
+  lines.push(dim("  per-class"));
   for (const cls of ALL_CLASSES) {
     const c = s.perClass[cls];
     if (c.count === 0) continue;
+    const orR = c.overrideRate;
+    const orStr = `${(orR * 100).toFixed(0)}%`;
+    const orColored = orR > 0.2 ? yellow(orStr) : gray(orStr);
     lines.push(
-      `  ${cls.padEnd(10)} ${String(c.count).padStart(5)}  avg $${c.avgCostUsd.toFixed(4)}  override ${(c.overrideRate * 100).toFixed(0)}%  cache_create P95 ${c.cacheCreationP95}`,
+      `    ${cls.padEnd(10)} ${cyan(String(c.count).padStart(5))}  ${gray("avg")} ${usd(c.avgCostUsd)}  ${gray("override")} ${orColored}  ${gray("p95 cache")} ${c.cacheCreationP95}`,
     );
   }
+
   if (s.topOverrides.length > 0) {
     lines.push("");
-    lines.push("Top override patterns (you correcting Maestro):");
+    lines.push(dim("  top override patterns") + " " + dim("(you correcting Maestro)"));
     for (const o of s.topOverrides) {
-      lines.push(`  ${o.from} → ${o.to}  ×${o.count}`);
+      lines.push(`    ${o.from} → ${o.to}  ${gray("×" + o.count)}`);
     }
     lines.push("");
-    lines.push("Run `maestro tune --learn` to fold these into heuristics.");
+    lines.push(green("  → run `maestro tune --learn` to fold these into heuristics"));
   }
   return lines.join("\n");
 }

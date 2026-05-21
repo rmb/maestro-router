@@ -1,8 +1,10 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import type { Command } from "commander";
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { createHeuristicClassifier, heuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
@@ -20,6 +22,16 @@ import {
   type TournamentReport,
   type TournamentRowResult,
 } from "../eval/tournament.js";
+import {
+  accuracyColor,
+  bar,
+  bold,
+  cyan,
+  dim,
+  gray,
+  header,
+  pct,
+} from "./render.js";
 import { format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -44,8 +56,8 @@ export function registerBenchCommand(program: Command): void {
   program
     .command("bench")
     .description("Run the eval suite against the current pipeline")
-    .option("--eval <path>", "labeled JSONL file", "evals/labeled.jsonl")
-    .option("--baseline <path>", "baseline JSON for regression check", "evals/baseline.json")
+    .option("--eval <path>", "labeled JSONL file (default: bundled evals/labeled.jsonl)")
+    .option("--baseline <path>", "baseline JSON for regression check (default: bundled evals/baseline.json)")
     .option("--gate <pct>", "regression gate (0-1)", "0.02")
     .option("--propose <path>", "validate a proposed profile-overrides.json before applying")
     .option("--tournament", "run model-tier downgrade tournament with real Claude calls (S4)")
@@ -74,7 +86,7 @@ export function registerBenchCommand(program: Command): void {
         const parent = program.opts<ParentOptions>();
         const cli = await loadCliConfig(parent.config);
 
-        const evalPath = resolve(cmdOpts.eval);
+        const evalPath = resolveBundledEval(cmdOpts.eval);
         const data = await readFile(evalPath, "utf8");
         const entries = data
           .split("\n")
@@ -147,31 +159,33 @@ export function registerBenchCommand(program: Command): void {
         }
 
         // Regression check
-        const baseline = await readBaseline(cmdOpts.baseline);
+        const baseline = await readBaseline(resolveBundledBaseline(cmdOpts.baseline));
         if (baseline) {
           const gate = parseFloat(cmdOpts.gate);
           const delta = baseline.accuracy - report.accuracy;
           if (!parent.quiet) {
+            const sign = delta >= 0 ? "+" : "";
+            const deltaStr = `${sign}${(delta * 100).toFixed(2)}pp`;
+            const deltaColor = delta > gate ? accuracyColor(0) : accuracyColor(1);
             process.stderr.write(
-              `\nRegression check: baseline=${baseline.accuracy.toFixed(4)} current=${report.accuracy.toFixed(4)} delta=${delta.toFixed(4)} (gate ${gate})\n`,
+              `\n${dim("regression")} baseline ${baseline.accuracy.toFixed(4)} → current ${report.accuracy.toFixed(4)} ${deltaColor(`Δ ${deltaStr}`)} ${dim(`(gate ${(gate * 100).toFixed(1)}pp)`)}\n`,
             );
           }
           if (delta > gate) {
             process.stderr.write(
-              `FAIL: accuracy dropped by more than gate. ${cmdOpts.propose ? "Proposed overrides REJECTED." : ""}\n`,
+              accuracyColor(0)(
+                `FAIL: accuracy dropped by more than gate. ${cmdOpts.propose ? "Proposed overrides REJECTED." : ""}\n`,
+              ),
             );
             process.exit(1);
           }
         }
 
         if (cmdOpts.updateBaseline) {
-          await writeFile(
-            resolve(cmdOpts.baseline),
-            JSON.stringify(report, null, 2),
-            "utf8",
-          );
+          const baselinePath = resolveBundledBaseline(cmdOpts.baseline);
+          await writeFile(baselinePath, JSON.stringify(report, null, 2), "utf8");
           if (!parent.quiet) {
-            process.stdout.write(`Baseline updated at ${cmdOpts.baseline}\n`);
+            process.stdout.write(`Baseline updated at ${baselinePath}\n`);
           }
         }
       },
@@ -327,6 +341,35 @@ function renderTournamentHuman(report: TournamentReport): string {
   return lines.join("\n");
 }
 
+/**
+ * Resolve the eval JSONL path. If the user passed an explicit path, honor it
+ * (cwd-relative or absolute). Otherwise look for the bundled `evals/labeled.jsonl`
+ * relative to the maestro package install dir, falling back to cwd-relative.
+ */
+function resolveBundledEval(userPath: string | undefined): string {
+  return resolveBundled(userPath, "evals/labeled.jsonl");
+}
+
+function resolveBundledBaseline(userPath: string | undefined): string {
+  return resolveBundled(userPath, "evals/baseline.json");
+}
+
+function resolveBundled(userPath: string | undefined, relative: string): string {
+  if (userPath !== undefined && userPath.length > 0) {
+    return isAbsolute(userPath) ? userPath : resolve(userPath);
+  }
+  // dist/cli/bench.js → walk up to package root, then evals/...
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    join(here, "..", "..", relative),
+    join(here, "..", "..", "..", relative),
+    resolve(relative),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(relative);
+}
+
 async function readBaseline(path: string): Promise<{ accuracy: number } | null> {
   try {
     const raw = await readFile(resolve(path), "utf8");
@@ -401,11 +444,23 @@ function buildRequest(entry: LabeledEntry): Request {
 
 function renderHuman(r: BenchReport): string {
   const lines: string[] = [];
-  lines.push(`bench: ${r.correct}/${r.total} correct (${(r.accuracy * 100).toFixed(2)}%)`);
-  lines.push(`latency p50=${r.latencyMs.p50}ms p95=${r.latencyMs.p95}ms`);
+  const accColor = accuracyColor(r.accuracy);
+
   lines.push("");
+  lines.push(header("Bench results"));
+  lines.push(
+    `  ${bold("accuracy")}  ${accColor(`${r.correct}/${r.total}`)}  ${accColor(`(${pct(r.accuracy, 2)})`)}  ${dim(bar(r.accuracy, 24))}`,
+  );
+  lines.push(
+    `  ${bold("latency")}   ${cyan(`p50=${r.latencyMs.p50}ms`)}  ${cyan(`p95=${r.latencyMs.p95}ms`)}`,
+  );
+  lines.push("");
+  lines.push(dim("  per-class"));
   for (const [cls, s] of Object.entries(r.perClass)) {
-    lines.push(`  ${cls.padEnd(10)} ${s.correct}/${s.total}  (${(s.accuracy * 100).toFixed(1)}%)`);
+    const c = accuracyColor(s.accuracy);
+    lines.push(
+      `    ${cls.padEnd(10)} ${c(`${s.correct}/${s.total}`.padStart(7))}  ${c(pct(s.accuracy, 1).padStart(6))}  ${gray(bar(s.accuracy, 16))}`,
+    );
   }
   return lines.join("\n");
 }

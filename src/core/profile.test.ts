@@ -43,7 +43,7 @@ describe("builtin profiles", () => {
     const t = balancedProfile.classes.trivial;
     expect(t.bare).toBe(true);
     expect(t.tools).toBe("Read,Edit");
-    expect(t.mcpConfig).toBe("{}");
+    expect(t.mcpConfig).toBe('{"mcpServers":{}}');
   });
 
   test("balanced standard+ uses full tools and no --bare", () => {

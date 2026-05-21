@@ -19,31 +19,37 @@ afterEach(async () => {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 describe("createSessionStore", () => {
-  test("getOrCreate returns a UUID v4", async () => {
+  test("getOrCreate returns a UUID v4 and isNew=true on first call", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const id = await store.getOrCreate("/foo");
-    expect(id).toMatch(UUID_RE);
+    const result = await store.getOrCreate("/foo");
+    expect(result.sessionId).toMatch(UUID_RE);
+    expect(result.isNew).toBe(true);
   });
 
   test("getOrCreate reuses the most-recent session for same cwd (F9)", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const a = await store.getOrCreate("/foo");
-    const b = await store.getOrCreate("/foo");
-    expect(a).toBe(b);
+    const first = await store.getOrCreate("/foo");
+    const second = await store.getOrCreate("/foo");
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(first.isNew).toBe(true);
+    expect(second.isNew).toBe(false);
   });
 
   test("different cwds get different sessions", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
     const a = await store.getOrCreate("/foo");
     const b = await store.getOrCreate("/bar");
-    expect(a).not.toBe(b);
+    expect(a.sessionId).not.toBe(b.sessionId);
+    expect(a.isNew).toBe(true);
+    expect(b.isNew).toBe(true);
   });
 
   test("newSession: true forces a fresh UUID even with recent session present", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
     const a = await store.getOrCreate("/foo");
     const b = await store.getOrCreate("/foo", { newSession: true });
-    expect(a).not.toBe(b);
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.isNew).toBe(true);
   });
 
   test("reuse window: expired sessions are not reused", async () => {
@@ -57,7 +63,8 @@ describe("createSessionStore", () => {
     const a = await store.getOrCreate("/foo");
     t = 1_002_000; // 2s later, beyond window
     const b = await store.getOrCreate("/foo");
-    expect(a).not.toBe(b);
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.isNew).toBe(true);
   });
 
   test("reuse refreshes lastUsedAt", async () => {
@@ -69,9 +76,9 @@ describe("createSessionStore", () => {
     const a = await store.getOrCreate("/foo");
     t = 5000;
     const b = await store.getOrCreate("/foo");
-    expect(a).toBe(b);
+    expect(b.sessionId).toBe(a.sessionId);
     const records = await store.list();
-    const rec = records.find((r) => r.sessionId === a)!;
+    const rec = records.find((r) => r.sessionId === a.sessionId)!;
     expect(new Date(rec.lastUsedAt).getTime()).toBe(5000);
   });
 
@@ -80,9 +87,9 @@ describe("createSessionStore", () => {
     const store = createSessionStore({ path: join(dir, "s.json"), now: () => t });
     const a = await store.getOrCreate("/foo");
     t = 9999;
-    await store.touch(a);
+    await store.touch(a.sessionId);
     const records = await store.list();
-    expect(records[0]!.sessionId).toBe(a);
+    expect(records[0]!.sessionId).toBe(a.sessionId);
     expect(new Date(records[0]!.lastUsedAt).getTime()).toBe(9999);
   });
 
@@ -106,9 +113,9 @@ describe("createSessionStore", () => {
       path,
       JSON.stringify([
         { sessionId: "good", cwd: "/x", createdAt: "2026-01-01T00:00:00Z", lastUsedAt: "2026-01-01T00:00:00Z" },
-        { cwd: "/x" }, // missing fields
+        { cwd: "/x" },
         "not an object",
-        { sessionId: 42, cwd: "/y", createdAt: "x", lastUsedAt: "y" }, // wrong type
+        { sessionId: 42, cwd: "/y", createdAt: "x", lastUsedAt: "y" },
       ]),
     );
     const store = createSessionStore({ path });
@@ -133,8 +140,8 @@ describe("createSessionStore", () => {
     const b = await store.getOrCreate("/foo", { newSession: true });
     t = 3000;
     const c = await store.getOrCreate("/foo");
-    // c should reuse b (which is more recent than a)
-    expect(c).toBe(b);
-    expect(c).not.toBe(a);
+    expect(c.sessionId).toBe(b.sessionId);
+    expect(c.sessionId).not.toBe(a.sessionId);
+    expect(c.isNew).toBe(false);
   });
 });

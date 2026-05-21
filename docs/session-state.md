@@ -1,10 +1,11 @@
 # Session state
 
-Last updated: 2026-05-21 · end of Phase 1.
+Last updated: 2026-05-21 · end of Phase 2.
 
 ## Last shipped
 
-`v0.0.1-core` — modules 1–10 complete.
+`v0.1.0-wrapper` — modules 11–16 complete (Phase 2). Phase 1 remains
+tagged `v0.0.1-core`.
 
 - core/types.ts (1)
 - core/cache.ts + tests (2)
@@ -22,17 +23,36 @@ Eval baseline saved to `evals/baseline.json`:
 - Per-class: trivial 74%, simple 67%, standard 96%, hard 88%, reasoning 91%, max 89%
 - p50/p95 latency 0ms (no LLM in pipeline)
 
+## Phase 2 deliverables
+
+- wrapper/preflight.ts (11): verifies Claude CLI version + 12 required flags
+- wrapper/session.ts (12): UUID store with aggressive cwd reuse (F9), returns `{sessionId, isNew}`
+- wrapper/spawn.ts (13): buildClaudeArgs (pure) + spawnClaude (subprocess); S6/S7/S8/S9 flags
+- wrapper/stream.ts (14): streamClaude with live stdout piping + AbortSignal + SIGINT
+- wrapper/passthrough.ts (15): isKnownSlashCommand + isSlashPrefix
+- wrapper/output.ts (16): parseOutput with S10 compact hint + R8 budget-exceeded detection
+
+End-of-Phase-2 status:
+- 240 unit tests passing
+- pnpm typecheck / lint / test clean
+- Eval baseline unchanged at 0.8394 (no regression, no new classifiers in Phase 2)
+- R8 spike confirmed: `--max-budget-usd` is a soft cap (~6× overrun observed)
+- Smoke tests confirmed: end-to-end wrapper routes correctly; S7+S8+S9 cut
+  cache_creation by ~60% on trivial prompts; session reuse preserves
+  conversation context across model swaps but **model swaps still pay
+  cache_create on the new model** (documented in router-observations.md)
+
 ## Next
 
-Phase 2 — modules 11–16:
-- 11 — `wrapper/preflight.ts`: verify `claude` CLI version + required flags
-- 12 — `wrapper/session.ts`: UUID session ID management with aggressive reuse (F9)
-- 13 — `wrapper/spawn.ts`: spawn `claude --print` with chosen flags (S6–S9)
-- 14 — `wrapper/stream.ts`: stdin/stdout piping, SIGINT
-- 15 — `wrapper/passthrough.ts`: detect slash commands, bypass classification
-- 16 — `wrapper/output.ts`: parse `--output-format json` for real token counts
-
-Phase 2 mid-spike: R8 verification of `--max-budget-usd` enforcement semantics.
+Phase 3 — modules 17–24:
+- 17 — `cli/index.ts`: commander entrypoint, shebang, version from package.json
+- 18 — `cli/utils.ts`: layered config loader (F2), format(), wrap() error boundary
+- 19 — `cli/telemetry-cmd.ts`: telemetry status / show / feedback
+- 20 — `cli/stats.ts`: cost vs Opus-everywhere baseline, cache cost breakdown
+- 21 — `cli/tune.ts`: dry-run + --apply + --learn (F3, F5)
+- 22 — `cli/replay.ts`: log replay against current pipeline
+- 23 — `cli/bench.ts`: standard mode + --propose + --tournament (single-axis)
+- 24 — `src/index.ts`: public API surface + internal-index.ts files
 
 ## Blockers
 
@@ -40,10 +60,12 @@ None.
 
 ## Open notes
 
-- pnpm 11 build-script approval is an environment quirk — install with
-  `--ignore-scripts` (logged in lessons.md).
-- Eval misses are mostly on multi-turn entries where the synthesized
-  conversation didn't include a `Read/Grep/LS/Glob` tool_use block — improving
-  the eval's request builder may bump trivial accuracy. Acceptable for v0.0.1.
-- Heuristic confidence tuning is mostly conservative; tournament downgrade
-  (Phase 3, module 23) and the tuning loop will refine over time.
+- pnpm 11 build-script approval quirk — install with `--ignore-scripts`
+  (lessons.md).
+- Eval baseline-equal because Phase 2 only added wrapper infrastructure
+  (no classifier changes). Phase 3's `bench --tournament` is where
+  accuracy will be re-evaluated with real Claude calls.
+- Smoke testing revealed two real bugs (mcpConfig `{}` rejected; session
+  reuse confusion between --session-id and --resume). Both fixed; documented
+  in router-observations.md.
+- Cost of Phase 2 spikes + smokes: ~$0.12 total on the Team subscription.

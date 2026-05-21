@@ -84,3 +84,42 @@ The CLI honored the cap by terminating, but only at a coarse checkpoint:
   is 0 (budget-error case).
 - Adjust profile `maxBudgetUsd` defaults upward in v0.2.1 if real telemetry
   shows budget errors in normal completions.
+
+## 2026-05-21 · Phase 2 smoke — end-to-end wrapper works; model swaps cost cache
+
+Ran two smoke turns via examples/smoke.ts:
+
+**Turn 1** ("rename foo to bar", new session, Haiku):
+- cache_create: 14,429 (vs 37,863 in spike 2 without S7)
+- cost: $0.020 (vs $0.048 in spike 2)
+- **~60% reduction** on the system-prompt cache cost from
+  `--exclude-dynamic-system-prompt-sections` (S7) + `--tools Read,Edit` (S8) +
+  `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` (S9).
+
+**Turn 2** ("what is the file extension in foo.bar.tsx?", same session, Sonnet):
+- `--resume <uuid>` preserved conversation context ✓
+- cache_read: 11,240 (conversation prefix reused from prior turn)
+- BUT cache_create: 15,521 (Sonnet had no prior cache; fresh cache write)
+- cost: $0.062 (Sonnet token rates × cache write)
+
+**Finding: model swaps within a session incur cache_creation on the new
+model.** Prompt cache is keyed by `(content, model)`, so switching from
+Haiku to Sonnet within a session pays the cache-create cost for Sonnet on
+that turn. Subsequent same-model turns benefit from cache_read.
+
+**Implications:**
+- Maestro's classification should bias toward model stability where
+  quality permits — bouncing between models per turn defeats prompt
+  caching even with session reuse.
+- The fine-tuning loop (`maestro tune --learn`) should detect rapid
+  model-tier churn as a pattern worth flattening (suggest profile
+  adjustments that keep similar prompts on the same model).
+- `stats` (Phase 3) should distinguish cache_creation cost from
+  cache_read cost in its report so users see the model-swap penalty.
+
+**Other fixes from smoke testing:**
+- `--mcp-config '{}'` is rejected by Claude CLI ("Does not adhere to MCP
+  server configuration schema"). The correct empty form is
+  `'{"mcpServers":{}}'`. Built-in profiles updated.
+- The session store now returns `{sessionId, isNew}` so the wrapper knows
+  whether to pass `--session-id` (new) or `--resume` (continuing).

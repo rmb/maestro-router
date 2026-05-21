@@ -26,8 +26,14 @@ export type GetOrCreateOptions = {
   newSession?: boolean;
 };
 
+export type GetOrCreateResult = {
+  sessionId: string;
+  /** true if a new session was created; false if an existing one was reused. */
+  isNew: boolean;
+};
+
 export type SessionStore = {
-  getOrCreate(cwd: string, opts?: GetOrCreateOptions): Promise<string>;
+  getOrCreate(cwd: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
   touch(sessionId: string): Promise<void>;
   list(): Promise<SessionRecord[]>;
 };
@@ -76,7 +82,7 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
             r.sessionId === reused.sessionId ? { ...r, lastUsedAt: nowIso } : r,
           );
           await write(updated);
-          return reused.sessionId;
+          return { sessionId: reused.sessionId, isNew: false };
         }
       }
 
@@ -88,7 +94,7 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
         lastUsedAt: nowIso,
       };
       await write([...records, created]);
-      return sessionId;
+      return { sessionId, isNew: true };
     },
 
     async touch(sessionId) {

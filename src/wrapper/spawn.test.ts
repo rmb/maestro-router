@@ -140,7 +140,7 @@ describe("buildClaudeArgs — S9 MCP isolation", () => {
     });
     expect(args).toContain("--strict-mcp-config");
     const mcpIdx = args.indexOf("--mcp-config");
-    expect(args[mcpIdx + 1]).toBe("{}");
+    expect(args[mcpIdx + 1]).toBe('{"mcpServers":{}}');
   });
 
   test("omits MCP flags when mcpConfig undefined", () => {

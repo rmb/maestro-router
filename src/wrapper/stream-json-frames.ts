@@ -85,3 +85,63 @@ export function matchesInjectedRequestId(frame: Frame): boolean {
   const id = (response as { request_id?: unknown }).request_id;
   return typeof id === "string" && id.startsWith(MAESTRO_REQUEST_ID_PREFIX);
 }
+
+/** A user-role message whose content array contains at least one tool_result block. */
+export function isToolResultMessage(frame: Frame): boolean {
+  if (frame.type !== "user") return false;
+  const message = frame.message;
+  if (typeof message !== "object" || message === null) return false;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (b) =>
+      typeof b === "object" &&
+      b !== null &&
+      (b as { type?: unknown }).type === "tool_result",
+  );
+}
+
+/** Extract tool_use_id strings from all tool_result blocks in a user frame. */
+export function extractToolUseIds(frame: Frame): string[] {
+  const message = frame.message;
+  if (typeof message !== "object" || message === null) return [];
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  const ids: string[] = [];
+  for (const b of content) {
+    if (
+      typeof b === "object" &&
+      b !== null &&
+      (b as { type?: unknown }).type === "tool_result" &&
+      typeof (b as { tool_use_id?: unknown }).tool_use_id === "string"
+    ) {
+      ids.push((b as { tool_use_id: string }).tool_use_id);
+    }
+  }
+  return ids;
+}
+
+/** Extract {id, name} pairs from all tool_use blocks in an assistant frame. */
+export function extractToolUseBlocks(frame: Frame): Array<{ id: string; name: string }> {
+  if (frame.type !== "assistant") return [];
+  const message = frame.message;
+  if (typeof message !== "object" || message === null) return [];
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  const blocks: Array<{ id: string; name: string }> = [];
+  for (const b of content) {
+    if (
+      typeof b === "object" &&
+      b !== null &&
+      (b as { type?: unknown }).type === "tool_use" &&
+      typeof (b as { id?: unknown }).id === "string" &&
+      typeof (b as { name?: unknown }).name === "string"
+    ) {
+      blocks.push({
+        id: (b as { id: string }).id,
+        name: (b as { name: string }).name,
+      });
+    }
+  }
+  return blocks;
+}

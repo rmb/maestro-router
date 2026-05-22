@@ -9,6 +9,9 @@ import {
   buildSetModelRequest,
   matchesInjectedRequestId,
   MAESTRO_REQUEST_ID_PREFIX,
+  isToolResultMessage,
+  extractToolUseIds,
+  extractToolUseBlocks,
 } from "./stream-json-frames.js";
 
 describe("parseFrame", () => {
@@ -110,5 +113,108 @@ describe("matchesInjectedRequestId", () => {
   test("false for non-control-response frames", () => {
     const f = parseFrame('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}')!;
     expect(matchesInjectedRequestId(f)).toBe(false);
+  });
+});
+
+describe("isToolResultMessage", () => {
+  test("returns true for user frame whose content contains a tool_result block", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"file contents"}]}}',
+    )!;
+    expect(isToolResultMessage(f)).toBe(true);
+  });
+
+  test("returns false for a text-only user message", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}',
+    )!;
+    expect(isToolResultMessage(f)).toBe(false);
+  });
+
+  test("returns false for a non-user frame", () => {
+    const f = parseFrame(
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}',
+    )!;
+    expect(isToolResultMessage(f)).toBe(false);
+  });
+
+  test("returns false for a user frame with no message", () => {
+    const f = parseFrame('{"type":"user"}')!;
+    expect(isToolResultMessage(f)).toBe(false);
+  });
+
+  test("returns true when tool_result appears alongside a text block", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"data"},{"type":"text","text":"note"}]}}',
+    )!;
+    expect(isToolResultMessage(f)).toBe(true);
+  });
+});
+
+describe("extractToolUseIds", () => {
+  test("returns array of tool_use_id strings from tool_result blocks", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"res"}]}}',
+    )!;
+    expect(extractToolUseIds(f)).toEqual(["toolu_01"]);
+  });
+
+  test("returns multiple ids when multiple tool_result blocks are present", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"a"},{"type":"tool_result","tool_use_id":"toolu_02","content":"b"}]}}',
+    )!;
+    expect(extractToolUseIds(f)).toEqual(["toolu_01", "toolu_02"]);
+  });
+
+  test("returns empty array for a text-only user message", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}',
+    )!;
+    expect(extractToolUseIds(f)).toEqual([]);
+  });
+
+  test("returns empty array when content is absent", () => {
+    const f = parseFrame('{"type":"user","message":{}}')!;
+    expect(extractToolUseIds(f)).toEqual([]);
+  });
+});
+
+describe("extractToolUseBlocks", () => {
+  test("returns id+name pairs from tool_use blocks in an assistant frame", () => {
+    const f = parseFrame(
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"path":"index.ts"}}]}}',
+    )!;
+    expect(extractToolUseBlocks(f)).toEqual([{ id: "toolu_01", name: "Read" }]);
+  });
+
+  test("returns multiple entries when multiple tool_use blocks are present", () => {
+    const f = parseFrame(
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{}},{"type":"tool_use","id":"toolu_02","name":"Grep","input":{}}]}}',
+    )!;
+    expect(extractToolUseBlocks(f)).toEqual([
+      { id: "toolu_01", name: "Read" },
+      { id: "toolu_02", name: "Grep" },
+    ]);
+  });
+
+  test("returns empty array for a non-assistant frame", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}',
+    )!;
+    expect(extractToolUseBlocks(f)).toEqual([]);
+  });
+
+  test("returns empty array when content contains no tool_use blocks", () => {
+    const f = parseFrame(
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will now read…"}]}}',
+    )!;
+    expect(extractToolUseBlocks(f)).toEqual([]);
+  });
+
+  test("skips tool_use blocks missing id or name", () => {
+    const f = parseFrame(
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01"},{"type":"tool_use","name":"Read"},{"type":"tool_use","id":"toolu_03","name":"Glob","input":{}}]}}',
+    )!;
+    expect(extractToolUseBlocks(f)).toEqual([{ id: "toolu_03", name: "Glob" }]);
   });
 });

@@ -123,12 +123,37 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
   for await (const line of rl) {
     const frame = parseFrame(line);
 
-    // DEBUG: log frame classification to /tmp/maestro-frames.log
-    if (frame !== null && process.env.MAESTRO_DEBUG_FRAMES) {
-      const hasText = isUserTextMessage(frame);
-      const hasTool = isToolResultMessage(frame);
-      const entry = JSON.stringify({ ts: Date.now(), type: frame.type, hasText, hasTool }) + "\n";
-      import("node:fs").then(fs => fs.appendFileSync("/tmp/maestro-frames.log", entry)).catch(() => {});
+    // tool_result check MUST come before isUserTextMessage: mixed frames
+    // (tool_result block + text sidechain) satisfy both predicates; checking
+    // user-text first would skip tool routing entirely via the continue below.
+    if (frame !== null && isToolResultMessage(frame)) {
+      const t0 = Date.now();
+
+      const ids = extractToolUseIds(frame);
+      const resolvedToolName =
+        ids.length > 0 ? toolUseMap.get(ids[0]!) : undefined;
+
+      const request: Request =
+        resolvedToolName !== undefined
+          ? { prompt: "", metadata: { resolvedToolName } }
+          : { prompt: "" };
+
+      const decision: Decision = await opts.pipeline.route(request);
+
+      injectedSeq += 1;
+      const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
+      child.stdin?.write(JSON.stringify(setModel) + "\n");
+      child.stdin?.write(line + "\n");
+
+      try {
+        await opts.telemetry.log({
+          type: "decision",
+          ts: new Date().toISOString(),
+          decision: { ...decision, latencyMs: Date.now() - t0 },
+        });
+      } catch { /* telemetry must never block routing */ }
+
+      continue;
     }
 
     if (frame !== null && isUserTextMessage(frame)) {
@@ -159,39 +184,6 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
           ts: new Date().toISOString(),
           decision: { ...decision, latencyMs: Date.now() - t0 },
           prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
-        });
-      } catch { /* telemetry must never block routing */ }
-
-      continue;
-    }
-
-    if (frame !== null && isToolResultMessage(frame)) {
-      const t0 = Date.now();
-
-      // Resolve the tool name from the first tool_use_id in this result frame.
-      // In practice a tool_result carries exactly one tool_use_id, but we
-      // defensively read the first populated id.
-      const ids = extractToolUseIds(frame);
-      const resolvedToolName =
-        ids.length > 0 ? toolUseMap.get(ids[0]!) : undefined;
-
-      const request: Request =
-        resolvedToolName !== undefined
-          ? { prompt: "", metadata: { resolvedToolName } }
-          : { prompt: "" };
-
-      const decision: Decision = await opts.pipeline.route(request);
-
-      injectedSeq += 1;
-      const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
-      child.stdin?.write(JSON.stringify(setModel) + "\n");
-      child.stdin?.write(line + "\n");
-
-      try {
-        await opts.telemetry.log({
-          type: "decision",
-          ts: new Date().toISOString(),
-          decision: { ...decision, latencyMs: Date.now() - t0 },
         });
       } catch { /* telemetry must never block routing */ }
 

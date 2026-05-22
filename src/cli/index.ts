@@ -7,7 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerBenchCommand } from "./bench.js";
 import { registerExportPromptsCommand } from "./export-prompts.js";
+import { registerDoctorCommand } from "./doctor.js";
 import { registerGuideCommand } from "./guide.js";
+import { registerInitCommand } from "./init.js";
 import { registerInstallCommandsCommand } from "./install-commands.js";
 import { registerInstallDefaultsCommand } from "./install-defaults.js";
 import { registerInstallHookCommand } from "./install-hook.js";
@@ -72,6 +74,8 @@ export async function buildProgram(): Promise<Command> {
   registerInstallCommandsCommand(program);
   registerInstallDefaultsCommand(program);
   registerGuideCommand(program);
+  registerInitCommand(program);
+  registerDoctorCommand(program);
 
   return program;
 }

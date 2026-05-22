@@ -76,6 +76,73 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     bareSafe: true,
   },
 
+  // console.log / debug-logging remove — removing is always trivial
+  {
+    pattern: "\\b(remove|delete|clean\\s+up)\\s+(a\\s+)?(console\\.(log|warn|error|debug)|log\\s+statement|debug\\s+statement|print\\s+statement)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // strip trailing whitespace / blank lines
+  {
+    pattern: "\\b(remove|strip|trim)\\s+(trailing\\s+)?(whitespace|spaces?|blank\\s+lines?)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+    bareSafe: true,
+  },
+  // add return type annotation (one-pass TypeScript/Python annotation)
+  {
+    pattern: "\\badd\\s+(a\\s+)?return\\s+type\\s+(annotation|hint)?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // add readonly modifier to property/field
+  {
+    pattern: "\\badd\\s+readonly\\s+(to\\b|modifier|keyword)?|\\bmake\\s+(this|the)\\s+(property|field|param|attribute)\\s+readonly\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // add empty / blank line between blocks
+  {
+    pattern: "\\badd\\s+an?\\s+(empty|blank)\\s+line\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // convert object/value to JSON (JSON.stringify one-liner)
+  {
+    pattern: "\\bconvert\\s+(this|the|a)\\s+(object|value|response|result|data)\\s+to\\s+json\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // "rename X to Y" — plain identifier rename with explicit "to" connector
+  {
+    pattern: "^\\s*rename\\s+\\w[\\w.]*\\s+to\\s+\\w[\\w.]*\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+    bareSafe: true,
+  },
+  // change var/let to const — scope-only mechanical fix
+  {
+    pattern: "\\b(change|convert|replace)\\s+(var|let)\\s+to\\s+const\\b|\\bconvert\\s+(all\\s+)?(var|let)s?\\s+to\\s+consts?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+
   // Trivial — tool/command output looks like a finished tool result. These
   // appear in panels where the user pastes context for the next prompt;
   // they need no model thinking on their own. Conservative confidence:
@@ -131,7 +198,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // Trivial — bump version (single field in package.json / pyproject.toml)
   {
-    pattern: "\\b(bump|update|set)\\s+(the\\s+)?(package\\s+)?version\\b",
+    pattern: "\\b(bump|update|set)\\s+(the\\s+)?(patch|minor|major|package\\s+|semver\\s+)?version\\b",
     flags: "i",
     class: "trivial",
     confidence: 0.8,
@@ -159,6 +226,61 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     flags: "i",
     class: "trivial",
     confidence: 0.75,
+    source: "builtin",
+  },
+  // Trivial — sort/reorder imports (flexible: "sort these imports alphabetically")
+  {
+    pattern: "\\b(sort|reorder|organize)\\s+(these\\s+|the\\s+|all\\s+)?imports?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Trivial — remove unused import(s) (handles "this/an unused import")
+  {
+    pattern: "\\b(remove|delete)\\s+(this\\s+|an?\\s+|the\\s+)?unused\\s+imports?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Trivial — add default value to optional parameter
+  {
+    pattern: "\\badd\\s+(a\\s+)?default\\s+(value|parameter)\\s+(to|for)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Trivial — add deprecation notice/warning
+  {
+    pattern: "\\badd\\s+(a\\s+)?deprecat(ion|ed)\\s+(notice|warning|comment|annotation|decorator)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Trivial — PHP mechanical fixes (type hint, docblock, array syntax, class rename)
+  {
+    pattern: "\\badd\\s+(a\\s+)?(type\\s+hint|docblock|phpdoc|php\\s+doc)\\s+(to|for|on)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  {
+    pattern: "\\bconvert\\s+(this\\s+)?php\\s+array\\s+syntax\\b|\\bconvert\\s+array\\(\\)\\s+to\\s+\\[\\]\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Trivial — Next.js/React mechanical changes
+  {
+    pattern: "\\badd\\s+(a\\s+)?loading\\.tsx\\b|\\bconvert\\s+(this\\s+)?page\\s+to\\s+(a\\s+)?server\\s+component\\b|\\bmark\\s+(this\\s+|the\\s+)?component\\s+as\\s+['\"]?use\\s+client['\"]?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
     source: "builtin",
   },
 
@@ -238,6 +360,182 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // Simple — extract repeated string/literal/query to a named constant or function
+  {
+    pattern: "\\bextract\\s+(this\\s+|the\\s+)?(repeated\\s+|inline\\s+|hard-?coded\\s+)?(string|literal|sql|query|value)\\s+(into|to|as)\\s+(a\\s+)?(constant|const|variable|named\\s+function)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — convert callback to async/await
+  {
+    pattern: "\\bconvert\\s+(this\\s+)?callback\\s+to\\s+async\\b|\\bpromisify\\s+(this|the)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — create TypeScript/language interface for a shape
+  {
+    pattern: "\\bcreate\\s+(a?n?\\s+)?(TypeScript\\s+|TS\\s+)?interface\\s+for\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add rate limiter to route/handler
+  {
+    pattern: "\\badd\\s+(a\\s+)?rate\\s+limit(er)?\\s+(to|for)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — convert class component to function component (React)
+  {
+    pattern: "\\bconvert\\s+(this\\s+)?class\\s+component\\s+to\\s+(a\\s+)?function\\s+component\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Simple — add logging or request middleware
+  {
+    pattern: "\\badd\\s+(a\\s+)?(logging|request\\s+logging|morgan|access\\s+log)\\s+middleware\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.7,
+    source: "builtin",
+  },
+  // Simple — implement builder pattern (single class, bounded scope)
+  {
+    pattern: "\\b(implement|add|create)\\s+(a\\s+)?(builder\\s+pattern|fluent\\s+builder|builder\\s+class)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — write a snapshot test
+  {
+    pattern: "\\b(write|add|create)\\s+(a\\s+)?snapshot\\s+tests?\\s+(for|to|covering)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — implement a retry wrapper (explicitly a wrapper/decorator, not full logic with backoff)
+  {
+    pattern: "\\b(implement|add|create|write)\\s+(a\\s+)?(simple\\s+)?retry\\s+(wrapper|decorator)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add pagination to this/these specific endpoint/query (single concern, not a feature)
+  {
+    pattern: "\\badd\\s+(cursor|offset|page|limit)\\s+pagination\\b|\\badd\\s+pagination\\s+(to|for|on)\\s+(this|these)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.7,
+    source: "builtin",
+  },
+  // Simple — PHP scoped changes (null coalescing, PHPUnit test, trait, input sanitization)
+  {
+    pattern: "\\badd\\s+(null\\s+coalescing|the\\s+\\?\\?\\s+operator|null\\s+coalesce)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  {
+    pattern: "\\bwrite\\s+(a\\s+)?(phpunit|pest)\\s+tests?\\s+(for|covering)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add Node.js/Express middleware (request scoped)
+  {
+    pattern: "\\badd\\s+(a\\s+)?(express|fastify|koa|hapi|nest(js)?)\\s+middleware\\b|\\badd\\s+(a\\s+)?(cors|helmet|compression|body-parser|json-parser)\\s+(middleware|plugin)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add Zod/Joi/Yup validation schema
+  {
+    pattern: "\\b(add|create|write)\\s+(a\\s+)?(zod|joi|yup|valibot|ajv)\\s+(schema|validator|validation)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add Next.js API route handler
+  {
+    pattern: "\\badd\\s+(a\\s+)?(next\\.?js\\s+)?(api\\s+route|route\\s+handler)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+
+  // extract string/value into a named constant (single-file scope change)
+  {
+    pattern: "\\bextract\\s+(this\\s+|the\\s+)?(repeated\\s+|hardcoded\\s+|inline\\s+)?(string|value|number|url|path|config\\s+value)\\s+(into|to|as)\\s+(a\\s+)?(constant|const|named\\s+constant|config\\s+variable)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // convert callback / promise chain to async/await
+  {
+    pattern: "\\b(convert|refactor|rewrite|change)\\s+(this\\s+|the\\s+)?(callback|promise\\s+chain|\\.then\\s+chain|nested\\s+callbacks?)\\s+(to|into|using)\\s+(async|promises?)\\b|\\bpromisify\\b|\\bconvert\\s+to\\s+async\\/await\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // create TypeScript interface or type alias
+  {
+    pattern: "\\b(create|add|define|write|generate)\\s+(a\\s+)?(typescript\\s+)?(interface|type\\s+alias)\\s+(for|to\\s+represent)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // add rate limiting to a route/handler
+  {
+    pattern: "\\badd\\s+(a\\s+)?rate\\s+(limit(?:er)?|limiting)\\s+(to|for|on|middleware)?\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // convert class component → function component
+  {
+    pattern: "\\bconvert\\s+(this\\s+|the\\s+)?class(?:\\s+-?based)?\\s+component\\s+to\\s+(a\\s+)?function(?:al)?\\s+component\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // add request/HTTP logging middleware
+  {
+    pattern: "\\badd\\s+(?:request\\s+|http\\s+|access\\s+|morgan\\s+)?logging\\s+middleware\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // move function/method/class to a shared utils/lib file
+  {
+    pattern: "\\b(move|extract)\\s+(this\\s+|the\\s+)?(function|method|class|helper|utility|util)\\s+(to|into)\\s+(a\\s+)?(shared\\s+)?(utils|lib|helpers?|services?|file|module)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
 
   // Hard — bugs and refactors that need investigation
   {
@@ -264,14 +562,14 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(slow|timing out|times out|crashes?|crashing|grows? linearly|under load|in CI but)\\b",
+      "\\b(slow\\w*|timing out|times out|crashes?|crashing|grows? linearly|under load|in CI but)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.7,
     source: "builtin",
   },
   {
-    pattern: "\\bmigrate\\b.+(endpoint|from|to|api)",
+    pattern: "\\bmigrate\\b.+(endpoint|from\\s+\\w|api)",
     flags: "i",
     class: "hard",
     confidence: 0.7,
@@ -335,6 +633,95 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // Hard — network connections dropping/disconnecting (requires investigation)
+  {
+    pattern: "\\b(connection|connections|websocket|socket)s?\\s+(are\\s+)?(dropping|dropped|disconnecting|disconnect)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — test/build/CI "fails" (present tense, not just "failing")
+  {
+    pattern: "\\b(test|tests|spec|CI|build|pipeline)\\s+(only\\s+)?fails?\\s+(on|in|when|with)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — fails when run in parallel (concurrency issue)
+  {
+    pattern: "\\bfails?\\s+(when|if)\\s+(run|running|executed)\\s+in\\s+parallel\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Hard — silent failure with no visible error (deployment, job, queue)
+  {
+    pattern: "\\bfails?\\s+silently\\b|\\bsilent\\s+(failure|drop|error)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — auth/session issues (stale tokens, wrong redirect, premature expiry)
+  {
+    pattern: "\\b(stale\\s+token|token\\s+stale|sessions?\\s+expire\\s+too\\s+(quickly|fast|soon)|redirect(s|ing)?\\s+to\\s+the\\s+wrong)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+
+  // "find out why / figure out why / track it down" — explicit investigation
+  {
+    pattern: "\\b(find\\s+out\\s+why|investigate\\s+why|figure\\s+out\\s+why|track\\s+it\\s+down|hunt\\s+(?:it\\s+)?down)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // silent failure — no error output despite broken behavior
+  {
+    pattern: "\\b(fails?\\s+silently|silent\\s+fail(?:ure)?|exits?\\s+with(?:out)?\\s+(?:an\\s+)?error|0\\s+exit\\s+code\\s+but)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // resource/listener/connection leak (extends memory-leak signal)
+  {
+    pattern: "\\b(leaking\\s+(?:listeners?|handlers?|callbacks?|references?|connections?)|resource\\s+leak|connection\\s+(?:pool\\s+)?leak)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // performance regression after upgrade or change
+  {
+    pattern: "\\b(\\d+[xX]\\s+slow(?:er)?|much\\s+slow(?:er)?\\s+after|slow(?:er)?\\s+after\\s+(?:upgrading|the\\s+(?:upgrade|update|migration))|performance\\s+regress(?:ion|ed)?)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // tests pass individually/locally but fail in parallel / when run together
+  {
+    pattern: "\\bpass(?:es)?\\s+(?:individually|locally|in\\s+isolation|one\\s+by\\s+one).{0,80}\\bfail\\b|\\bfail\\s+when\\s+run\\s+(?:in\\s+parallel|together|concurrently)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // intermittent failure that can still be reproduced/investigated
+  {
+    pattern: "\\bintermittent(?:ly)?\\b.{0,60}\\b(fail|break|crash|error|wrong|drop|timeout|hang|lose|miss)\\b|\\b(fail|break|crash|error|wrong|drop|timeout|hang|lose|miss).{0,60}\\bintermittent(?:ly)?\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.7,
+    source: "builtin",
+  },
 
   // Reasoning — design / compare / evaluate
   {
@@ -369,6 +756,38 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.8,
     source: "builtin",
   },
+  // Reasoning — "what's the right way/approach to handle X" design question
+  {
+    pattern: "\\bwhat[''']?s\\s+the\\s+right\\s+(way|approach|strategy|pattern|method)\\s+(to|for)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Reasoning — security review with proposed fixes (design, not investigation)
+  {
+    pattern: "\\breview\\s+(this|the|our)\\s+.{0,40}\\s+(for\\s+security|for\\s+vulnerabilities?)\\b.{0,80}(propose|suggest|recommend|provide)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Reasoning — deployment/release strategy question
+  {
+    pattern: "\\bdesign\\s+(a\\s+)?(blue[/-]green|canary|rolling|zero-downtime)\\s+(deploy|deployment|release|strategy)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Reasoning — test strategy / testing pyramid design
+  {
+    pattern: "\\b(design|define|plan|recommend)\\s+(a\\s+|the\\s+)?(test\\s+strategy|testing\\s+strategy|testing\\s+pyramid|test\\s+pyramid|contract\\s+testing\\s+strategy)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.85,
+    source: "builtin",
+  },
 
   // Max — adversarial debugging
   {
@@ -380,7 +799,15 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(can[''’]?t reproduce|cannot reproduce|unreproducible|intermittent(?:ly)?|silent (?:data )?loss|byzantine|heisenbug|no error in logs|no slow query log)\\b",
+      "\\b(can[‘’’]?t reproduce|cannot reproduce|unreproducible|silent (?:data )?loss|byzantine|heisenbug|no error in logs|no slow query log)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // "intermittently" only escalates to max when paired with a can’t-reproduce signal
+  {
+    pattern: "\\bintermittent(?:ly)?\\b.{0,100}\\b(can[‘’’]?t\\s+reproduce|cannot\\s+reproduce|not\\s+reproducible|no\\s+error)\\b|\\b(can[‘’’]?t\\s+reproduce|cannot\\s+reproduce|no\\s+error\\s+in\\s+logs).{0,100}\\bintermittent(?:ly)?\\b",
     flags: "i",
     class: "max",
     confidence: 0.9,
@@ -414,6 +841,46 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   // Multi-service blast radius: explicit count of services affected.
   {
     pattern: "\\b(took\\s+down|brought\\s+down|knocked\\s+out)\\s+(\\d+|several|multiple|many)\\s+services?\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — critical security vulnerabilities (SQL injection, CVE, deserialization, etc.)
+  {
+    pattern: "\\b(sql|xss|xxe|ldap|rce|ssti|ssrf|idor)\\s+injection\\b|\\bcritical\\s+(CVE|vulnerability|security\\s+issue)\\b|\\b(deserialization|rce|remote\\s+code\\s+execution)\\s+vulnerability\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — data corruption in a database/table/records (broader than "corrupted data")
+  {
+    pattern: "\\bdata\\s+corrupt(?:ion|ed)?\\b|\\bcorrupt(?:ed|ing)?\\s+(the\\s+)?(data|records?|table|database|permissions?|user\\s+data)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Max — broken code / bad deploy pushed to production
+  {
+    pattern: "\\b(pushed|deployed|shipped|merged)\\s+(broken|bad|corrupt|wrong)\\s+code\\s+(to\\s+)?(production|prod)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — resource at critical capacity with explicit time pressure
+  {
+    pattern: "\\b(disk|storage|database|db|volume)\\s+(?:is\\s+at\\s+)?\\d+%\\s+(full|capacity)\\b|\\b(\\d+\\s+hours?|hours?\\s+before)\\s+(it\\s+fills?|before\\s+(?:it\\s+)?full|runs?\\s+out)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — GDPR/compliance data deletion failures or unauthorized data access
+  {
+    pattern: "\\b(gdpr|ccpa|data\\s+subject)\\s+(data\\s+)?(deletion|erasure|request|rights?)\\s+(not\\s+|failing|broken|incorrect)\\b|\\busers?\\s+can\\s+access\\s+each\\s+other[''']?s\\s+data\\b",
     flags: "i",
     class: "max",
     confidence: 0.9,

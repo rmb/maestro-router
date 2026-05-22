@@ -88,7 +88,12 @@ const MAX_INPUT_CHARS = 2000;
 // 3-5s in real measurements (cache_creation pays ~37k system prompt tokens).
 // 10s is comfortable headroom; the AbortSignal kills it cleanly on user ctrl-c.
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_BUDGET_USD = 0.01;
+// Cold-call cost is dominated by cache_creation_input_tokens for Claude
+// Code's default system prompt (~37k tokens → ~$0.045 on Haiku 4.5).
+// $0.01 was unrealistic and produced `error_max_budget_usd` on every
+// classification, silently disabling the stage. $0.10 covers a cold
+// call with margin; warm calls cost ~$0.001 via cache_read.
+const DEFAULT_MAX_BUDGET_USD = 0.1;
 const DEFAULT_MODEL = "haiku";
 const DEFAULT_WEIGHT = 0.7;
 const DEFAULT_CONFIDENCE = 0.7;

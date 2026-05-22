@@ -142,6 +142,62 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.85,
     source: "builtin",
   },
+  // convert arrow function to regular/named function — pure syntax transform
+  {
+    pattern: "\\bconvert\\s+(this\\s+|the\\s+)?arrow\\s+function\\s+(to|into)\\s+(a\\s+)?(?:named\\s+|regular\\s+)?function\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // remove commented-out code block
+  {
+    pattern: "\\b(remove|delete)\\s+(the\\s+|this\\s+|all\\s+)?commented(?:-out|\\s+out)?\\s+(code|block|lines?|section)s?\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // add trailing comma
+  {
+    pattern: "\\badd\\s+(a\\s+)?trailing\\s+comma\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // convert string concatenation to template literal
+  {
+    pattern: "\\bconvert\\s+(this\\s+|the\\s+)?string\\s+concatenation\\s+to\\s+(a\\s+)?template\\s+(literal|string)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // add newline at end of file
+  {
+    pattern: "\\badd\\s+(a\\s+)?newline\\s+(at\\s+the\\s+end|at\\s+end)\\s+of\\s+(this\\s+)?file\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // convert require() to ES module import
+  {
+    pattern: "\\bconvert\\s+(this\\s+|the\\s+)?require\\(\\)\\s+(call\\s+)?to\\s+(an?\\s+)?(?:es\\s+|esm\\s+)?module\\s+import\\b|\\bchange\\s+(from\\s+)?require\\s+to\\s+import\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // change import style (default ↔ named)
+  {
+    pattern: "\\bchange\\s+(this\\s+|the\\s+)?(default\\s+import|named\\s+import)\\s+to\\s+(a\\s+)?(named|default)\\s+import\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
 
   // Trivial — tool/command output looks like a finished tool result. These
   // appear in panels where the user pastes context for the next prompt;
@@ -536,6 +592,62 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // add a health check endpoint
+  {
+    pattern: "\\badd\\s+(a\\s+)?health\\s+(check|probe)\\s+(endpoint|route|handler)?\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // write a mock / stub for a service or dependency
+  {
+    pattern: "\\bwrite\\s+(a\\s+)?(?:jest\\s+|unit\\s+|test\\s+)?mock\\s+(for|of)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // add a retry mechanism / policy
+  {
+    pattern: "\\badd\\s+(a\\s+)?retry\\s+(mechanism|logic|wrapper|policy|strategy)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // implement a debounce / memoize / throttle utility
+  {
+    pattern: "\\bimplement\\s+(a\\s+)?(debounce|memoize|throttle|deep.?equal|deep.?clone)\\s+(hook|wrapper|function|utility|helper)?\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // create a custom error / exception class
+  {
+    pattern: "\\b(create|implement)\\s+(a\\s+)?custom\\s+(error|exception)\\s+class\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // add environment variable validation
+  {
+    pattern: "\\badd\\s+(environment\\s+variable|env\\s+var(?:iable)?)\\s+validation\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // add CORS configuration/headers/support
+  {
+    pattern: "\\badd\\s+cors\\s+(config(?:uration)?|headers?|support|settings?|allow|middleware)?\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
 
   // Hard — bugs and refactors that need investigation
   {
@@ -722,6 +834,46 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.7,
     source: "builtin",
   },
+  // scheduled job / cron runs more than once (double execution)
+  {
+    pattern: "\\b(cron|scheduled\\s+job|job)\\s+runs?\\s+(twice|multiple\\s+times|more\\s+than\\s+once)\\b|\\bruns?\\s+twice\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // bundle / artifact size grew (performance regression, different dimension)
+  {
+    pattern: "\\b(bundle|build|artifact|output)\\s+(?:size\\s+)?(?:is\\s+)?(?:\\d+[xX]\\s+)?(larger|bigger|grew|ballooned)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // cache hit rate dropped / fell unexpectedly
+  {
+    pattern: "\\b(cache\\s+hit\\s+rate|hit\\s+rate|cache\\s+(?:miss|misses))\\s+(dropped?|fell|decreased|went|went\\s+down|from\\s+\\d+%\\s+to)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // occasional / sporadic duplicate records (write-path bug, hard to reproduce)
+  {
+    pattern: "\\b(occasionally?\\s+produces?|sporadic(?:ally)?|duplicate)\\s+(records?|writes?|inserts?|entries|rows?)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // auth token rejected before its expiry time (clock skew or invalidation bug)
+  {
+    pattern: "\\b(tokens?|jwts?)\\s+(are\\s+being\\s+|being\\s+)?rejected\\s+(as\\s+)?expired\\b|\\bexpired\\s+before\\s+(the\\s+)?expir(?:y|ation)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
 
   // Reasoning — design / compare / evaluate
   {
@@ -815,7 +967,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(oom-killed|cascading failure|stale content|consensus|exfil|breach|security breach|corrupt(?:ed)? data|missed a \\d+(?:-hour|-day) outage|byzantine fault)\\b",
+      "\\b(oom-?killed|oomkilled|cascading failure|stale content|consensus|exfil|breach|security breach|corrupt(?:ed)? data|missed a \\d+(?:-hour|-day) outage|byzantine fault)\\b",
     flags: "i",
     class: "max",
     confidence: 0.85,
@@ -880,7 +1032,55 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // Max — GDPR/compliance data deletion failures or unauthorized data access
   {
-    pattern: "\\b(gdpr|ccpa|data\\s+subject)\\s+(data\\s+)?(deletion|erasure|request|rights?)\\s+(not\\s+|failing|broken|incorrect)\\b|\\busers?\\s+can\\s+access\\s+each\\s+other[''']?s\\s+data\\b",
+    pattern: "\\b(gdpr|ccpa)\\b.{0,80}\\b(deletion|erasure)\\b.{0,80}\\b(not|fail|broken|incorrect)\\b|\\busers?\\s+can\\s+access\\s+each\\s+other[''']?s\\s+data\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — "logs attached" / "here are the traces" — active incident with evidence attached
+  {
+    pattern: "\\blogs?\\s+attached\\b|\\bhere\\s+(are|is)\\s+the\\s+(traces?|distributed\\s+traces?|stack\\s+traces?|errors?\\s+and|error\\s+rate)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — no error log(s) at all (variation of "no error in logs")
+  {
+    pattern: "\\bno\\s+error\\s+logs?\\b|\\bno\\s+errors?\\s+(were\\s+)?logged\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — compromised service account / leaked credentials
+  {
+    pattern: "\\b(compromised\\s+(?:service\\s+)?account|leaked\\s+(?:credentials?|api\\s+key|access\\s+token|secret)|service\\s+account\\s+(?:was\\s+|has\\s+been\\s+|is\\s+)?compromised)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — race condition in financial/billing context (money at stake)
+  {
+    pattern: "\\brace\\s+condition\\b.{0,80}\\b(billing|payment|charge|financial|order|transaction|money|invoice)\\b|\\b(billing|payment|charge|financial|order|transaction).{0,80}\\brace\\s+condition\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Max — irreversible high-stakes operation (data migration, no rollback)
+  {
+    pattern: "\\b(irreversible\\s+(?:decision|action|migration|operation)|can[''']?t\\s+rollback|cannot\\s+roll\\s*back)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Max — double/overcharging customers (financial correctness critical)
+  {
+    pattern: "\\b(double-?charg(?:ing|ed)|over-?charg(?:ing|ed)|incorrect(?:ly)?\\s+charg(?:ing|ed))\\b",
     flags: "i",
     class: "max",
     confidence: 0.9,

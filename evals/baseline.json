@@ -1,7 +1,61 @@
 {
-  "accuracy": 0.7278,
-  "correct": 238,
   "total": 327,
-  "timestamp": "2026-05-22T18:00:00Z",
-  "note": "Baseline reset after eval set expanded from 137 to 327 prompts. Heuristic v2 with 40+ new patterns."
+  "correct": 266,
+  "accuracy": 0.8135,
+  "perClass": {
+    "trivial": {
+      "total": 64,
+      "correct": 48,
+      "accuracy": 0.75
+    },
+    "simple": {
+      "total": 57,
+      "correct": 44,
+      "accuracy": 0.7719
+    },
+    "standard": {
+      "total": 63,
+      "correct": 53,
+      "accuracy": 0.8413
+    },
+    "hard": {
+      "total": 54,
+      "correct": 43,
+      "accuracy": 0.7963
+    },
+    "reasoning": {
+      "total": 51,
+      "correct": 46,
+      "accuracy": 0.902
+    },
+    "max": {
+      "total": 38,
+      "correct": 32,
+      "accuracy": 0.8421
+    }
+  },
+  "confusion": {
+    "trivial>trivial": 48,
+    "simple>simple": 44,
+    "simple>trivial": 3,
+    "standard>simple": 8,
+    "standard>standard": 53,
+    "hard>hard": 43,
+    "reasoning>reasoning": 46,
+    "max>max": 32,
+    "max>standard": 1,
+    "reasoning>standard": 4,
+    "reasoning>trivial": 1,
+    "trivial>simple": 8,
+    "trivial>standard": 7,
+    "simple>standard": 10,
+    "hard>standard": 11,
+    "max>hard": 5,
+    "standard>hard": 2,
+    "trivial>hard": 1
+  },
+  "latencyMs": {
+    "p50": 0,
+    "p95": 0
+  }
 }

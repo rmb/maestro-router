@@ -134,11 +134,11 @@
 {"prompt": "convert this object to JSON", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "add a return type annotation to this function", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "format this TypeScript file with prettier", "expectedClass": "trivial", "source": "generated"}
-{"prompt": "remove this unused import", "expectedClass": "simple", "source": "generated"}
+{"prompt": "remove this unused import", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "update the copyright year in this file", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "add an empty line between these two functions", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "capitalize the first letter of this variable name", "expectedClass": "trivial", "source": "generated"}
-{"prompt": "add a TODO comment here", "expectedClass": "simple", "source": "generated"}
+{"prompt": "add a TODO comment here", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "bump the patch version in package.json", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "add readonly to this property", "expectedClass": "trivial", "source": "generated"}
 {"prompt": "fix the typo in this error message", "expectedClass": "trivial", "source": "generated"}

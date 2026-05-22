@@ -363,3 +363,215 @@ describe("runSdkProxy — multi-turn + slash commands", () => {
     expect(fwd.type).toBe("user");
   });
 });
+
+describe("runSdkProxy — tool_result routing via toolUseMap", () => {
+  test("reads tool name from assistant stdout frame and injects set_model for subsequent tool_result", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    // Pipeline: Read → trivial (haiku), anything else → standard (sonnet).
+    const pipeline: Pipeline = {
+      route: async (req) => {
+        const tool = req.metadata?.resolvedToolName;
+        return decisionFor(tool === "Read" ? "trivial" : "standard");
+      },
+    };
+
+    // Sequence: assistant emits tool_use(Read), then host sends tool_result.
+    const assistantLine =
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"path":"index.ts"}}]}}';
+    const toolResultLine =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"file contents"}]}}';
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([toolResultLine + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Emit the assistant frame from child stdout BEFORE the tool_result arrives.
+    // In real usage the child processes the tool_use and we get the result on stdin.
+    // In tests we emit on child stdout before closing.
+    fc.emit(assistantLine);
+    fc.close(0);
+    await proxyP;
+
+    // The proxy should have injected set_model (haiku) then the tool_result frame.
+    expect(fc.stdinWrites).toHaveLength(2);
+    const setModel = JSON.parse(fc.stdinWrites[0]!.trim()) as {
+      type: string;
+      request: { subtype: string; model: string };
+    };
+    expect(setModel.type).toBe("control_request");
+    expect(setModel.request.subtype).toBe("set_model");
+    expect(setModel.request.model).toBe(balancedProfile.classes.trivial.model); // haiku
+
+    const forwarded = JSON.parse(fc.stdinWrites[1]!.trim()) as { type: string };
+    expect(forwarded.type).toBe("user");
+  });
+
+  test("tool_result with unknown tool_use_id falls back to pipeline without metadata", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const routeCalls: Array<import("../core/types.js").Request> = [];
+    const pipeline: Pipeline = {
+      route: async (req) => {
+        routeCalls.push(req);
+        return decisionFor("standard");
+      },
+    };
+
+    // tool_result referencing an id that never appeared in assistant stdout.
+    const toolResultLine =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"unknown-id","content":"data"}]}}';
+
+    setTimeout(() => fc.close(0), 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([toolResultLine + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Pipeline must have been called with no resolvedToolName.
+    expect(routeCalls).toHaveLength(1);
+    expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
+
+    // set_model + tool_result frame forwarded.
+    expect(fc.stdinWrites).toHaveLength(2);
+  });
+
+  test("toolUseMap evicts oldest entry when size exceeds 50", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const routeCalls: Array<import("../core/types.js").Request> = [];
+    const pipeline: Pipeline = {
+      route: async (req) => {
+        routeCalls.push(req);
+        return decisionFor("standard");
+      },
+    };
+
+    // Emit 51 assistant frames, each with a different tool_use id.
+    // The first one ("toolu_00") should be evicted before we send its tool_result.
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([
+        '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_00","content":"data"}]}}\n',
+      ]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Emit 51 assistant frames with unique ids; toolu_00 through toolu_50.
+    for (let i = 0; i <= 50; i++) {
+      fc.emit(
+        `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_${i.toString().padStart(2,"0")}","name":"Read","input":{}}]}}`,
+      );
+    }
+    fc.close(0);
+    await proxyP;
+
+    // toolu_00 was evicted; pipeline receives no resolvedToolName.
+    expect(routeCalls).toHaveLength(1);
+    expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
+  });
+
+  test("tool_result logging records a decision event", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const assistantLine =
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Grep","input":{}}]}}';
+    const toolResultLine =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"12 matches"}]}}';
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("trivial"),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([toolResultLine + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    fc.emit(assistantLine);
+    fc.close(0);
+    await proxyP;
+
+    expect(tel.events).toHaveLength(1);
+    expect(tel.events[0]!.type).toBe("decision");
+  });
+
+  test("non-tool-result user message is not affected by toolUseMap logic", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const routeCalls: Array<import("../core/types.js").Request> = [];
+    const pipeline: Pipeline = {
+      route: async (req) => {
+        routeCalls.push(req);
+        return decisionFor("standard");
+      },
+    };
+
+    const userLine =
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"explain this"}]}}';
+
+    setTimeout(() => fc.close(0), 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([userLine + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Normal user-text path: prompt passed, no resolvedToolName.
+    expect(routeCalls).toHaveLength(1);
+    expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
+    expect(routeCalls[0]!.prompt).toBe("explain this");
+  });
+});

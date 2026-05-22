@@ -29,7 +29,7 @@ const ERROR_INDICATORS: ReadonlyArray<RegExp> = [
   /\b(test (?:failed|failing)|build failed|assertion(?:error)?:|panic:|fatal:)/i,
 ];
 
-const STRUCTURED_OUTPUT_TOOLS = new Set(["Read", "Grep", "LS", "Glob"]);
+const STRUCTURED_OUTPUT_TOOLS = new Set(["Read", "Grep", "LS", "Glob", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
 export type DetectedTurnType =
   | "user_prompt"

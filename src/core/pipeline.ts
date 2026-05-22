@@ -15,7 +15,7 @@ import type {
   Request,
 } from "./types.js";
 
-const SHORT_CIRCUIT_THRESHOLD = 0.6;
+const SHORT_CIRCUIT_THRESHOLD = 0.55;
 /**
  * Confidence above which the classifier's predicted class is trusted as-is.
  * Between SHORT_CIRCUIT and HIGH thresholds, the class is upgraded one tier

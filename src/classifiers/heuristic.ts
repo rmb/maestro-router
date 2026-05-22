@@ -13,7 +13,8 @@ import type {
   Request,
 } from "../core/types.js";
 
-const SIZE_THRESHOLD = 50_000;
+const SIZE_THRESHOLD_LARGE = 50_000;
+const SIZE_THRESHOLD_MEDIUM = 15_000;
 
 /**
  * Built-in patterns. Ordering matters for ties; the engine picks highest
@@ -40,6 +41,15 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 1.0,
     source: "builtin",
     bareSafe: true,
+  },
+  // Git write operations: mechanical commands, no model reasoning needed.
+  // Not bareSafe (side-effectful) but unambiguously trivial.
+  {
+    pattern: "^\\s*git\\s+(add|commit|push|pull|stash|fetch|checkout|tag|restore)\\b(?:\\s+[^|&;`$\\n]*)?\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
   },
   {
     pattern: "^\\s*(rename|format|lint)\\s+\\S+(?:\\s+\\S+)?\\s*$",
@@ -103,6 +113,38 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.7,
     source: "builtin",
   },
+  // Trivial — bump version (single field in package.json / pyproject.toml)
+  {
+    pattern: "\\b(bump|update|set)\\s+(the\\s+)?(package\\s+)?version\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Trivial — add to .gitignore
+  {
+    pattern: "\\b(add|append).+\\.?gitignore\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Trivial — add to exports/barrel/index (one-liner re-export)
+  {
+    pattern: "\\b(re-?export|add|include)\\s+.+\\b(to\\s+(the\\s+)?(index|exports?|barrel)|re-?export)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Trivial — move/relocate a file (mechanical path change)
+  {
+    pattern: "\\b(move|relocate)\\s+(this\\s+|the\\s+)?(file|module|component)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.75,
+    source: "builtin",
+  },
 
   // Simple
   {
@@ -135,6 +177,46 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   {
     pattern:
       "\\badd\\s+(a |an |the )?new\\s+(entry|value|item|option|case)\\s+to\\s+(the\\s+)?(enum|list|array|map|switch|select|dropdown)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — write a unit/integration test for a specific function/component
+  {
+    pattern: "\\b(write|add|create)\\s+(a\\s+)?(unit\\s+|integration\\s+|e2e\\s+)?tests?\\s+(for|to|covering)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add error handling / null checks / guard clauses
+  {
+    pattern: "\\b(add|implement|include)\\s+(proper\\s+)?(error\\s+handling|null\\s+(check|guard)|guard\\s+clause|input\\s+validation)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — remove unused code/imports (scoped, single-pass cleanup)
+  {
+    pattern: "\\b(remove|delete|clean\\s+up)\\s+(unused|dead|orphaned)\\s+(import|variable|code|export|param|function|class|dep)s?\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add type annotations (TypeScript/Python type pass)
+  {
+    pattern: "\\b(add|annotate\\s+with|apply)\\s+(type\\s+annotations?|types)\\s+to\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — extract a function/method/component (local refactor, single spot)
+  {
+    pattern: "\\bextract\\s+(this|it)?\\s*(into\\s+)?(a\\s+)?(function|method|component|helper|util|hook)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -197,6 +279,31 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     source: "builtin",
   },
 
+  // Hard — failing tests or CI (requires investigation, not just a re-run)
+  {
+    pattern: "\\b(tests?|test\\s+suite|specs?|CI|build|pipeline)\\s+(is\\s+|are\\s+)?(failing|broken|red|not\\s+passing)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — "why does/is/are X not work/fail/crash" debugging question
+  {
+    pattern: "\\bwhy\\s+(does|is|are|did|do|would)\\b.+\\b(not\\s+work|fail|break|crash|throw|hang|return\\s+null|return\\s+undefined)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — explicit request for debugging help
+  {
+    pattern: "\\b(help\\s+me\\s+debug|debug\\s+this|can[''']?t\\s+figure\\s+out\\s+why|can[''']?t\\s+understand\\s+why)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+
   // Reasoning — design / compare / evaluate
   {
     pattern:
@@ -208,10 +315,26 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(should we|compare|evaluate|what['’]?s the best|how should we|design (our|a|the))\\b",
+      "\\b(should we|compare|evaluate|what[‘’]?s the best|how should we|design (our|a|the))\\b",
     flags: "i",
     class: "reasoning",
     confidence: 0.75,
+    source: "builtin",
+  },
+  // Reasoning — trade-off analysis
+  {
+    pattern: "\\b(pros\\s+and\\s+cons|trade-?offs?|what\\s+are\\s+the\\s+(advantages|disadvantages|benefits|drawbacks))\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Reasoning — best approach/practice/way for/to
+  {
+    pattern: "\\bbest\\s+(approach|practice|way|strategy|pattern)\\s+(for|to)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.8,
     source: "builtin",
   },
 

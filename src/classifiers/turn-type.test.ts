@@ -132,7 +132,7 @@ describe("turnTypeClassifier", () => {
     expect(result?.class).toBe("trivial");
   });
 
-  test("tool_result with prior Edit tool → simple (not structured-output)", async () => {
+  test("tool_result with prior Edit tool → trivial (write tools are structured-output)", async () => {
     const messages: Message[] = [
       { role: "user", content: "edit it" },
       {
@@ -142,7 +142,20 @@ describe("turnTypeClassifier", () => {
       { role: "tool", content: "edit applied" },
     ];
     const result = await call({ prompt: "edit applied", messages });
-    expect(result?.class).toBe("simple");
+    expect(result?.class).toBe("trivial");
+  });
+
+  test("tool_result with prior Write tool → trivial", async () => {
+    const messages: Message[] = [
+      { role: "user", content: "write it" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "x", name: "Write", input: {} }],
+      },
+      { role: "tool", content: "file written" },
+    ];
+    const result = await call({ prompt: "file written", messages });
+    expect(result?.class).toBe("trivial");
   });
 
   test("error_recovery → hard confidence 0.7", async () => {

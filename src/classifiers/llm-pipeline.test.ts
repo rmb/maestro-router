@@ -77,7 +77,7 @@ describe("pipeline with LLM classifier", () => {
     // This prompt has no override, no error/tool turn type, no regex hit.
     // It SHOULD fall through to the LLM.
     const decision = await p.route({
-      prompt: "describe the trade-offs of message queues with at-least-once delivery",
+      prompt: "outline the failure modes of two-phase commit across shard boundaries",
     });
     expect(count()).toBe(1);
     expect(decision.class).toBe("reasoning");
@@ -98,7 +98,7 @@ describe("pipeline with LLM classifier", () => {
       profile: balancedProfile,
     });
     const decision = await p.route({
-      prompt: "describe the trade-offs of message queues with at-least-once delivery",
+      prompt: "outline the failure modes of two-phase commit across shard boundaries",
     });
     expect(count()).toBe(0);
     // Falls through to default class

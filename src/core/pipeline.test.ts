@@ -95,12 +95,12 @@ describe("createPipeline", () => {
     const p = createPipeline({
       classifiers: [
         fixed("a", { class: "standard", confidence: 0.5 }, 1.0),
-        fixed("b", { class: "hard", confidence: 0.55 }, 0.5),
+        fixed("b", { class: "hard", confidence: 0.5 }, 0.5),
       ],
       profile: balancedProfile,
     });
     // a: 1.0 * 0.5 = 0.5 (standard)
-    // b: 0.5 * 0.55 = 0.275 (hard)
+    // b: 0.5 * 0.5 = 0.25 (hard)
     // standard wins
     const d = await p.route(req("hi"));
     expect(d.class).toBe("standard");

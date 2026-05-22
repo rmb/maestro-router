@@ -39,10 +39,16 @@ describe("heuristic classifier — built-in trivial fast-path", () => {
     expect(r.class).toBe("trivial");
   });
 
-  test("'git push origin main' does NOT match fast-path (no push allowed)", async () => {
+  test("'git push origin main' does NOT match fast-path (confidence < 1.0)", async () => {
     const r = (await ask("git push origin main")) as { confidence: number } | null;
-    // either null or non-fast-path match
+    // git push is trivial but not bareSafe (side-effectful), so < 1.0
     expect(r === null || r.confidence < 1.0).toBe(true);
+  });
+
+  test("'git commit -m msg' → trivial (non-bareSafe)", async () => {
+    const r = (await ask("git commit -m 'fix: typo'")) as { class: string; confidence: number } | null;
+    expect(r?.class).toBe("trivial");
+    expect(r?.confidence).toBeLessThan(1.0);
   });
 
   test("'rename foo' → trivial 1.0 fast-path", async () => {
@@ -107,6 +113,56 @@ describe("heuristic classifier — non-fast-path matches", () => {
   test("'memory leak we cannot reproduce locally' → max", async () => {
     const r = (await ask("memory leak we cannot reproduce locally")) as { class: string };
     expect(r.class).toBe("max");
+  });
+
+  test("'bump the version to 1.2.3' → trivial", async () => {
+    const r = (await ask("bump the version to 1.2.3")) as { class: string };
+    expect(r.class).toBe("trivial");
+  });
+
+  test("'add node_modules to .gitignore' → trivial", async () => {
+    const r = (await ask("add node_modules to .gitignore")) as { class: string };
+    expect(r.class).toBe("trivial");
+  });
+
+  test("'write a unit test for parseDate' → simple", async () => {
+    const r = (await ask("write a unit test for parseDate")) as { class: string };
+    expect(r.class).toBe("simple");
+  });
+
+  test("'add error handling to the fetch call' → simple", async () => {
+    const r = (await ask("add error handling to the fetch call")) as { class: string };
+    expect(r.class).toBe("simple");
+  });
+
+  test("'remove unused imports from this file' → simple", async () => {
+    const r = (await ask("remove unused imports from this file")) as { class: string };
+    expect(r.class).toBe("simple");
+  });
+
+  test("'extract this into a helper function' → simple", async () => {
+    const r = (await ask("extract this into a helper function")) as { class: string };
+    expect(r.class).toBe("simple");
+  });
+
+  test("'the tests are failing in CI' → hard", async () => {
+    const r = (await ask("the tests are failing in CI")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
+  test("'why does the fetch call not work in production?' → hard", async () => {
+    const r = (await ask("why does the fetch call not work in production?")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
+  test("'what are the tradeoffs between REST and gRPC?' → reasoning", async () => {
+    const r = (await ask("what are the tradeoffs between REST and gRPC?")) as { class: string };
+    expect(r.class).toBe("reasoning");
+  });
+
+  test("'what is the best approach to cache invalidation?' → reasoning", async () => {
+    const r = (await ask("what is the best approach to cache invalidation?")) as { class: string };
+    expect(r.class).toBe("reasoning");
   });
 
   test("returns null when no rule matches", async () => {

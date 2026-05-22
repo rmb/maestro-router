@@ -315,6 +315,37 @@ describe("runStreamJsonProxy", () => {
     expect(exitCode).toBe(0);
   });
 
+  test("emits synthetic system/init line before reading any user turn (VSCode 60s deadline)", async () => {
+    const tel = mockTelemetry();
+    const out = collector();
+    const stderr = collector();
+    const mockSpawn = vi.fn().mockResolvedValue({ exitCode: 0, cost: null, sessionId: null });
+
+    const stdin = Readable.from([userLine("hi") + "\n"]);
+    await runStreamJsonProxy({
+      realClaude: "node",
+      claudeArgs: ["--input-format", "stream-json"],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawnTurn: mockSpawn,
+    });
+
+    const firstLine = out.buf.split("\n")[0] ?? "";
+    const parsed = JSON.parse(firstLine) as {
+      type: string;
+      subtype: string;
+      _maestro_synthetic: boolean;
+    };
+    expect(parsed.type).toBe("system");
+    expect(parsed.subtype).toBe("init");
+    expect(parsed._maestro_synthetic).toBe(true);
+  });
+
   test("first turn has no --resume, second turn has --resume", async () => {
     const tel = mockTelemetry();
     const out = collector();

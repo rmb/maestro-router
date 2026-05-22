@@ -229,7 +229,15 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
       : heuristicClassifier;
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
-  if (cli.userConfig.useLlmClassifier !== false) classifiers.push(llmClassifier);
+  // Wrapper-hot-path discipline: the LLM stage adds 13-20s of cold-call
+  // latency and ~$0.04 of cache_creation cost per VSCode prompt. With
+  // VSCode's 60s subprocess-init deadline, that's too tight a margin and
+  // caused real timeouts in production. Heuristic + embedding + the
+  // pipeline default-class fallback cover the wrapper case well enough;
+  // the LLM stage stays available for `bench --llm` / `tune` where
+  // accuracy matters more than latency. Opt back in with
+  // useLlmClassifierInWrapper: true.
+  if (cli.userConfig.useLlmClassifierInWrapper === true) classifiers.push(llmClassifier);
   return { pipeline: createPipeline({ classifiers, profile }), profile };
 }
 

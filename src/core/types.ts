@@ -75,8 +75,19 @@ export type UserConfig = {
    * When true (default), use `claude --json-schema` as a final classifier
    * for prompts the cheap classifiers can't handle. Adds ~$0.001 per
    * uncertain prompt on Haiku. Set false to disable entirely (S12).
+   *
+   * NOTE: this flag controls bench/tune workflows. The wrapper's hot path
+   * has its own opt-in via `useLlmClassifierInWrapper` because cold-call
+   * latency (13-20s) plus VSCode's 60s init deadline left no margin.
    */
   useLlmClassifier?: boolean;
+  /**
+   * When true, run the LLM classifier inside the VSCode-panel hot path.
+   * Default false — too costly (cold cache_creation ~\$0.04/call) and
+   * too slow (13-20s) to belong on the wrapper hot path. Opt in only if
+   * accuracy matters more than latency for your workflow.
+   */
+  useLlmClassifierInWrapper?: boolean;
   /**
    * When true (default if `@xenova/transformers` peer is installed), run
    * an in-process ONNX embedding classifier between `heuristic` and `llm`.

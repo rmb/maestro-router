@@ -114,30 +114,34 @@ streaming API protocol, intercepts each `tool_result` turn, and routes the
 continuation to a different model. `claudeProcessWrapper` today wraps a CLI binary,
 not an HTTP server.
 
-### Options considered
+### What was shipped (v0.3)
 
-| Option | Cost | Capability | Verdict |
-|---|---|---|---|
-| Status quo (per-turn routing only) | 0 | Model fixed per turn | Current |
-| Natural-language hints (this spec §1) | Trivial | User can pre-select right model | Ships now |
-| stdio bridge / local API proxy | Large | True per-tool routing | Deferred v0.3 |
+Per-tool routing is **already implemented** — reviewed post-design, the other session
+shipped it before this spec was written. The "stdio bridge" turned out to be
+`sdk-proxy.ts`, which speaks the Claude Code stream-json SDK protocol and was already
+in place.
+
+Three components work together:
+
+1. **`src/classifiers/tool-override.ts`** — `TOOL_CLASS` map at confidence 1.0:
+   `Read/Glob/Grep/LS → trivial`, `Edit/Write/MultiEdit/NotebookEdit/Bash → simple`,
+   `Task/WebFetch/WebSearch → standard`.
+
+2. **`src/wrapper/sdk-proxy.ts`** — on every assistant frame, records
+   `tool_use_id → tool_name` in a bounded map (cap 50). On every `tool_result` frame,
+   resolves the tool name, routes via the full pipeline (tool-override fires at conf=1.0
+   for known tools), injects `set_model` before forwarding the frame to Claude.
+
+3. **`src/cli/wire-compat.ts`** — `toolOverrideClassifier` inserted into the pipeline.
 
 ### Decision
 
-**Defer the stdio bridge to v0.3.** The complexity-vs-savings tradeoff is not yet
-justified: most multi-step sessions are homogeneous in complexity, and the per-turn
-routing already captures the dominant cost signal. The natural-language hint fix
-(§1) closes the most common case where the user signals complexity upfront but
-Maestro misses it.
+**Already accepted.** Per-tool model switching is shipped in v0.3. The sdk-proxy
+architecture is the stdio bridge — no separate component needed.
 
-**Preconditions for v0.3 implementation:**
-
-1. `maestro stats` evidence that per-tool switching would save ≥ 15% on real
-   workloads (currently unmeasured).
-2. An ADR covering the stdio bridge protocol, session continuity across model swaps
-   at the tool boundary, and the latency budget per tool call.
-3. Bench evidence that the `tool-override` classifier accuracy is ≥ 85% on a
-   labelled tool-call dataset.
+Open question for v0.3.x: the `TOOL_CLASS` routing table is static. A future iteration
+could make it configurable per-project via `.maestro/config.json` (C12), but that is
+explicitly deferred.
 
 ### ADR
 

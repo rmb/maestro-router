@@ -101,9 +101,9 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.85,
     source: "builtin",
   },
-  // add readonly modifier to property/field
+  // add readonly modifier to property/field (add/make/mark)
   {
-    pattern: "\\badd\\s+readonly\\s+(to\\b|modifier|keyword)?|\\bmake\\s+(this|the)\\s+(property|field|param|attribute)\\s+readonly\\b",
+    pattern: "\\badd\\s+readonly\\s+(to\\b|modifier|keyword)?|\\b(make|mark)\\s+(this|the)\\s+(property|field|param|attribute)\\s+(as\\s+)?readonly\\b",
     flags: "i",
     class: "trivial",
     confidence: 0.85,
@@ -386,7 +386,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // Simple — add error handling / null checks / guard clauses
   {
-    pattern: "\\b(add|implement|include)\\s+(proper\\s+)?(error\\s+handling|null\\s+(check|guard)|guard\\s+clause|input\\s+validation)\\b",
+    pattern: "\\b(add|implement|include)\\s+(a\\s+|an?\\s+|proper\\s+)?(error\\s+handling|null\\s+(check|guard)|null(?:able)?\\s+(check|guard|assertion)|guard\\s+clause|input\\s+validation|input\\s+sanitization)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -584,12 +584,28 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
-  // move function/method/class to a shared utils/lib file
+  // move function/method/class to a shared utils/lib file (handles "helper function", "validation logic" etc.)
   {
-    pattern: "\\b(move|extract)\\s+(this\\s+|the\\s+)?(function|method|class|helper|utility|util)\\s+(to|into)\\s+(a\\s+)?(shared\\s+)?(utils|lib|helpers?|services?|file|module)\\b",
+    pattern: "\\b(move|extract)\\s+(this\\s+|the\\s+)?(?:\\w+\\s+)?(function|method|class|helper|utility|util|logic|handler|validator)\\s+(to|into)\\s+(a\\s+)?(shared\\s+)?(utils|lib|helpers?|services?|file|module|utility|class)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — PHP class-level scoped changes
+  {
+    pattern: "\\badd\\s+(a\\s+)?php\\s+trait\\b|\\bconvert\\s+(this\\s+)?php\\s+class\\s+to\\s+use\\b|\\bphp\\s+constructor\\s+property\\s+promotion\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add/improve test coverage for a specific module or edge case
+  {
+    pattern: "\\badd\\s+(test\\s+coverage|coverage)\\s+(for|to)\\b|\\b(increase|improve|restore|boost)\\s+(test\\s+coverage|coverage\\s+for)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.7,
     source: "builtin",
   },
   // add a health check endpoint
@@ -651,7 +667,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
 
   // Hard — bugs and refactors that need investigation
   {
-    pattern: "\\b(flaky|race condition|memory leak|deadlock|heisenbug|off-by-one)\\b",
+    pattern: "\\b(flaky|race\\s+conditions?|memory leak|deadlock|heisenbug|off-by-one)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.85,
@@ -674,14 +690,14 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(slow\\w*|timing out|times out|crashes?|crashing|grows? linearly|under load|in CI but)\\b",
+      "\\b(slow\\w*|timing out|times out|crashes?|crashing|grows?\\s+(?:linearly|by\\s+\\d|steadily|over\\s+time)|under load|in CI but|runs?\\s+out\\s+of\\s+memory|out\\s+of\\s+memory)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.7,
     source: "builtin",
   },
   {
-    pattern: "\\bmigrate\\b.+(endpoint|from\\s+\\w|api)",
+    pattern: "\\bmigrate\\b.+(endpoint|api)\\b|\\bmigrate\\s+this\\s+endpoint\\b",
     flags: "i",
     class: "hard",
     confidence: 0.7,
@@ -707,7 +723,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
 
   // Hard — failing tests or CI (requires investigation, not just a re-run)
   {
-    pattern: "\\b(tests?|test\\s+suite|specs?|CI|build|pipeline)\\s+(is\\s+|are\\s+)?(failing|broken|red|not\\s+passing)\\b",
+    pattern: "\\b(tests?|test\\s+suite|specs?|CI|build|pipeline)\\s+(is\\s+|are\\s+)?(all\\s+)?(failing|broken|red|not\\s+passing)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.75,
@@ -777,9 +793,41 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.8,
     source: "builtin",
   },
-  // Hard — auth/session issues (stale tokens, wrong redirect, premature expiry)
+  // Hard — auth/session issues (stale tokens plural/singular, wrong redirect, premature expiry)
   {
-    pattern: "\\b(stale\\s+token|token\\s+stale|sessions?\\s+expire\\s+too\\s+(quickly|fast|soon)|redirect(s|ing)?\\s+to\\s+the\\s+wrong)\\b",
+    pattern: "\\b(stale\\s+tokens?|tokens?\\s+stale|sessions?\\s+expire\\s+too\\s+(quickly|fast|soon)|redirect(s|ing)?\\s+to\\s+the\\s+wrong)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — CI/test fails only on a specific branch/environment (branching bug)
+  {
+    pattern: "\\b(tests?|CI|build|pipeline)\\s+(only\\s+)?fails?\\s+(only\\s+)?(on|in)\\s+(the\\s+)?(main|master|prod|feature|staging)\\s+(branch|environment)?\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — significant performance difference between environments
+  {
+    pattern: "\\b(staging|dev|local|test)\\b.{0,60}\\b(production|prod)\\b.{0,40}\\b(slower?|faster?|different|\\d+x|ms|seconds?|latency|performance)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — test/code coverage regression
+  {
+    pattern: "\\b(test|code)\\s+coverage\\s+(dropped|fell|decreased|went\\s+down|regressed)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — queue worker or job processor misbehavior
+  {
+    pattern: "\\b(queue\\s+worker|job\\s+queue|background\\s+job|job\\s+processor)\\s+.{0,40}(drops?|drops\\s+jobs?|silently|after\\s+processing|stops\\s+processing)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.8,
@@ -908,9 +956,9 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.8,
     source: "builtin",
   },
-  // Reasoning — "what's the right way/approach to handle X" design question
+  // Reasoning — "what's/what is the right way/approach/stack/model to/for X" design question
   {
-    pattern: "\\bwhat[''']?s\\s+the\\s+right\\s+(way|approach|strategy|pattern|method)\\s+(to|for)\\b",
+    pattern: "\\bwhat(?:[''']s|\\s+is)\\s+the\\s+right\\s+(way|approach|strategy|pattern|method|stack|model|tool|technology|architecture|concurrency\\s+model|observability\\s+stack)\\b",
     flags: "i",
     class: "reasoning",
     confidence: 0.8,

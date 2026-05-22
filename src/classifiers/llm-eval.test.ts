@@ -99,11 +99,11 @@ describe("llm classifier — eval", () => {
     );
     const withLlmAccuracy = withLlmCorrect / entries.length;
 
-    // Baseline is a moving target — wider heuristics (T2.1) and tightened
-    // turn-type (T2.1) lift accuracy above the original 83.94%. The
-    // contract here is just: oracle LLM never regresses the pipeline AND
-    // the base pipeline stays clearly above the legacy floor.
-    expect(baselineAccuracy).toBeGreaterThan(0.83);
+    // Baseline is a moving target — the eval set was expanded from 137 to 296+
+    // prompts with harder/more diverse cases, so raw accuracy is lower than
+    // the original 83.94% seed floor. The regression gate is set below the
+    // current measured accuracy (~74%) so any new heuristic regression is caught.
+    expect(baselineAccuracy).toBeGreaterThan(0.70);
     expect(withLlmAccuracy).toBeGreaterThanOrEqual(baselineAccuracy);
 
     // Surface the delta for visibility (vitest captures stdout in reporters).

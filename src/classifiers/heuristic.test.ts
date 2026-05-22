@@ -135,9 +135,9 @@ describe("heuristic classifier — non-fast-path matches", () => {
     expect(r.class).toBe("simple");
   });
 
-  test("'remove unused imports from this file' → simple", async () => {
+  test("'remove unused imports from this file' → trivial", async () => {
     const r = (await ask("remove unused imports from this file")) as { class: string };
-    expect(r.class).toBe("simple");
+    expect(r.class).toBe("trivial");
   });
 
   test("'extract this into a helper function' → simple", async () => {

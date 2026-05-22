@@ -123,6 +123,14 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
   for await (const line of rl) {
     const frame = parseFrame(line);
 
+    // DEBUG: log frame classification to /tmp/maestro-frames.log
+    if (frame !== null && process.env.MAESTRO_DEBUG_FRAMES) {
+      const hasText = isUserTextMessage(frame);
+      const hasTool = isToolResultMessage(frame);
+      const entry = JSON.stringify({ ts: Date.now(), type: frame.type, hasText, hasTool }) + "\n";
+      import("node:fs").then(fs => fs.appendFileSync("/tmp/maestro-frames.log", entry)).catch(() => {});
+    }
+
     if (frame !== null && isUserTextMessage(frame)) {
       const promptText = extractPromptText(frame) ?? "";
       const t0 = Date.now();

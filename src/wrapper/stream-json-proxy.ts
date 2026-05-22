@@ -315,24 +315,6 @@ export async function runStreamJsonProxy(opts: StreamJsonProxyOptions): Promise<
   let isFirstTurn = true;
   let exitCode = 0;
 
-  // Pre-emit a synthetic system/init line so VSCode's 60s subprocess-
-  // initialization deadline is satisfied immediately. The real init from
-  // claude is suppressed in streamClaudeForTurn when isFirstTurn=false,
-  // but for turn 1 the real one comes through unchanged — VSCode sees
-  // ours first, then claude's authoritative one with the real session_id.
-  // Belt-and-suspenders against any slow classification path.
-  stdout.write(
-    JSON.stringify({
-      type: "system",
-      subtype: "init",
-      session_id: sessionId ?? "",
-      cwd: process.cwd(),
-      tools: [],
-      mcp_servers: [],
-      _maestro_synthetic: true,
-    }) + "\n",
-  );
-
   const rl = readline.createInterface({ input: stdin, crlfDelay: Infinity });
   const lines = rl[Symbol.asyncIterator]() as AsyncIterator<string>;
 

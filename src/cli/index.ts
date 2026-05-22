@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerBenchCommand } from "./bench.js";
+import { registerExportPromptsCommand } from "./export-prompts.js";
 import { registerGuideCommand } from "./guide.js";
 import { registerInstallCommandsCommand } from "./install-commands.js";
 import { registerInstallDefaultsCommand } from "./install-defaults.js";
@@ -64,6 +65,7 @@ export async function buildProgram(): Promise<Command> {
   registerStatsCommand(program);
   registerTuneCommand(program);
   registerReplayCommand(program);
+  registerExportPromptsCommand(program);
   registerBenchCommand(program);
   registerInstallVscodeCommand(program);
   registerInstallHookCommand(program);

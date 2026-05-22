@@ -28,6 +28,7 @@ import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier } from "../classifiers/override.js";
+import { toolOverrideClassifier } from "../classifiers/tool-override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { createPipeline } from "../core/pipeline.js";
 import type { Pipeline } from "../core/pipeline.js";
@@ -227,7 +228,7 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
     cli.userHeuristics.length > 0
       ? createHeuristicClassifier({ extraRules: cli.userHeuristics })
       : heuristicClassifier;
-  const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+  const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolOverrideClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
   // Wrapper-hot-path discipline: the LLM stage adds 13-20s of cold-call
   // latency and ~$0.04 of cache_creation cost per VSCode prompt. With

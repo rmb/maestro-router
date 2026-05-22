@@ -123,3 +123,72 @@ describe("stripOverride", () => {
     expect(stripOverride("@OPUS go")).toBe("go");
   });
 });
+
+describe("natural-language think hints", () => {
+  test("'think hard' → max", async () => {
+    expect(await call("think hard if there is a way")).toMatchObject({
+      class: "max",
+      confidence: 1.0,
+    });
+  });
+
+  test("'think harder' → max", async () => {
+    expect(await call("think harder about this")).toMatchObject({ class: "max" });
+  });
+
+  test("'think deeply' → max", async () => {
+    expect(await call("think deeply about the design")).toMatchObject({ class: "max" });
+  });
+
+  test("'think deep' → max", async () => {
+    expect(await call("think deep on this")).toMatchObject({ class: "max" });
+  });
+
+  test("'think carefully' → max", async () => {
+    expect(await call("think carefully before answering")).toMatchObject({ class: "max" });
+  });
+
+  test("'think more carefully' → max", async () => {
+    expect(await call("please think more carefully")).toMatchObject({ class: "max" });
+  });
+
+  test("'think step by step' → max", async () => {
+    expect(await call("think step by step through this problem")).toMatchObject({ class: "max" });
+  });
+
+  test("'think step-by-step' → max", async () => {
+    expect(await call("think step-by-step please")).toMatchObject({ class: "max" });
+  });
+
+  test("case insensitive", async () => {
+    expect(await call("THINK HARD")).toMatchObject({ class: "max" });
+    expect(await call("Think Deeply")).toMatchObject({ class: "max" });
+  });
+
+  test("emits override.nl_think diagnostic", async () => {
+    const result = await call("think hard about this");
+    const codes = result!.diagnostics!.map((d) => d.code);
+    expect(codes).toContain("override.nl_think");
+  });
+
+  test("'I think' does NOT match", async () => {
+    expect(await call("I think this is fine")).toBeNull();
+  });
+
+  test("'rethink' does NOT match", async () => {
+    expect(await call("rethink the approach")).toBeNull();
+  });
+
+  test("'overthink' does NOT match", async () => {
+    expect(await call("don't overthink it")).toBeNull();
+  });
+
+  test("'think' alone does NOT match", async () => {
+    expect(await call("think")).toBeNull();
+  });
+
+  test("natural hint does not block existing @-hint", async () => {
+    // @fast wins — override.ts checks @-hints first
+    expect(await call("@fast think hard")).toMatchObject({ class: "trivial" });
+  });
+});

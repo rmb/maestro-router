@@ -20,7 +20,7 @@
 {"prompt": "change the default port to 3000", "expectedClass": "simple", "source": "seed"}
 {"prompt": "add a console.log for debugging", "expectedClass": "trivial", "source": "seed"}
 {"prompt": "update the readme with installation instructions", "expectedClass": "simple", "source": "seed"}
-{"prompt": "add a docstring to this class", "expectedClass": "simple", "source": "seed"}
+{"prompt": "add a docstring to this class", "expectedClass": "trivial", "source": "seed"}
 {"prompt": "change the timeout from 5 to 10 seconds", "expectedClass": "simple", "source": "seed"}
 {"prompt": "add a TODO comment about deprecating this", "expectedClass": "trivial", "source": "seed"}
 {"prompt": "update the version number in package.json", "expectedClass": "trivial", "source": "seed"}

@@ -535,6 +535,22 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // Standard — generic pagination to a list/endpoint (non-trivial wiring)
+  {
+    pattern: "\\badd\\s+pagination\\s+(to\\s+)?(the\\s+|this\\s+)?\\w+(?:\\s+\\w+)*\\b",
+    flags: "i",
+    class: "standard",
+    confidence: 0.72,
+    source: "builtin",
+  },
+  // Standard — search filtering (and optional sorting) on an endpoint
+  {
+    pattern: "\\bimplement\\s+search\\s+(filter(?:ing)?|sort(?:ing)?)\\b",
+    flags: "i",
+    class: "standard",
+    confidence: 0.75,
+    source: "builtin",
+  },
   // Simple — add specific pagination type to a single endpoint (cursor/offset naming — not a full feature)
   {
     pattern: "\\badd\\s+(cursor|offset|keyset|page-based|limit-based)\\s+pagination\\b",

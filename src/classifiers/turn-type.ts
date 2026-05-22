@@ -25,11 +25,20 @@ const ERROR_INDICATORS: ReadonlyArray<RegExp> = [
   /\b(stack ?trace|traceback)\b/i,
   /\b(typeerror|referenceerror|syntaxerror|runtimeerror|valueerror|keyerror|nullpointerexception)\b/i,
   /\b(econnrefused|enotfound|etimedout|enoent|eacces)\b/i,
-  /\b(doesn['’]?t work|won['’]?t work|broken|broke|not working)\b/i,
+  /\b(doesn['‘’]?t work|won['‘’]?t work|not working)\b/i,
   /\b(test (?:failed|failing)|build failed|assertion(?:error)?:|panic:|fatal:)/i,
 ];
 
 const STRUCTURED_OUTPUT_TOOLS = new Set(["Read", "Grep", "LS", "Glob", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+// Short benign tool outputs that require no reasoning to process
+const TRIVIAL_TOOL_RESULT = [
+  /^(file|directory)\s+(written|created|deleted|moved|updated|copied)\b/i,
+  /^build\s+(output|result|success|passed)\b/i,
+  /^(tool\s+result|glob\s+results?|search\s+results?|grep\s+results?):/i,
+  /^[\w./\-\\]+(\.[\w]+)?\n[\w./\-\\]+(\.[\w]+)?(\n[\w./\-\\]+(\.[\w]+)?)*\s*$/,
+  /^<\w[\w-]*>[^<]{1,120}<\/\w[\w-]*>$/,
+];
 
 export type DetectedTurnType =
   | "user_prompt"
@@ -91,6 +100,7 @@ const classify: ClassifyFn = (req: Request) => {
       const toolName = priorToolName(req.messages);
       if (toolName && STRUCTURED_OUTPUT_TOOLS.has(toolName)) cls = "trivial";
     }
+    if (cls === "simple" && TRIVIAL_TOOL_RESULT.some((re) => re.test(req.prompt))) cls = "trivial";
     return { class: cls, confidence: 0.85, diagnostics } satisfies Classification;
   }
 

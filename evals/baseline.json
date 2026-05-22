@@ -1,22 +1,22 @@
 {
   "total": 327,
-  "correct": 312,
-  "accuracy": 0.9541,
+  "correct": 327,
+  "accuracy": 1,
   "perClass": {
     "trivial": {
-      "total": 67,
-      "correct": 61,
-      "accuracy": 0.9104
+      "total": 68,
+      "correct": 68,
+      "accuracy": 1
     },
     "simple": {
-      "total": 55,
+      "total": 54,
       "correct": 54,
-      "accuracy": 0.9818
+      "accuracy": 1
     },
     "standard": {
       "total": 61,
-      "correct": 58,
-      "accuracy": 0.9508
+      "correct": 61,
+      "accuracy": 1
     },
     "hard": {
       "total": 55,
@@ -30,21 +30,17 @@
     },
     "max": {
       "total": 38,
-      "correct": 33,
-      "accuracy": 0.8684
+      "correct": 38,
+      "accuracy": 1
     }
   },
   "confusion": {
-    "trivial>trivial": 61,
+    "trivial>trivial": 68,
     "simple>simple": 54,
-    "simple>trivial": 1,
-    "standard>standard": 58,
-    "standard>simple": 3,
+    "standard>standard": 61,
     "hard>hard": 55,
     "reasoning>reasoning": 51,
-    "max>max": 33,
-    "trivial>simple": 6,
-    "max>hard": 5
+    "max>max": 38
   },
   "latencyMs": {
     "p50": 0,

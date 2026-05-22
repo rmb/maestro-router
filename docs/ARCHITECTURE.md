@@ -62,6 +62,16 @@ Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003
        │             └──────────┬───────────────┘                     │
        │                        ▼                                     │
        │                ┌────────────────────────────────┐            │
+       │                │ tool-override.ts (v0.3)        │            │
+       │                │  tool_result turns only        │            │
+       │                │  Read/Glob/Grep/LS → trivial   │            │
+       │                │  Edit/Write/Bash → simple      │            │
+       │                │  Task/WebFetch → standard      │            │
+       │                │  conf 1.0; null if unknown     │            │
+       │                └────────────────────────────────┘            │
+       │                              │                               │
+       │                              ▼                               │
+       │                ┌────────────────────────────────┐            │
        │                │ heuristic.ts                   │            │
        │                │  built-in regex + user rules   │            │
        │                │  + size policy + bare_safe     │            │

@@ -84,10 +84,12 @@ const VALID_CLASSES: ReadonlySet<Class> = new Set<Class>([
 ]);
 
 const MAX_INPUT_CHARS = 2000;
-// Cold Claude CLI startup + Haiku response on a fresh session averages
-// 3-5s in real measurements (cache_creation pays ~37k system prompt tokens).
-// 10s is comfortable headroom; the AbortSignal kills it cleanly on user ctrl-c.
-const DEFAULT_TIMEOUT_MS = 10_000;
+// Cold Claude CLI startup + Haiku response averages 3-8s when
+// cache_creation runs. With network jitter we see 10s+ in practice
+// (observed during the T0.7 validation tournament). 20s is comfortable
+// headroom while still bounding the pipeline's overall p95.
+// The AbortSignal kills it cleanly on user ctrl-c.
+const DEFAULT_TIMEOUT_MS = 20_000;
 // Cold-call cost is dominated by cache_creation_input_tokens for Claude
 // Code's default system prompt (~37k tokens → ~$0.045 on Haiku 4.5).
 // $0.01 was unrealistic and produced `error_max_budget_usd` on every

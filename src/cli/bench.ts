@@ -19,6 +19,8 @@ import {
   buildProposedHeuristics,
   DOWNGRADE,
   runTournament,
+  type MatrixCell,
+  type MatrixResult,
   type TournamentInput,
   type TournamentProgress,
   type TournamentReport,
@@ -71,6 +73,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--tournament-resume <path>", "tournament: resume from a partial-result JSONL")
     .option("--confirm-cost", "tournament: required to actually spend money")
     .option("--tournament-output <path>", "tournament: write proposed overrides + heuristics here")
+    .option("--tournament-matrix", "tournament: also test same-model effort-step-down variant per prompt (matrix mode)")
     .option("--update-baseline", "write the new report as the baseline")
     .option("--llm", "include the LLM classifier (costs ~$0.001 per uncertain prompt; default off)")
     .option("--embedding", "include the in-process embedding classifier (requires @xenova/transformers; default off)")
@@ -87,6 +90,7 @@ export function registerBenchCommand(program: Command): void {
         tournamentResume?: string;
         confirmCost?: boolean;
         tournamentOutput?: string;
+        tournamentMatrix?: boolean;
         updateBaseline?: boolean;
         llm?: boolean;
         embedding?: boolean;
@@ -207,7 +211,8 @@ export function registerBenchCommand(program: Command): void {
  * on the high side so users don't get surprised.
  */
 const TOURNAMENT_COST_PER_CALL_ESTIMATE_USD = 0.05;
-const TOURNAMENT_CALLS_PER_ROW = 3;
+const TOURNAMENT_CALLS_PER_ROW_STANDARD = 3;
+const TOURNAMENT_CALLS_PER_ROW_MATRIX = 5; // A + B_tier + judge_tier + B_effort + judge_effort
 const DEFAULT_TOURNAMENT_SAMPLE = 10;
 const DEFAULT_TOURNAMENT_BUDGET_USD = 5;
 
@@ -222,6 +227,7 @@ type TournamentModeArgs = {
     tournamentResume?: string;
     confirmCost?: boolean;
     tournamentOutput?: string;
+    tournamentMatrix?: boolean;
   };
   parent: ParentOptions;
 };
@@ -235,13 +241,17 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
     const raw = parseFloat(args.cmdOpts.tournamentBudget ?? "");
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TOURNAMENT_BUDGET_USD;
   })();
+  const callsPerRow = args.cmdOpts.tournamentMatrix === true
+    ? TOURNAMENT_CALLS_PER_ROW_MATRIX
+    : TOURNAMENT_CALLS_PER_ROW_STANDARD;
   const estimatedCost =
-    sample * TOURNAMENT_CALLS_PER_ROW * TOURNAMENT_COST_PER_CALL_ESTIMATE_USD;
+    sample * callsPerRow * TOURNAMENT_COST_PER_CALL_ESTIMATE_USD;
 
   if (!args.cmdOpts.confirmCost) {
     if (!args.parent.quiet) {
+      const modeLabel = args.cmdOpts.tournamentMatrix === true ? " [matrix mode]" : "";
       process.stdout.write(
-        `Tournament estimate: ${sample} prompts × ${TOURNAMENT_CALLS_PER_ROW} calls = ${sample * TOURNAMENT_CALLS_PER_ROW} claude invocations\n`,
+        `Tournament estimate${modeLabel}: ${sample} prompts × ${callsPerRow} calls = ${sample * callsPerRow} claude invocations\n`,
       );
       process.stdout.write(
         `Estimated cost: ~$${estimatedCost.toFixed(2)} (conservative @ $${TOURNAMENT_COST_PER_CALL_ESTIMATE_USD.toFixed(2)}/call). Hard cap: $${budget.toFixed(2)}.\n`,
@@ -293,8 +303,11 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
   }
 
   if (!args.parent.quiet) {
+    const callDesc = args.cmdOpts.tournamentMatrix === true
+      ? `${inputs.length} prompts × 5 calls (A + B + judge + B_effort + judge_effort) [matrix mode]`
+      : `${inputs.length} prompts × 3 calls (A + B + judge)`;
     process.stderr.write(
-      `\n${bold("Tournament")} ${dim(`${inputs.length} prompts × 3 calls (A + B + judge), cap ${"$" + budget.toFixed(2)}, sequential`)}\n\n`,
+      `\n${bold("Tournament")} ${dim(`${callDesc}, cap ${"$" + budget.toFixed(2)}, sequential`)}\n\n`,
     );
   }
 
@@ -328,6 +341,16 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
           `        ${dim("J")} ${gray(`$${e.costUsd.toFixed(4)}`)}  ${verdictGlyph[e.verdict] ?? e.verdict}  ${dim(`spent $${e.totalSpent.toFixed(4)}`)}\n`,
         );
         break;
+      case "b_effort_done":
+        process.stderr.write(
+          `        ${dim("B~")} ${gray(`$${e.costUsd.toFixed(4)}`)} ${dim(`effort→${e.effortLevel}`)}\n`,
+        );
+        break;
+      case "judge_effort_done":
+        process.stderr.write(
+          `        ${dim("J~")} ${gray(`$${e.costUsd.toFixed(4)}`)}  ${verdictGlyph[e.verdict] ?? e.verdict}  ${dim(`effort→${e.effortLevel}  spent $${e.totalSpent.toFixed(4)}`)}\n`,
+        );
+        break;
       case "skipped":
         process.stderr.write(`        ${yellow("⤬ skip")} ${dim(e.reason)}\n`);
         break;
@@ -347,6 +370,7 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
   const report = await runTournament(inputs, {
     getSpec: (c) => args.profile.classes[c],
     budgetCapUsd: budget,
+    matrix: args.cmdOpts.tournamentMatrix === true,
     ...(args.parent.quiet ? {} : { onProgress }),
     ...(resumePath !== undefined ? { resumePath } : {}),
   });
@@ -358,9 +382,27 @@ async function runTournamentMode(args: TournamentModeArgs): Promise<void> {
   }
 
   if (args.cmdOpts.tournamentOutput) {
+    const effortReductions = report.matrixResults.flatMap((mr: MatrixResult) =>
+      mr.cells
+        .filter((cell: MatrixCell) => {
+          const total = cell.wins + cell.ties + cell.losses + cell.failed;
+          return total > 0 && (cell.wins + cell.ties) > cell.losses;
+        })
+        .map((cell: MatrixCell) => ({
+          class: mr.class,
+          currentEffort: mr.currentEffort,
+          reducedEffort: cell.effort,
+          winRate: Number(
+            ((cell.wins + cell.ties) / (cell.wins + cell.ties + cell.losses + cell.failed)).toFixed(4),
+          ),
+          sampleCount: cell.wins + cell.ties + cell.losses + cell.failed,
+        })),
+    );
+
     const proposal = {
       overrides: {} as ProfileOverride,
       heuristics: buildProposedHeuristics(report.recommendedDowngrades),
+      ...(report.matrixResults.length > 0 ? { effortReductions } : {}),
     };
     await writeFile(
       resolve(args.cmdOpts.tournamentOutput),
@@ -415,6 +457,27 @@ function renderTournamentHuman(report: TournamentReport): string {
       );
     }
   }
+  // Matrix section
+  if (report.matrixResults.length > 0) {
+    lines.push("");
+    lines.push(dim("  effort matrix (same model, lower effort)"));
+    lines.push(dim("  class            effort-step    wins  ties  losses  failed"));
+    for (const mr of report.matrixResults) {
+      for (const cell of mr.cells) {
+        const total = cell.wins + cell.ties + cell.losses + cell.failed;
+        const recommend = total > 0 && (cell.wins + cell.ties) > cell.losses;
+        const ratio = total > 0 ? (cell.wins + cell.ties) / total : 0;
+        const verdict = recommend
+          ? accuracyColor(ratio)("✓ reduce effort")
+          : gray("keep effort");
+        lines.push(
+          `    ${mr.class.padEnd(10)} ${cyan((`${mr.currentEffort}→${cell.effort}`).padEnd(13))} ` +
+          `${String(cell.wins).padStart(4)}  ${String(cell.ties).padStart(4)}  ${String(cell.losses).padStart(6)}  ${String(cell.failed).padStart(6)}  ${verdict}`,
+        );
+      }
+    }
+  }
+
   const skippedBudget = report.rows.filter(
     (r: TournamentRowResult) => r.skipReason === "budget_cap_reached",
   ).length;

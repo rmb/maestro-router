@@ -167,6 +167,12 @@ type ClaudeEnvelope = {
   type?: string;
   subtype?: string;
   result?: unknown;
+  /**
+   * Claude CLI ≥ 2.1.x: when `--json-schema` is supplied, the validated
+   * payload appears here and `result` is left empty. The judge uses
+   * --json-schema; A/B response calls don't.
+   */
+  structured_output?: unknown;
   total_cost_usd?: number;
   is_error?: boolean;
 };
@@ -323,11 +329,14 @@ function extractJudgeVerdict(stdout: string): JudgeExtraction | null {
   if (env.is_error === true) return null;
   if (env.type !== "result") return null;
 
+  // Claude CLI ≥ 2.1.x routes --json-schema output to structured_output;
+  // result is left empty. Prefer structured_output, fall back to result.
+  const payload = env.structured_output ?? env.result;
   const inner =
-    typeof env.result === "string"
-      ? extractJSON<JudgePayload>(env.result)
-      : typeof env.result === "object" && env.result !== null
-        ? (env.result as JudgePayload)
+    typeof payload === "string"
+      ? extractJSON<JudgePayload>(payload)
+      : typeof payload === "object" && payload !== null
+        ? (payload as JudgePayload)
         : null;
   if (!inner) return null;
 

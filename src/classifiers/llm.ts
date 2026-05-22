@@ -198,6 +198,12 @@ type LLMResultEnvelope = {
   type?: string;
   subtype?: string;
   result?: unknown;
+  /**
+   * Claude CLI ≥ 2.1.x: when `--json-schema` is supplied, the validated
+   * payload appears here and `result` is left empty. Prefer this when
+   * present.
+   */
+  structured_output?: unknown;
   is_error?: boolean;
 };
 
@@ -312,11 +318,14 @@ export function createLLMClassifier(opts: LLMClassifierOptions = {}): Classifier
       );
     }
 
+    // Prefer structured_output (Claude CLI ≥ 2.1.x with --json-schema),
+    // fall back to result for older CLI versions.
+    const payload = envelope.structured_output ?? envelope.result;
     const inner =
-      typeof envelope.result === "string"
-        ? extractJSON<LLMClassifierPayload>(envelope.result)
-        : typeof envelope.result === "object" && envelope.result !== null
-          ? (envelope.result as LLMClassifierPayload)
+      typeof payload === "string"
+        ? extractJSON<LLMClassifierPayload>(payload)
+        : typeof payload === "object" && payload !== null
+          ? (payload as LLMClassifierPayload)
           : null;
 
     if (!inner || typeof inner !== "object") {

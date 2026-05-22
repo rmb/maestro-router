@@ -42,6 +42,25 @@ function judgeEnvelope(winner: "A" | "B" | "tie", reason = "ok", costUsd = 0.02)
   return envelope({ winner, reason }, costUsd);
 }
 
+/**
+ * Claude CLI ≥ 2.1.x envelope shape: --json-schema output goes in
+ * `structured_output`, leaving `result` empty. Mirrors the shape we
+ * observed in production tournament runs (commit f9d3474).
+ */
+function judgeEnvelopeStructuredOutput(
+  winner: "A" | "B" | "tie",
+  reason = "ok",
+  costUsd = 0.02,
+): string {
+  return JSON.stringify({
+    type: "result",
+    subtype: "success",
+    total_cost_usd: costUsd,
+    result: "",
+    structured_output: { winner, reason },
+  });
+}
+
 function ok(stdout: string): TournamentSpawnResult {
   return { stdout, exitCode: 0, timedOut: false };
 }
@@ -143,6 +162,25 @@ describe("runTournament — verdicts", () => {
     );
     const row = report.rows[0]!;
     expect(row.judgeVerdict).toBe("tie");
+    expect(row.recommendDowngrade).toBe(true);
+  });
+
+  test("structured_output payload (CLI ≥ 2.1.x) is read correctly", async () => {
+    // Regression: real-money tournament run on 2026-05-22 produced
+    // judge_failed on every row because Claude CLI now routes
+    // --json-schema results to `structured_output` instead of `result`.
+    const spawn = makeMockSpawn([
+      ok(envelope("response A")),
+      ok(envelope("response B")),
+      ok(judgeEnvelopeStructuredOutput("B", "downgrade safe")),
+    ]);
+    const report = await runTournament(
+      [{ prompt: "add a comment", currentClass: "simple", currentSpec: getSpec("simple") }],
+      { spawn, getSpec },
+    );
+    const row = report.rows[0]!;
+    expect(row.judgeVerdict).toBe("B_wins");
+    expect(row.judgeReason).toBe("downgrade safe");
     expect(row.recommendDowngrade).toBe(true);
   });
 });

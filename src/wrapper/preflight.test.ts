@@ -175,3 +175,49 @@ describe("preflight", () => {
     expect(r.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
+
+describe("preflight — fastModeAvailable detection", () => {
+  test("fastModeAvailable is true when --fast-mode appears in --help output", () => {
+    const spawn: SpawnLike = (_cmd, args) => {
+      if (args[0] === "--version") return { status: 0, stdout: "2.1.112\n" };
+      if (args[0] === "--help") {
+        return {
+          status: 0,
+          stdout: [
+            "--print",
+            "--model",
+            "--effort",
+            "--max-budget-usd",
+            "--session-id",
+            "--resume",
+            "--output-format",
+            "--bare",
+            "--exclude-dynamic-system-prompt-sections",
+            "--tools",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "--fast-mode",
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "auth") {
+        return { status: 0, stdout: JSON.stringify({ authMethod: "claude.ai" }) };
+      }
+      return { status: 0, stdout: "" };
+    };
+    const result = preflight({ spawn });
+    expect(result.fastModeAvailable).toBe(true);
+  });
+
+  test("fastModeAvailable is false when --fast-mode is absent from --help output", () => {
+    const result = preflight({ spawn: okSpawn });
+    expect(result.fastModeAvailable).toBe(false);
+  });
+
+  test("fastModeAvailable is false when binary is missing (ok=false path)", () => {
+    const fail: SpawnLike = () => ({ status: 1, stdout: "", error: new Error("not found") });
+    const result = preflight({ binary: "no-claude", spawn: fail });
+    expect(result.ok).toBe(false);
+    expect(result.fastModeAvailable).toBe(false);
+  });
+});

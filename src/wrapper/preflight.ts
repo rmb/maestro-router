@@ -36,6 +36,13 @@ export type PreflightResult = {
    * true only when auth is via ANTHROPIC_API_KEY.
    */
   bareSupported: boolean;
+  /**
+   * Whether the Claude CLI `--help` output advertises `--fast-mode`.
+   * Populated during flag-verification; false on any early-return path.
+   * Used by the fast-mode spike (scripts/fast-mode-spike.ts) and, if the
+   * spike confirms cost savings, by a future production integration.
+   */
+  fastModeAvailable?: boolean;
   reason?: string;
 };
 
@@ -77,6 +84,7 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       missingFlags: [],
       authMethod: "",
       bareSupported: false,
+      fastModeAvailable: false,
       reason: `Claude CLI not found at '${binary}'. Install: https://docs.claude.com`,
     };
   }
@@ -89,6 +97,7 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       missingFlags: [],
       authMethod: "",
       bareSupported: false,
+      fastModeAvailable: false,
       reason: `Could not parse Claude CLI version from '${versionRes.stdout.trim()}'`,
     };
   }
@@ -100,6 +109,7 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       missingFlags: [],
       authMethod: "",
       bareSupported: false,
+      fastModeAvailable: false,
       reason: `Claude CLI ${version} is below the required minimum ${MIN_VERSION}. Run \`claude install\` to upgrade.`,
     };
   }
@@ -113,10 +123,12 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       missingFlags: [],
       authMethod: "",
       bareSupported: false,
+      fastModeAvailable: false,
       reason: "Could not retrieve Claude CLI --help output to verify flags",
     };
   }
   const missing = REQUIRED_FLAGS.filter((flag) => !helpRes.stdout.includes(flag));
+  const fastModeAvailable = helpRes.stdout.includes("--fast-mode");
   if (missing.length > 0) {
     return {
       ok: false,
@@ -125,6 +137,7 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
       missingFlags: missing,
       authMethod: "",
       bareSupported: false,
+      fastModeAvailable: false,
       reason: `Required flags not exposed by this Claude CLI: ${missing.join(", ")}. Run \`claude install\` to upgrade.`,
     };
   }
@@ -140,6 +153,7 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
     missingFlags: [],
     authMethod: auth.method,
     bareSupported: auth.bareSupported,
+    fastModeAvailable,
   };
 }
 

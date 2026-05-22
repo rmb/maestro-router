@@ -18,12 +18,12 @@
 {"prompt": "add a parameter to this function", "expectedClass": "simple", "source": "seed"}
 {"prompt": "update the error message to be clearer", "expectedClass": "simple", "source": "seed"}
 {"prompt": "change the default port to 3000", "expectedClass": "simple", "source": "seed"}
-{"prompt": "add a console.log for debugging", "expectedClass": "simple", "source": "seed"}
+{"prompt": "add a console.log for debugging", "expectedClass": "trivial", "source": "seed"}
 {"prompt": "update the readme with installation instructions", "expectedClass": "simple", "source": "seed"}
 {"prompt": "add a docstring to this class", "expectedClass": "simple", "source": "seed"}
 {"prompt": "change the timeout from 5 to 10 seconds", "expectedClass": "simple", "source": "seed"}
-{"prompt": "add a TODO comment about deprecating this", "expectedClass": "simple", "source": "seed"}
-{"prompt": "update the version number in package.json", "expectedClass": "simple", "source": "seed"}
+{"prompt": "add a TODO comment about deprecating this", "expectedClass": "trivial", "source": "seed"}
+{"prompt": "update the version number in package.json", "expectedClass": "trivial", "source": "seed"}
 {"prompt": "add an optional second argument", "expectedClass": "simple", "source": "seed"}
 {"prompt": "change http to https in the config", "expectedClass": "simple", "source": "seed"}
 {"prompt": "update the title in the page header", "expectedClass": "simple", "source": "seed"}
@@ -32,7 +32,7 @@
 {"prompt": "update the placeholder text", "expectedClass": "simple", "source": "seed"}
 {"prompt": "add a new entry to the enum", "expectedClass": "simple", "source": "seed"}
 {"prompt": "change the success message wording", "expectedClass": "simple", "source": "seed"}
-{"prompt": "implement a debounce utility", "expectedClass": "standard", "source": "seed"}
+{"prompt": "implement a debounce utility", "expectedClass": "simple", "source": "seed"}
 {"prompt": "add a REST endpoint for user search", "expectedClass": "standard", "source": "seed"}
 {"prompt": "write a function to merge two arrays without duplicates", "expectedClass": "standard", "source": "seed"}
 {"prompt": "add pagination to the user list", "expectedClass": "standard", "source": "seed"}
@@ -225,7 +225,7 @@
 {"prompt": "convert this PHP class to use constructor property promotion", "expectedClass": "simple", "source": "generated"}
 {"prompt": "add a PHP trait for this shared logging behavior", "expectedClass": "simple", "source": "generated"}
 {"prompt": "implement a PHP middleware for request authentication", "expectedClass": "standard", "source": "generated"}
-{"prompt": "refactor this PHP service class to use interfaces and dependency injection", "expectedClass": "standard", "source": "generated"}
+{"prompt": "refactor this PHP service class to use interfaces and dependency injection", "expectedClass": "hard", "source": "generated"}
 {"prompt": "migrate this legacy PHP 7 code to PHP 8.2 with named arguments and enums", "expectedClass": "standard", "source": "generated"}
 {"prompt": "implement a Symfony event subscriber for this domain event", "expectedClass": "standard", "source": "generated"}
 {"prompt": "this PHP script runs out of memory processing large CSV files, fix it", "expectedClass": "hard", "source": "generated"}

@@ -76,12 +76,12 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     bareSafe: true,
   },
 
-  // console.log / debug-logging remove — removing is always trivial
+  // console.log / debug-logging add or remove — always trivial
   {
-    pattern: "\\b(remove|delete|clean\\s+up)\\s+(a\\s+)?(console\\.(log|warn|error|debug)|log\\s+statement|debug\\s+statement|print\\s+statement)\\b",
+    pattern: "\\b(add|insert|remove|delete|clean\\s+up)\\s+(a\\s+|all\\s+)?(console\\.(log|warn|error|debug|trace)|log\\s+statement|debug\\s+statement|print\\s+statement)\\b",
     flags: "i",
     class: "trivial",
-    confidence: 0.8,
+    confidence: 0.85,
     source: "builtin",
   },
   // strip trailing whitespace / blank lines
@@ -184,7 +184,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // convert require() to ES module import
   {
-    pattern: "\\bconvert\\s+(this\\s+|the\\s+)?require\\(\\)\\s+(call\\s+)?to\\s+(an?\\s+)?(?:es\\s+|esm\\s+)?module\\s+import\\b|\\bchange\\s+(from\\s+)?require\\s+to\\s+import\\b",
+    pattern: "\\b(convert|change)\\s+(this\\s+|the\\s+|from\\s+)?require\\(?\\)?\\s*(call\\s+)?to\\s+(an?\\s+)?(?:es\\s+|esm\\s+)?(?:module\\s+)?import\\b|\\bchange\\s+(from\\s+)?require\\s+to\\s+import\\b",
     flags: "i",
     class: "trivial",
     confidence: 0.85,
@@ -239,10 +239,25 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(add|fix|update)\\s+(a |the )?(typo|comment|jsdoc|docstring|semicolon|copyright header|copyright)",
+      "\\b(add|fix|update)\\s+(a |the )?(php\\s+|missing\\s+|jsdoc\\s+)?(typo|comment|docstring|docblock|jsdoc|semicolon|copyright\\s+header|copyright)",
     flags: "i",
     class: "trivial",
     confidence: 0.75,
+    source: "builtin",
+  },
+  // Trivial — add @deprecated annotation or TODO comment
+  {
+    pattern: "\\badd\\s+(a\\s+)?@deprecated\\b|\\badd\\s+(the\\s+)?deprecated\\s+(jsdoc\\s+)?(tag|annotation|comment)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  {
+    pattern: "\\b(add|update)\\s+(a\\s+)?todo\\s+comment\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.8,
     source: "builtin",
   },
   {
@@ -254,7 +269,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // Trivial — bump version (single field in package.json / pyproject.toml)
   {
-    pattern: "\\b(bump|update|set)\\s+(the\\s+)?(patch|minor|major|package\\s+|semver\\s+)?version\\b",
+    pattern: "\\b(bump|update|set)\\s+(the\\s+)?(patch|minor|major|package|semver)?\\s*version\\b",
     flags: "i",
     class: "trivial",
     confidence: 0.8,
@@ -294,7 +309,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // Trivial — remove unused import(s) (handles "this/an unused import")
   {
-    pattern: "\\b(remove|delete)\\s+(this\\s+|an?\\s+|the\\s+)?unused\\s+imports?\\b",
+    pattern: "\\b(remove|delete)\\s+(this\\s+|an?\\s+|the\\s+)?unused\\s+(?:imports?|variable|var|const(?:ant)?|param(?:eter)?)\\b",
     flags: "i",
     class: "trivial",
     confidence: 0.85,
@@ -376,17 +391,49 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
-  // Simple — write a unit/integration test for a specific function/component
+  // Simple — write a unit test for a specific single function/method/component (not a whole module)
   {
-    pattern: "\\b(write|add|create)\\s+(a\\s+)?(unit\\s+|integration\\s+|e2e\\s+)?tests?\\s+(for|to|covering)\\b",
+    pattern: "\\b(write|add|create)\\s+(a\\s+)?(unit\\s+)?tests?\\s+(?:for|to|covering)\\s+(?:this|the)\\s+(?:\\w+\\s+)*(?:function|method|class|component|hook|util(?:ity)?|helper|service\\s+method|utility\\s+function|switch\\s+statement|logic)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
     source: "builtin",
   },
-  // Simple — add error handling / null checks / guard clauses
+  // Simple — write a unit test covering specific cases/paths (for a named method or function)
   {
-    pattern: "\\b(add|implement|include)\\s+(a\\s+|an?\\s+|proper\\s+)?(error\\s+handling|null\\s+(check|guard)|null(?:able)?\\s+(check|guard|assertion)|guard\\s+clause|input\\s+validation|input\\s+sanitization)\\b",
+    pattern: "\\b(write|add|create)\\s+(a\\s+)?(?:unit\\s+|integration\\s+)?tests?\\s+covering\\b.{0,80}\\bfor\\s+this\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — write tests for specific logic in a scoped context
+  {
+    pattern: "\\b(write|add|create)\\s+(a\\s+)?tests?\\s+for\\s+each\\s+(branch|case|path)\\s+(in|of)\\s+(this|the)\\s+\\w+\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add null checks / guard clauses or scoped error handling (single call/function, not whole client)
+  {
+    pattern: "\\b(add|implement|include)\\s+(a\\s+|an?\\s+|proper\\s+)?(null\\s+(check|guard)|null(?:able)?\\s+(check|guard|assertion)|guard\\s+clause|input\\s+sanitization)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add error handling / try-catch to a single specific call or function
+  {
+    pattern: "\\b(add|implement)\\s+(a\\s+)?(try.?catch|error\\s+handling)\\s+(to|for|around)\\s+(this|the)\\s+(function|method|fetch|call|request|handler|operation|query)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — add input validation to a specific single endpoint/route/function (not a whole form/module)
+  {
+    pattern: "\\b(add|implement)\\s+(input\\s+|request\\s+)?(validation|sanitization)\\s+(to|for)\\s+(this|the)\\s+(endpoint|route|handler|function|method|controller|api\\s+endpoint)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -416,9 +463,9 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
-  // Simple — extract repeated string/literal/query to a named constant or function
+  // Simple — extract repeated string/literal/query/logic to a named constant, function, or utility
   {
-    pattern: "\\bextract\\s+(this\\s+|the\\s+)?(repeated\\s+|inline\\s+|hard-?coded\\s+)?(string|literal|sql|query|value)\\s+(into|to|as)\\s+(a\\s+)?(constant|const|variable|named\\s+function)\\b",
+    pattern: "\\bextract\\s+(this\\s+|the\\s+)?(repeated\\s+|inline\\s+|hard-?coded\\s+)?(?:\\w+\\s+)?(string|literal|sql(?:\\s+query)?|query|value|logic|function)\\s+(into|to|as)\\s+(a\\s+)?(constant|const|variable|named\\s+function|shared\\s+utility|helper|util(?:ity)?)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -488,9 +535,9 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
-  // Simple — add pagination to this/these specific endpoint/query (single concern, not a feature)
+  // Simple — add specific pagination type to a single endpoint (cursor/offset naming — not a full feature)
   {
-    pattern: "\\badd\\s+(cursor|offset|page|limit)\\s+pagination\\b|\\badd\\s+pagination\\s+(to|for|on)\\s+(this|these)\\b",
+    pattern: "\\badd\\s+(cursor|offset|keyset|page-based|limit-based)\\s+pagination\\b",
     flags: "i",
     class: "simple",
     confidence: 0.7,
@@ -634,7 +681,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // implement a debounce / memoize / throttle utility
   {
-    pattern: "\\bimplement\\s+(a\\s+)?(debounce|memoize|throttle|deep.?equal|deep.?clone)\\s+(hook|wrapper|function|utility|helper)?\\b",
+    pattern: "\\bimplement\\s+(a\\s+)?(debounce|memoize|throttle|deep.?equali(?:ty)?|deep.?equal|deep.?clone)\\s+(hook|wrapper|function|utility|helper|check)?\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -834,6 +881,54 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     source: "builtin",
   },
 
+  // Hard — concrete error message / stack trace pasted
+  {
+    pattern: "\\b(got\\s+error|failed\\s+with|fails\\s+with|throws?)\\s*:\\s*\\w*Error\\b|\\bAssertionError\\b|\\bECONNREFUSED\\b|\\bENOENT\\b|\\bEACCES\\b|\\bhere['’‘]?s\\s+(the|a)\\s+stack\\s+trace\\b|\\bstack\\s+trace\\s*:",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — build failure with specific error
+  {
+    pattern: "\\bbuild\\s+failed\\s*:|\\bmodule\\s+not\\s+found\\s*:|\\bcannot\\s+find\\s+module\\b|\\bmissing\\s+module\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — performance disparity between environments
+  {
+    pattern: "\\b(staging|dev(?:elopment)?)\\b.{0,80}\\b(prod(?:uction)?|live)\\b.{0,40}\\b(same|identical|same\\s+data)\\b|\\b(faster|slower|longer|\\d+ms|\\d+s)\\b.{0,60}\\b(staging|prod(?:uction)?)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — memory usage grows over time (leak pattern)
+  {
+    pattern: "\\bmemory\\s+(usage\\s+)?(grows?|increases?|climbs?|balloons?|leaks?)\\s+(by|over|at|steadily|gradually|\\d+)",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — env-specific failure (passes/works in one env but not another)
+  {
+    pattern: "\\b(fails?|breaks?|doesn[''']?t\\s+(?:work|resolve|start))\\b.{0,40}\\bin\\s+(some|certain|specific)\\s+(test\\s+)?(env|envs|environments?)\\b.{0,40}\\b(not\\s+(?:in\\s+)?others|but\\s+not)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — "debug it" as explicit instruction at end of a description
+  {
+    pattern: "(?:—|--|:\\s*)\\s*debug\\s+(it|this)\\s*$|\\bplease\\s+(?:help\\s+me\\s+)?debug\\s+(it|this)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
   // "find out why / figure out why / track it down" — explicit investigation
   {
     pattern: "\\b(find\\s+out\\s+why|investigate\\s+why|figure\\s+out\\s+why|track\\s+it\\s+down|hunt\\s+(?:it\\s+)?down)\\b",
@@ -934,7 +1029,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(should we|compare|evaluate|what[‘’]?s the best|how should we|design (our|a|the))\\b",
+      "\\b(should we|compare|evaluate|what[‘’’]?s the best|how should we|design (our|a|the))\\b",
     flags: "i",
     class: "reasoning",
     confidence: 0.75,
@@ -989,6 +1084,31 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     source: "builtin",
   },
 
+  // Reasoning — adversarial prompt injection (role claim + trivialize + complex task)
+  {
+    pattern: "\\b(i\\s+am|i'm)\\s+(the\\s+)?(system\\s+administrator|admin|superuser|root|god\\s+mode|owner)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.9,
+    source: "builtin",
+  },
+  // Reasoning — meta-classifier injection (wrapping the prompt in classification tags)
+  {
+    pattern: "<PROMPT_TO_CLASSIFY>",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.95,
+    source: "builtin",
+  },
+  // Reasoning — test isolation / architectural testing strategy question
+  {
+    pattern: "\\bwhat\\s+is\\s+the\\s+(right|best|correct|proper|ideal)\\s+(test|testing)\\s+(isolation|strategy|approach|pattern)\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.8,
+    source: "builtin",
+  },
+
   // Max — adversarial debugging
   {
     pattern: "\\b(production is down|prod (?:is )?down|here are the logs|here's the logs)\\b",
@@ -999,7 +1119,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(can[‘’’]?t reproduce|cannot reproduce|unreproducible|silent (?:data )?loss|byzantine|heisenbug|no error in logs|no slow query log)\\b",
+      "\\b(can[‘’’']?t reproduce|cannot reproduce|unreproducible|silent (?:data )?loss|byzantine|heisenbug|no error in logs|no slow query log)\\b",
     flags: "i",
     class: "max",
     confidence: 0.9,
@@ -1007,7 +1127,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   // "intermittently" only escalates to max when paired with a can’t-reproduce signal
   {
-    pattern: "\\bintermittent(?:ly)?\\b.{0,100}\\b(can[‘’’]?t\\s+reproduce|cannot\\s+reproduce|not\\s+reproducible|no\\s+error)\\b|\\b(can[‘’’]?t\\s+reproduce|cannot\\s+reproduce|no\\s+error\\s+in\\s+logs).{0,100}\\bintermittent(?:ly)?\\b",
+    pattern: "\\bintermittent(?:ly)?\\b.{0,100}\\b(can[‘’’']?t\\s+reproduce|cannot\\s+reproduce|not\\s+reproducible|no\\s+error)\\b|\\b(can[‘’’']?t\\s+reproduce|cannot\\s+reproduce|no\\s+error\\s+in\\s+logs).{0,100}\\bintermittent(?:ly)?\\b",
     flags: "i",
     class: "max",
     confidence: 0.9,

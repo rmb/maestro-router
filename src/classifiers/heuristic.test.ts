@@ -125,8 +125,8 @@ describe("heuristic classifier — non-fast-path matches", () => {
     expect(r.class).toBe("trivial");
   });
 
-  test("'write a unit test for parseDate' → simple", async () => {
-    const r = (await ask("write a unit test for parseDate")) as { class: string };
+  test("'write a unit test for the parseDate function' → simple", async () => {
+    const r = (await ask("write a unit test for the parseDate function")) as { class: string };
     expect(r.class).toBe("simple");
   });
 

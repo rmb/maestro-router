@@ -59,6 +59,22 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     source: "builtin",
     bareSafe: true,
   },
+  {
+    pattern: "^\\s*(sort|reorder|organize)\\s+imports?\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 1.0,
+    source: "builtin",
+    bareSafe: true,
+  },
+  {
+    pattern: "^\\s*remove\\s+(?:all\\s+)?unused\\s+imports?\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 1.0,
+    source: "builtin",
+    bareSafe: true,
+  },
 
   // Trivial — tool/command output looks like a finished tool result. These
   // appear in panels where the user pastes context for the next prompt;
@@ -303,6 +319,22 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // Hard — explicit bug report ("there's a bug", "I found a bug")
+  {
+    pattern: "\\b(there[''']?s\\s+a\\s+bug|i\\s+(?:think\\s+)?found\\s+a\\s+bug|there\\s+is\\s+a\\s+bug|found\\s+a\\s+(?:bug|regression))\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — performance investigation / optimization request
+  {
+    pattern: "\\b(speed\\s+(?:this\\s+)?up|improve\\s+(?:the\\s+)?performance|reduce\\s+(?:the\\s+)?latency|optimize\\s+(?:for\\s+)?(?:speed|performance|throughput))\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
 
   // Reasoning — design / compare / evaluate
   {
@@ -415,49 +447,50 @@ export function createHeuristicClassifier(opts: HeuristicOptions = {}): Classifi
   }));
 
   const classify: ClassifyFn = (req: Request): Classification | null => {
-    const diagnostics: Diagnostic[] = [];
-
-    if (req.prompt.length > SIZE_THRESHOLD) {
-      diagnostics.push({
-        severity: "info",
-        code: "size.longcontext",
-        message: `prompt is ${req.prompt.length} chars (>${SIZE_THRESHOLD}); favor sonnet`,
-      });
-      return { class: "standard", confidence: 0.7, diagnostics };
-    }
-
+    // 1. Pattern scan — fast-path short-circuits at confidence >= 1.0
     let best: Compiled | null = null;
     for (const c of compiled) {
       if (!c.re.test(req.prompt)) continue;
-      if (c.rule.confidence >= 1.0) {
-        best = c;
-        break;
-      }
-      if (!best || c.rule.confidence > best.rule.confidence) {
-        best = c;
-      }
+      if (c.rule.confidence >= 1.0) { best = c; break; }
+      if (!best || c.rule.confidence > best.rule.confidence) best = c;
     }
 
+    // 2. Definite pattern match overrides size check
+    if (best && best.rule.confidence >= 1.0) {
+      const diagnostics: Diagnostic[] = [
+        { severity: "info", code: "heuristic.matched", message: `${best.rule.class} @1.00 (${best.rule.source ?? "user"})` },
+      ];
+      if (best.rule.bareSafe === true) {
+        diagnostics.push({ severity: "info", code: "heuristic.bare_safe", message: "definite-trivial fast-path" });
+      }
+      return { class: best.rule.class, confidence: 1.0, diagnostics };
+    }
+
+    // 3. Size floor — only when no definite pattern matched
+    if (req.prompt.length > SIZE_THRESHOLD_LARGE) {
+      return {
+        class: "standard",
+        confidence: 0.7,
+        diagnostics: [{ severity: "info", code: "size.longcontext", message: `prompt is ${req.prompt.length} chars (>${SIZE_THRESHOLD_LARGE}); favor sonnet` }],
+      };
+    }
+    if (req.prompt.length > SIZE_THRESHOLD_MEDIUM) {
+      return {
+        class: "standard",
+        confidence: 0.65,
+        diagnostics: [{ severity: "info", code: "size.mediumcontext", message: `prompt is ${req.prompt.length} chars (>${SIZE_THRESHOLD_MEDIUM}); lean sonnet` }],
+      };
+    }
+
+    // 4. Sub-1.0 pattern match
     if (!best) return null;
-
-    diagnostics.push({
-      severity: "info",
-      code: "heuristic.matched",
-      message: `${best.rule.class} @${best.rule.confidence.toFixed(2)} (${best.rule.source ?? "user"})`,
-    });
+    const diagnostics: Diagnostic[] = [
+      { severity: "info", code: "heuristic.matched", message: `${best.rule.class} @${best.rule.confidence.toFixed(2)} (${best.rule.source ?? "user"})` },
+    ];
     if (best.rule.bareSafe === true) {
-      diagnostics.push({
-        severity: "info",
-        code: "heuristic.bare_safe",
-        message: "definite-trivial fast-path",
-      });
+      diagnostics.push({ severity: "info", code: "heuristic.bare_safe", message: "definite-trivial fast-path" });
     }
-
-    return {
-      class: best.rule.class,
-      confidence: best.rule.confidence,
-      diagnostics,
-    };
+    return { class: best.rule.class, confidence: best.rule.confidence, diagnostics };
   };
 
   return createClassifier({ name: "heuristic", weight: 0.7, classify });

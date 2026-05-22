@@ -145,6 +145,52 @@ describe("heuristic classifier — non-fast-path matches", () => {
     expect(r.class).toBe("simple");
   });
 
+  test("'sort imports' → trivial 1.0 bareSafe", async () => {
+    const r = (await ask("sort imports")) as { class: string; confidence: number; diagnostics: { code: string }[] };
+    expect(r.class).toBe("trivial");
+    expect(r.confidence).toBe(1.0);
+    expect(r.diagnostics.map((d) => d.code)).toContain("heuristic.bare_safe");
+  });
+
+  test("'organize imports' → trivial 1.0 bareSafe", async () => {
+    const r = (await ask("organize imports")) as { class: string; confidence: number };
+    expect(r.class).toBe("trivial");
+    expect(r.confidence).toBe(1.0);
+  });
+
+  test("'remove unused imports' → trivial 1.0 bareSafe", async () => {
+    const r = (await ask("remove unused imports")) as { class: string; confidence: number; diagnostics: { code: string }[] };
+    expect(r.class).toBe("trivial");
+    expect(r.confidence).toBe(1.0);
+    expect(r.diagnostics.map((d) => d.code)).toContain("heuristic.bare_safe");
+  });
+
+  test("'remove all unused imports' → trivial 1.0 bareSafe", async () => {
+    const r = (await ask("remove all unused imports")) as { class: string; confidence: number };
+    expect(r.class).toBe("trivial");
+    expect(r.confidence).toBe(1.0);
+  });
+
+  test("'there's a bug in the auth handler' → hard", async () => {
+    const r = (await ask("there's a bug in the auth handler")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
+  test("'I found a bug in the parser' → hard", async () => {
+    const r = (await ask("I found a bug in the parser")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
+  test("'speed up the database queries' → hard", async () => {
+    const r = (await ask("speed up the database queries")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
+  test("'improve performance of the search API' → hard", async () => {
+    const r = (await ask("improve performance of the search API")) as { class: string };
+    expect(r.class).toBe("hard");
+  });
+
   test("'the tests are failing in CI' → hard", async () => {
     const r = (await ask("the tests are failing in CI")) as { class: string };
     expect(r.class).toBe("hard");
@@ -180,7 +226,24 @@ describe("heuristic classifier — size policy", () => {
     expect(r.diagnostics.map((d) => d.code)).toContain("size.longcontext");
   });
 
-  test("prompt ≤ 50k chars uses normal rules", async () => {
+  test("prompt > 15k but ≤ 50k chars → standard 0.65 with mediumcontext diagnostic", async () => {
+    const medium = "y ".repeat(9_000); // ~18k chars, no pattern
+    const r = (await ask(medium)) as { class: string; confidence: number; diagnostics: { code: string }[] };
+    expect(r.class).toBe("standard");
+    expect(r.confidence).toBe(0.65);
+    expect(r.diagnostics.map((d) => d.code)).toContain("size.mediumcontext");
+  });
+
+  test("fast-path pattern (confidence 1.0) beats size check on large prompts", async () => {
+    const rule: HeuristicRule = { pattern: "\\bfrobnicate\\b", class: "trivial", confidence: 1.0, source: "builtin", bareSafe: true };
+    const c = createHeuristicClassifier({ rules: [rule] });
+    const long = "frobnicate " + "x ".repeat(30_000);
+    const r = (await c.classify({ prompt: long })) as { class: string; confidence: number };
+    expect(r.class).toBe("trivial");
+    expect(r.confidence).toBe(1.0);
+  });
+
+  test("prompt ≤ 15k chars uses normal rules", async () => {
     const r = (await ask("rename foo")) as { class: string };
     expect(r.class).toBe("trivial");
   });

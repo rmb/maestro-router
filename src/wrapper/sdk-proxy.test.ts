@@ -164,5 +164,123 @@ describe("runSdkProxy — user message routing", () => {
   });
 });
 
+describe("runSdkProxy — control protocol passthrough", () => {
+  test("forwards control_request frames to the child unchanged", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const initLine =
+      '{"type":"control_request","request_id":"sdk-host-1","request":{"subtype":"initialize","hooks":{},"sdkMcpServers":[]}}';
+    const stdin = Readable.from([initLine + "\n"]);
+    setTimeout(() => fc.close(0), 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    expect(fc.stdinWrites).toHaveLength(1);
+    expect(fc.stdinWrites[0]!.trim()).toBe(initLine);
+    expect(tel.events).toHaveLength(0); // no user message → no decision
+  });
+
+  test("forwards child stdout lines to host stdout unchanged", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const stdin = Readable.from([]); // empty — just verifying stdout passthrough
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    fc.emit('{"type":"system","subtype":"init","session_id":"abc"}');
+    fc.emit('{"type":"result","subtype":"success","total_cost_usd":0.001,"result":"ok"}');
+    fc.close(0);
+    await proxyP;
+
+    expect(out.lines).toEqual([
+      '{"type":"system","subtype":"init","session_id":"abc"}',
+      '{"type":"result","subtype":"success","total_cost_usd":0.001,"result":"ok"}',
+    ]);
+  });
+
+  test("drops control_response frames matching maestro-prefixed request_ids", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    fc.emit('{"type":"control_response","response":{"request_id":"maestro-1","subtype":"success"}}');
+    fc.emit('{"type":"control_response","response":{"request_id":"sdk-host-x","subtype":"success"}}');
+    fc.emit('{"type":"result","subtype":"success","result":"done"}');
+    fc.close(0);
+    await proxyP;
+
+    expect(out.lines).toEqual([
+      '{"type":"control_response","response":{"request_id":"sdk-host-x","subtype":"success"}}',
+      '{"type":"result","subtype":"success","result":"done"}',
+    ]);
+  });
+
+  test("propagates child exit code to the proxy return value", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    setTimeout(() => fc.close(7), 10);
+
+    const code = await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    expect(code).toBe(7);
+  });
+});
+
 // `vi` is referenced for parity with future expansion; keep import live.
 void vi;

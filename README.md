@@ -6,8 +6,8 @@ API key required.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Status: **v0.2.1** — five-stage classifier pipeline, wire-compat for the VSCode
-Claude Code panel, Stop-hook feedback, tournament evaluator. Not yet on npm;
+Status: **v0.2.2** — five-stage classifier pipeline, per-turn model routing for
+the VSCode panel, Stop-hook feedback, tournament evaluator. Not yet on npm;
 install from source.
 
 ---
@@ -23,7 +23,7 @@ For every prompt you send to Claude Code, Maestro:
    - `--exclude-dynamic-system-prompt-sections` for cross-session cache reuse
    - Per-class `--tools` and `--mcp-config` restriction for low-class prompts (smaller cached system prompt)
    - `--bare` for definite-trivial patterns *when authenticated by `ANTHROPIC_API_KEY`* (suppressed on OAuth since Claude CLI doesn't read keychain in bare mode)
-5. **Reuses sessions aggressively** via `--session-id` + `--resume`, so conversation continuity is preserved across model swaps and the ~37k system-prompt cache bootstrap is amortized
+5. **Routes per-turn in the VSCode panel**: the `--input-format stream-json` channel is intercepted as a long-lived proxy; each user turn is classified independently and spawned as `claude --print --resume`, so a session that starts with `"what does this do?"` can escalate to `"redesign the cache layer"` on the right model mid-session. Session continuity is preserved via `--session-id` + `--resume` across all turns.
 6. **Logs exact cost + token counts** from `--output-format json` to `~/.maestro/decisions.jsonl`
 
 A trivial `git status` prompt measured ~58% cheaper than vanilla Claude Code on
@@ -437,7 +437,8 @@ MAESTRO_SKIP_EMBED_CHECK=1 pnpm build
 | v0.0.1-core | Core machinery + classifiers + eval seed |
 | v0.1.0-wrapper | Claude CLI subprocess wrapper + session manager |
 | v0.2.0-cli | Full CLI + public API + `claudeProcessWrapper` wire-compat |
-| **v0.2.1** | LLM classifier (S12), F2 per-project config, S4 tournament, F7 Stop-hook, S2 embedding |
+| v0.2.1 | LLM classifier (S12), F2 per-project config, S4 tournament, F7 Stop-hook, S2 embedding |
+| **v0.2.2** | Per-turn panel routing: stream-json proxy intercepts each VSCode turn independently |
 
 Backlog of considered-but-deferred ideas (remote anonymized telemetry,
 Bedrock/Codex compatibility, etc.) lives in

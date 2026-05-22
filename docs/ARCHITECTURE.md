@@ -27,7 +27,11 @@ Three constraints pushed the design here:
 3. **VSCode panel coverage.** The official `anthropic.claude-code`
    extension exposes a `claudeCode.claudeProcessWrapper` setting. Pointing
    it at `maestro` routes every panel-UI invocation through us without
-   touching the extension code.
+   touching the extension code. The `--input-format stream-json` channel is
+   owned by Maestro as a per-turn proxy: each user message is classified
+   independently and forwarded as `claude --print --resume`, so model routing
+   can change mid-session as complexity escalates. Session continuity is
+   preserved via `--session-id` + `--resume`.
 
 Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003-wrapper-architecture-over-proxy.md).
 
@@ -183,12 +187,16 @@ src/
     internal-index.ts  Namespace target for `export * as classifiers`
 
   wrapper/          Subprocess concerns. Depend on core + node:child_process.
-    preflight.ts    Verify Claude CLI version + required flags (R6)
-    session.ts      UUID store with aggressive cwd reuse (F9)
-    spawn.ts        buildClaudeArgs (pure) + spawnClaude (batch)
-    stream.ts       streamClaude (live pipe + capture + signal forwarding)
-    passthrough.ts  Slash-command detection (skip classification)
-    output.ts       Parse --output-format json → CostBreakdown + diagnostics
+    preflight.ts        Verify Claude CLI version + required flags (R6)
+    session.ts          UUID store with aggressive cwd reuse (F9)
+    spawn.ts            buildClaudeArgs (pure) + spawnClaude (batch)
+    stream.ts           streamClaude (live pipe + capture + signal forwarding)
+    stream-json-proxy.ts  Per-turn proxy for VSCode panel sessions: reads NDJSON
+                          user turns, classifies each, spawns claude --print
+                          --resume, filters duplicate init events, logs per-turn
+                          cost telemetry
+    passthrough.ts      Slash-command detection (skip classification)
+    output.ts           Parse --output-format json/stream-json → CostBreakdown + diagnostics
 
   cli/              Commander shell. Depends on core + classifiers + wrapper.
     index.ts        Entrypoint + version + global options

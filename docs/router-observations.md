@@ -123,3 +123,38 @@ that turn. Subsequent same-model turns benefit from cache_read.
   `'{"mcpServers":{}}'`. Built-in profiles updated.
 - The session store now returns `{sessionId, isNew}` so the wrapper knows
   whether to pass `--session-id` (new) or `--resume` (continuing).
+
+## 2026-05-22 · Spike — `--fast-mode` cost investigation
+
+**Status:** PENDING — run `npx tsx scripts/fast-mode-spike.ts --confirm-cost` to fill in results.
+
+**Hypothesis:** `--fast-mode` (if available) reduces `total_cost_usd` for low-complexity
+prompts by changing Anthropic's internal serving strategy, without degrading output quality.
+Maestro could apply it selectively on `haiku`-class turns to multiply existing savings.
+
+**Method:** `scripts/fast-mode-spike.ts` — 5 representative prompts (format, rename,
+explain-error, list, completion) run twice each (baseline vs `--fast-mode`) on a single
+model. Metrics captured: `total_cost_usd`, `duration_ms`, token breakdown from
+`--output-format json`.
+
+**Gate:** Proceed to production integration only if:
+1. `total_cost_usd` is strictly lower for fast-mode on ≥ 3 of 5 prompts.
+2. Response quality is acceptable on all 5 (no truncation, no refusal).
+
+**Results:** *(fill in after running the spike)*
+
+| Prompt | Baseline $ | Fast-mode $ | Δ cost | Cheaper? |
+|---|---|---|---|---|
+| short-format | | | | |
+| rename-symbol | | | | |
+| explain-error | | | | |
+| list-items | | | | |
+| continuation | | | | |
+
+**Recommendation:** *(fill in)*
+
+**Action:**
+- If PROCEED: open `docs/superpowers/plans/YYYY-MM-DD-fast-mode-production.md` covering
+  integration into `src/core/profile.ts` (add `fastMode?: boolean` to `ClassSpec`) and
+  `src/wrapper/spawn.ts` (emit `--fast-mode` when flag is set and `PreflightResult.fastModeAvailable` is true).
+- If SKIP or INCONCLUSIVE: add one line to `docs/future-ideas.md` and close.

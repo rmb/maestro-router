@@ -99,20 +99,39 @@ describe("overrideClassifier", () => {
 });
 
 describe("natural-language think hints", () => {
-  test("think hard → max", async () => {
-    expect(await call("think hard about this")).toMatchObject({ class: "max" });
+  test("'think hard' → max", async () => {
+    expect(await call("think hard if there is a way")).toMatchObject({
+      class: "max",
+      confidence: 1.0,
+    });
   });
 
-  test("think deeply → max", async () => {
-    expect(await call("think deeply about this")).toMatchObject({ class: "max" });
+  test("'think harder' → max", async () => {
+    expect(await call("think harder about this")).toMatchObject({ class: "max" });
   });
 
-  test("think step by step → max", async () => {
-    expect(await call("think step by step")).toMatchObject({ class: "max" });
+  test("'think deeply' → max", async () => {
+    expect(await call("think deeply about the design")).toMatchObject({ class: "max" });
   });
 
-  test("reason through → max", async () => {
-    expect(await call("reason through this problem")).toMatchObject({ class: "max" });
+  test("'think deep' → max", async () => {
+    expect(await call("think deep on this")).toMatchObject({ class: "max" });
+  });
+
+  test("'think carefully' → max", async () => {
+    expect(await call("think carefully before answering")).toMatchObject({ class: "max" });
+  });
+
+  test("'think more carefully' → max", async () => {
+    expect(await call("please think more carefully")).toMatchObject({ class: "max" });
+  });
+
+  test("'think step by step' → max", async () => {
+    expect(await call("think step by step through this problem")).toMatchObject({ class: "max" });
+  });
+
+  test("'think step-by-step' → max", async () => {
+    expect(await call("think step-by-step please")).toMatchObject({ class: "max" });
   });
 
   test("case insensitive", async () => {
@@ -125,13 +144,35 @@ describe("natural-language think hints", () => {
     expect(await call("can you think hard about this architecture")).toMatchObject({ class: "max" });
   });
 
-  test("natural hint does not block existing @-hint", async () => {
-    expect(await call("@fast think hard about this")).toMatchObject({ class: "trivial" });
+  test("emits override.nl_think diagnostic", async () => {
+    const result = await call("think hard about this");
+    const codes = result!.diagnostics!.map((d) => d.code);
+    expect(codes).toContain("override.nl_think");
   });
 
   test("returns confidence 1.0 on natural-language match", async () => {
     const r = await call("think hard about this");
     expect(r!.confidence).toBe(1.0);
+  });
+
+  test("'I think' does NOT match", async () => {
+    expect(await call("I think this is fine")).toBeNull();
+  });
+
+  test("'rethink' does NOT match", async () => {
+    expect(await call("rethink the approach")).toBeNull();
+  });
+
+  test("'overthink' does NOT match", async () => {
+    expect(await call("don't overthink it")).toBeNull();
+  });
+
+  test("'think' alone does NOT match", async () => {
+    expect(await call("think")).toBeNull();
+  });
+
+  test("natural hint does not block existing @-hint", async () => {
+    expect(await call("@fast think hard")).toMatchObject({ class: "trivial" });
   });
 });
 

@@ -51,7 +51,7 @@ export const balancedProfile: Profile = {
     standard: { model: "sonnet", effort: "medium", tools: "default", maxBudgetUsd: 1.0 },
     hard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0 },
     reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
-    max: { model: "opus", effort: "max", tools: "default", maxBudgetUsd: 10.0 },
+    max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };
 

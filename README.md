@@ -1,10 +1,18 @@
 # maestro-router
 
-A CLI wrapper that classifies each Claude Code prompt and routes it to the
-optimal model + thinking budget. **Works on Claude Pro/Team subscriptions — no
-API key required.**
+**Automatic per-prompt model routing for Claude Code — cut AI costs 60–80%
+without changing how you work.**
+
+Routes every Claude Code prompt to the cheapest model+thinking budget that will
+produce the right answer: `git status` goes to Haiku ($0.0003), a production
+incident goes to Opus max ($0.05). No API key needed — works on **Claude
+Pro/Team subscriptions** via OAuth.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
+[![Node ≥ 20](https://img.shields.io/badge/Node-%E2%89%A520-green)](https://nodejs.org/)
+
+> **Keywords:** Claude Code cost optimization · LLM routing · model selection · Haiku Sonnet Opus · Claude Pro · Claude Team · AI cost reduction · prompt classification · VSCode Claude extension
 
 Status: **v0.2.2** — five-stage classifier pipeline, per-turn model routing for
 the VSCode panel, Stop-hook feedback, tournament evaluator. Not yet on npm;
@@ -17,7 +25,7 @@ install from source.
 For every prompt you send to Claude Code, Maestro:
 
 1. **Detects turn type** (new user prompt vs tool result vs error recovery vs continuation)
-2. **Classifies complexity** through a 5-stage pipeline (override → turn-type → heuristic → embedding → LLM), short-circuiting at confidence ≥ 0.6
+2. **Classifies complexity** through a 5-stage pipeline (override → turn-type → heuristic → embedding → LLM), short-circuiting at confidence ≥ 0.55
 3. **Picks the right `--model`, `--effort`, `--max-budget-usd`** from your profile (six classes: trivial / simple / standard / hard / reasoning / max)
 4. **Applies Claude-specific savings**:
    - `--exclude-dynamic-system-prompt-sections` for cross-session cache reuse
@@ -26,9 +34,20 @@ For every prompt you send to Claude Code, Maestro:
 5. **Routes per-turn in the VSCode panel**: the `--input-format stream-json` channel is intercepted as a long-lived proxy; each user turn is classified independently and spawned as `claude --print --resume`, so a session that starts with `"what does this do?"` can escalate to `"redesign the cache layer"` on the right model mid-session. Session continuity is preserved via `--session-id` + `--resume` across all turns.
 6. **Logs exact cost + token counts** from `--output-format json` to `~/.maestro/decisions.jsonl`
 
-A trivial `git status` prompt measured ~58% cheaper than vanilla Claude Code on
-the verification spike. Mixed-class workloads typically land in 60–80%.
+**Typical savings: 60–80% on mixed workloads.** A `git status` measured ~58%
+cheaper; a writing session with frequent file-edit tool results saves more
+because each write-confirmation turn now routes to Haiku instead of Sonnet.
 `maestro stats` shows your actual realized savings.
+
+### Why it exists
+
+Claude Opus/Sonnet are overkill for the majority of prompts in a real coding
+session: `git commit`, version bumps, "add a docstring", "remove unused
+imports", tool-result acknowledgements. Routing these to Haiku costs ~$0.0003
+instead of ~$0.015 for Sonnet. Maestro does this automatically — you keep
+using Claude Code exactly as before.
+
+If you've ever thought "this is wasting Opus on a rename", Maestro is the fix.
 
 ---
 
@@ -372,20 +391,20 @@ Disable explicitly via `useEmbeddingClassifier: false`.
 ## The classifier pipeline (at a glance)
 
 ```
-prompt → override → turn-type → heuristic → embedding → llm
-          @fast?    tool_result? regex?     similar?    haiku
-          1.0       0.85         1.0/0.9   0.5–1.0    0.7–0.95
+prompt → override → turn-type → heuristic  → embedding → llm
+          @fast?    tool_result? 45+ rules   similar?    haiku
+          1.0       0.85         0.75–1.0    0.55–1.0   0.7–0.95
                                                        ↓
                                             vote (weighted) → cache → spawn claude
 ```
 
 - **override (1.0)** — `@fast`/`@deep`/etc. wins instantly
-- **turn-type (0.85)** — tool_result → trivial/simple; error_recovery → hard
-- **heuristic (1.0/0.9)** — regex over built-in rules + user heuristics.json
-- **embedding (0.5–1.0)** — cosine similarity vs ~60 frozen exemplars (optional peer)
+- **turn-type (0.85)** — tool_result after Read/Grep/Write/Edit → trivial; error_recovery → hard
+- **heuristic (0.75–1.0)** — 45+ built-in regex rules (git ops, version bumps, test writing, refactors, debug questions, trade-off analysis) + user `heuristics.json`
+- **embedding (0.55–1.0)** — cosine similarity vs ~60 frozen exemplars (optional peer)
 - **LLM (0.7–0.95)** — final fallback for ambiguous prompts via `claude --print --model haiku --json-schema`; ~$0.001/call
 
-First classifier with confidence ≥ 0.6 short-circuits. Otherwise, all
+First classifier with confidence ≥ 0.55 short-circuits. Otherwise, all
 sub-threshold results vote weighted. Empty pipeline → default `standard`.
 
 Full data flow + module breakdown:
@@ -439,6 +458,7 @@ MAESTRO_SKIP_EMBED_CHECK=1 pnpm build
 | v0.2.0-cli | Full CLI + public API + `claudeProcessWrapper` wire-compat |
 | v0.2.1 | LLM classifier (S12), F2 per-project config, S4 tournament, F7 Stop-hook, S2 embedding |
 | **v0.2.2** | Per-turn panel routing: stream-json proxy intercepts each VSCode turn independently |
+| v0.2.3 (next) | +15 heuristic rules (git ops, tests, debug, tradeoffs), lower short-circuit threshold, write-tool turns → trivial |
 
 Backlog of considered-but-deferred ideas (remote anonymized telemetry,
 Bedrock/Codex compatibility, etc.) lives in

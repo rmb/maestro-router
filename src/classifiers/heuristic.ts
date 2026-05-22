@@ -50,6 +50,28 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     bareSafe: true,
   },
 
+  // Trivial — tool/command output looks like a finished tool result. These
+  // appear in panels where the user pastes context for the next prompt;
+  // they need no model thinking on their own. Conservative confidence:
+  // a wider, less specific pattern catches these without claiming high
+  // certainty.
+  {
+    pattern:
+      "^(tool result:|glob results:|grep returned:|command output:|build output:|here are the file contents|<file>|file (written|already exists))",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Multi-line bare path list (e.g. "src/index.ts\nsrc/lib.ts") — common
+  // tool output shape, no prose.
+  {
+    pattern: "^(?:[\\w./@-]+\\.[a-z]{1,5}\\s*\\n){2,}",
+    flags: "",
+    class: "trivial",
+    confidence: 0.8,
+    source: "builtin",
+  },
   // Trivial (with context)
   {
     pattern:
@@ -57,6 +79,13 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     flags: "i",
     class: "trivial",
     confidence: 0.7,
+    source: "builtin",
+  },
+  {
+    pattern: "\\bfix\\s+(the\\s+)?(indentation|whitespace|spacing|formatting)\\b",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
     source: "builtin",
   },
   {
@@ -78,7 +107,7 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   // Simple
   {
     pattern:
-      "\\b(update|change)\\s+(the\\s+)?(error message|timeout|default|placeholder|title|color|version|port|wording|icon)\\b",
+      "\\b(update|change)\\s+(the\\s+)?(error message|timeout|default|placeholder|title|color|version|port|wording|icon|readme|success message|message)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.75,
@@ -86,10 +115,29 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   },
   {
     pattern:
-      "\\b(add|update)\\s+(a |an |the )?(parameter|argument|comment|console\\.log|tooltip|todo|entry|hover|docstring)\\b",
+      "\\b(add|update)\\s+(a |an |the )?(parameter|argument|optional|comment|console\\.log|tooltip|todo|entry|hover|docstring)\\b",
     flags: "i",
     class: "simple",
     confidence: 0.7,
+    source: "builtin",
+  },
+  // Single-spot config/value tweaks ("change http to https", "add a new
+  // entry to the enum"). Bounded to short prompts so we don't catch
+  // multi-step requests of the same shape.
+  {
+    pattern:
+      "\\bchange\\s+(http|https|the\\s+(host|url|endpoint|protocol|scheme))\\s+to\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.7,
+    source: "builtin",
+  },
+  {
+    pattern:
+      "\\badd\\s+(a |an |the )?new\\s+(entry|value|item|option|case)\\s+to\\s+(the\\s+)?(enum|list|array|map|switch|select|dropdown)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.75,
     source: "builtin",
   },
 
@@ -129,6 +177,23 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     flags: "i",
     class: "hard",
     confidence: 0.7,
+    source: "builtin",
+  },
+  // Cross-codebase or "split this file into..." work that requires
+  // touching many files without a tight spec.
+  {
+    pattern:
+      "\\b(find\\s+and\\s+fix|fix\\s+all|remove\\s+all|clean\\s+up\\s+all|split\\s+this|break\\s+this\\s+up)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  {
+    pattern: "\\b(eviction|invalidation)\\s+(is|seems|appears)\\s+(wrong|off|broken|buggy)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
     source: "builtin",
   },
 
@@ -179,6 +244,24 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     flags: "i",
     class: "max",
     confidence: 0.8,
+    source: "builtin",
+  },
+  // "customers report random X, no error in logs" — adversarial-debugging
+  // signature: visible user-facing symptom + invisible cause.
+  {
+    pattern:
+      "\\b(customers?\\s+report|users?\\s+report|reports?\\s+of)\\b.+\\b(random|intermittent|sometimes|occasional|flaky)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Multi-service blast radius: explicit count of services affected.
+  {
+    pattern: "\\b(took\\s+down|brought\\s+down|knocked\\s+out)\\s+(\\d+|several|multiple|many)\\s+services?\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.9,
     source: "builtin",
   },
 ];

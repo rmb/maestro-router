@@ -1,7 +1,7 @@
 {
   "total": 137,
-  "correct": 125,
-  "accuracy": 0.9124,
+  "correct": 121,
+  "accuracy": 0.8832,
   "perClass": {
     "trivial": {
       "total": 27,
@@ -10,13 +10,13 @@
     },
     "simple": {
       "total": 21,
-      "correct": 19,
-      "accuracy": 0.9048
+      "correct": 18,
+      "accuracy": 0.8571
     },
     "standard": {
       "total": 24,
-      "correct": 23,
-      "accuracy": 0.9583
+      "correct": 20,
+      "accuracy": 0.8333
     },
     "hard": {
       "total": 24,
@@ -36,10 +36,10 @@
   },
   "confusion": {
     "trivial>trivial": 21,
-    "simple>simple": 19,
-    "simple>trivial": 2,
-    "standard>standard": 23,
-    "standard>simple": 1,
+    "simple>simple": 18,
+    "simple>trivial": 3,
+    "standard>standard": 20,
+    "standard>simple": 4,
     "hard>hard": 23,
     "hard>standard": 1,
     "reasoning>reasoning": 20,

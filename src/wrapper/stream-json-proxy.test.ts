@@ -300,6 +300,7 @@ describe("runStreamJsonProxy", () => {
       realClaude: "node",
       claudeArgs: ["--input-format", "stream-json"],
       pipeline: mockPipeline(),
+      profile: balancedProfile,
       userConfig: {},
       telemetry: tel.writer,
       stdin,
@@ -334,6 +335,7 @@ describe("runStreamJsonProxy", () => {
       realClaude: "node",
       claudeArgs: ["--input-format", "stream-json", "--session-id", "fixed-uuid"],
       pipeline: mockPipeline(),
+      profile: balancedProfile,
       userConfig: {},
       telemetry: tel.writer,
       stdin,
@@ -357,6 +359,7 @@ describe("runStreamJsonProxy", () => {
       realClaude: "node",
       claudeArgs: ["--input-format", "stream-json"],
       pipeline: mockPipeline(),
+      profile: balancedProfile,
       userConfig: {},
       telemetry: tel.writer,
       stdin,
@@ -396,6 +399,7 @@ describe("runStreamJsonProxy", () => {
       realClaude: "node",
       claudeArgs: ["--input-format", "stream-json"],
       pipeline: mockPipeline(),
+      profile: balancedProfile,
       userConfig: {},
       telemetry: tel.writer,
       stdin,
@@ -408,5 +412,55 @@ describe("runStreamJsonProxy", () => {
     const turn2SessionIdx = capturedArgs[1]?.indexOf("--session-id") ?? -1;
     expect(turn2SessionIdx).toBeGreaterThanOrEqual(0);
     expect(capturedArgs[1]?.[turn2SessionIdx + 1]).toBe("discovered-uuid");
+  });
+
+  test("slash command turns bypass pipeline and use standard class", async () => {
+    const tel = mockTelemetry();
+    const out = collector();
+    const err = collector();
+    const capturedDecisions: string[] = [];
+
+    // Pipeline should NOT be called for slash commands
+    const spyPipeline: Pipeline = {
+      route: async (req) => {
+        capturedDecisions.push(req.prompt);
+        return testDecision("trivial"); // would misroute if called
+      },
+    };
+
+    const mockSpawn = vi.fn().mockImplementation(
+      (_binary: string, _args: ReadonlyArray<string>, prompt: string) => {
+        return Promise.resolve({ exitCode: 0, cost: null, sessionId: "s1" });
+      },
+    );
+
+    const slashLine = JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "/model haiku" }] } });
+    const realLine = JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "real question" }] } });
+    const stdinData = [slashLine, realLine].join("\n") + "\n";
+    const stdin = Readable.from([stdinData]);
+
+    await runStreamJsonProxy({
+      realClaude: "node",
+      claudeArgs: ["--input-format", "stream-json"],
+      pipeline: spyPipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: err.stream,
+      spawnTurn: mockSpawn,
+    });
+
+    // Pipeline called only for the real question, not the slash command
+    expect(capturedDecisions).toHaveLength(1);
+    expect(capturedDecisions[0]).toBe("real question");
+    // Both turns still spawned (slash command gets standard model passthrough)
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    // Slash command turn logged with classifier=passthrough
+    const slashEvent = tel.events.find((e) =>
+      e.type === "decision" && (e as { decision: { classifier: string } }).decision.classifier === "passthrough",
+    );
+    expect(slashEvent).toBeDefined();
   });
 });

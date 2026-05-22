@@ -33,7 +33,7 @@ import { createPipeline } from "../core/pipeline.js";
 import type { Pipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { createTelemetry } from "../core/telemetry.js";
-import type { Classifier, Decision } from "../core/types.js";
+import type { Classifier, Decision, Profile } from "../core/types.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
@@ -221,7 +221,7 @@ function applyRouting(
   return filtered;
 }
 
-function buildPipeline(cli: LoadedCliConfig): Pipeline {
+function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Profile } {
   const { profile } = loadProfile({ userConfig: cli.userConfig, overrides: cli.profileOverrides });
   const heuristic =
     cli.userHeuristics.length > 0
@@ -230,7 +230,7 @@ function buildPipeline(cli: LoadedCliConfig): Pipeline {
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
   if (cli.userConfig.useLlmClassifier !== false) classifiers.push(llmClassifier);
-  return createPipeline({ classifiers, profile });
+  return { pipeline: createPipeline({ classifiers, profile }), profile };
 }
 
 export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<number> {
@@ -273,7 +273,7 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   // is classified independently and spawned as claude --print --resume.
   if (argsContainStreamJsonInput(claudeArgs)) {
     const cli = await loadCliConfig();
-    const pipeline = buildPipeline(cli);
+    const { pipeline, profile } = buildPipeline(cli);
     const telemetry = createTelemetry(
       cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
     );
@@ -281,6 +281,7 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
       realClaude,
       claudeArgs,
       pipeline,
+      profile,
       userConfig: cli.userConfig,
       telemetry,
       stdin: process.stdin,
@@ -307,7 +308,7 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   }
 
   const cli = await loadCliConfig();
-  const pipeline = buildPipeline(cli);
+  const { pipeline } = buildPipeline(cli);
   const decision = await pipeline.route({ prompt });
   const modifiedArgs = applyRouting(
     claudeArgs,

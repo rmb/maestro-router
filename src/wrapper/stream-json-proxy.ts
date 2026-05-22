@@ -3,9 +3,10 @@
 import readline from "node:readline";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import type { CostBreakdown, Decision, UserConfig } from "../core/types.js";
+import type { CostBreakdown, Decision, Profile, UserConfig } from "../core/types.js";
 import type { Pipeline } from "../core/pipeline.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
+import { isSlashPrefix } from "./passthrough.js";
 
 export type UserTurn = {
   promptText: string;
@@ -31,6 +32,8 @@ export type StreamJsonProxyOptions = {
   realClaude: string;
   claudeArgs: ReadonlyArray<string>;
   pipeline: Pipeline;
+  /** Active profile, used to construct the pass-through decision for slash commands. */
+  profile: Profile;
   userConfig: UserConfig;
   telemetry: TelemetryWriter;
   stdin: Readable;
@@ -301,7 +304,7 @@ export async function streamClaudeForTurn(
  * Session continuity is maintained via --session-id + --resume across all turns.
  */
 export async function runStreamJsonProxy(opts: StreamJsonProxyOptions): Promise<number> {
-  const { realClaude, claudeArgs, pipeline, userConfig, telemetry, stdin, stdout, stderr } = opts;
+  const { realClaude, claudeArgs, pipeline, profile, userConfig, telemetry, stdin, stdout, stderr } = opts;
   const spawnTurn = opts.spawnTurn ?? streamClaudeForTurn;
 
   let sessionId = extractSessionId(claudeArgs);
@@ -321,7 +324,20 @@ export async function runStreamJsonProxy(opts: StreamJsonProxyOptions): Promise<
       }
 
       const t0 = Date.now();
-      const decision = await pipeline.route({ prompt: turn.promptText });
+      // Slash commands (/model, /compact, /clear, etc.) are interactive-session
+      // directives handled by the extension UI. They should not be classified
+      // by the pipeline (a short token like "/model haiku" would likely misroute
+      // to Haiku). Route at standard class without touching any classifier.
+      const decision: Decision = isSlashPrefix(turn.promptText)
+        ? {
+            class: "standard",
+            classifier: "passthrough",
+            confidence: 1.0,
+            spec: profile.classes.standard,
+            latencyMs: 0,
+            diagnostics: [],
+          }
+        : await pipeline.route({ prompt: turn.promptText });
 
       const args = buildTurnArgs(
         claudeArgs,

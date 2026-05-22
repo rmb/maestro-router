@@ -11,10 +11,13 @@ import {
   buildProposedHeuristics,
   buildResponseArgs,
   DOWNGRADE,
+  EFFORT_DOWNGRADE,
   JUDGE_JSON_SCHEMA,
   JUDGE_PROMPT_TEMPLATE,
   JUDGE_SYSTEM_PROMPT,
   runTournament,
+  type MatrixCell,
+  type MatrixResult,
   type TournamentInput,
   type TournamentRowResult,
   type TournamentSpawn,
@@ -114,6 +117,54 @@ describe("runTournament — skip semantics", () => {
     expect(DOWNGRADE.hard).toBe("standard");
     expect(DOWNGRADE.reasoning).toBe("hard");
     expect(DOWNGRADE.max).toBe("reasoning");
+  });
+});
+
+describe("EFFORT_DOWNGRADE map", () => {
+  test("low maps to null (floor)", () => {
+    expect(EFFORT_DOWNGRADE.low).toBeNull();
+  });
+
+  test("medium→low, high→medium, xhigh→high, max→xhigh", () => {
+    expect(EFFORT_DOWNGRADE.medium).toBe("low");
+    expect(EFFORT_DOWNGRADE.high).toBe("medium");
+    expect(EFFORT_DOWNGRADE.xhigh).toBe("high");
+    expect(EFFORT_DOWNGRADE.max).toBe("xhigh");
+  });
+
+  test("every Effort key is present", () => {
+    const keys = Object.keys(EFFORT_DOWNGRADE) as Array<keyof typeof EFFORT_DOWNGRADE>;
+    expect(keys.sort()).toEqual(["high", "low", "max", "medium", "xhigh"].sort());
+  });
+
+  test("MatrixCell has the 6 required fields", () => {
+    const cell: MatrixCell = {
+      model: "sonnet",
+      effort: "medium",
+      wins: 1,
+      ties: 0,
+      losses: 2,
+      failed: 0,
+    };
+    expect(cell.model).toBe("sonnet");
+    expect(cell.effort).toBe("medium");
+    expect(typeof cell.wins).toBe("number");
+    expect(typeof cell.ties).toBe("number");
+    expect(typeof cell.losses).toBe("number");
+    expect(typeof cell.failed).toBe("number");
+  });
+
+  test("MatrixResult has class, currentModel, currentEffort, cells", () => {
+    const mr: MatrixResult = {
+      class: "standard",
+      currentModel: "sonnet",
+      currentEffort: "medium",
+      cells: [],
+    };
+    expect(mr.class).toBe("standard");
+    expect(mr.currentModel).toBe("sonnet");
+    expect(mr.currentEffort).toBe("medium");
+    expect(Array.isArray(mr.cells)).toBe(true);
   });
 });
 
@@ -601,6 +652,172 @@ describe("runTournament resume", () => {
       } catch {
         /* ignore */
       }
+    }
+  });
+});
+
+describe("runTournament matrix — effort downgrade", () => {
+  test("matrix=false (default): no B_effort spawns, no effortDowngradedEffort on rows", async () => {
+    const spawn = makeMockSpawn([
+      ok(envelope("A")),
+      ok(envelope("B")),
+      ok(judgeEnvelope("B")),
+    ]);
+    const report = await runTournament(
+      [{ prompt: "rename var", currentClass: "standard", currentSpec: getSpec("standard") }],
+      { spawn, getSpec },
+    );
+    // matrix defaults false — only 3 spawns: A, B_tier, judge
+    expect(spawn.calls).toHaveLength(3);
+    expect(report.rows[0]!.effortDowngradedEffort).toBeUndefined();
+    expect(report.matrixResults).toHaveLength(0);
+  });
+
+  test("matrix=true: standard/medium → also tests standard/low; 5 spawns", async () => {
+    const spawn = makeMockSpawn([
+      ok(envelope("A response")),
+      ok(envelope("B tier response")),
+      ok(judgeEnvelope("B", "tier ok")),
+      ok(envelope("B effort response")),
+      ok(judgeEnvelope("tie", "effort tie")),
+    ]);
+    const report = await runTournament(
+      [{ prompt: "format this file", currentClass: "standard", currentSpec: getSpec("standard") }],
+      { spawn, getSpec, matrix: true },
+    );
+    expect(spawn.calls).toHaveLength(5);
+    const row = report.rows[0]!;
+    expect(row.skipped).toBe(false);
+    expect(row.effortDowngradedEffort).toBe("low");
+    expect(row.judgeVerdictEffort).toBe("tie");
+    expect(row.recommendEffortDowngrade).toBe(true);
+    expect(report.matrixResults).toHaveLength(1);
+    const mr = report.matrixResults[0]!;
+    expect(mr.class).toBe("standard");
+    expect(mr.currentModel).toBe(getSpec("standard").model);
+    expect(mr.currentEffort).toBe(getSpec("standard").effort);
+    expect(mr.cells).toHaveLength(1);
+    const cell = mr.cells[0]!;
+    expect(cell.model).toBe(getSpec("standard").model);
+    expect(cell.effort).toBe("low");
+    expect(cell.ties).toBe(1);
+    expect(cell.wins).toBe(0);
+    expect(cell.losses).toBe(0);
+  });
+
+  test("matrix=true: low effort at floor → no B_effort spawn; still 3 spawns", async () => {
+    const spawn = makeMockSpawn([
+      ok(envelope("A")),
+      ok(envelope("B")),
+      ok(judgeEnvelope("A")),
+    ]);
+    const report = await runTournament(
+      [{ prompt: "add comment", currentClass: "simple", currentSpec: getSpec("simple") }],
+      { spawn, getSpec, matrix: true },
+    );
+    // simple spec has low effort — already at floor, no B_effort
+    expect(spawn.calls).toHaveLength(3);
+    expect(report.rows[0]!.effortDowngradedEffort).toBeUndefined();
+  });
+
+  test("matrix=true: B_effort spawn fails → effort fields not set, budget continues", async () => {
+    const spawn = makeMockSpawn([
+      ok(envelope("A")),
+      ok(envelope("B tier")),
+      ok(judgeEnvelope("A")),
+      { stdout: "", exitCode: 1, timedOut: false }, // B_effort fails
+    ]);
+    const report = await runTournament(
+      [{ prompt: "design cache", currentClass: "standard", currentSpec: getSpec("standard") }],
+      { spawn, getSpec, matrix: true },
+    );
+    // B_effort failed → no judge_effort spawn
+    expect(spawn.calls).toHaveLength(4);
+    const row = report.rows[0]!;
+    expect(row.effortDowngradedEffort).toBeUndefined();
+    expect(row.recommendEffortDowngrade).toBeUndefined();
+  });
+
+  test("matrix=true: budget cap reached before B_effort → B_effort not spawned", async () => {
+    // cap=$0.10; A+B_tier+judge costs $0.12 → cap hit before matrix block
+    const spawn = makeMockSpawn([
+      ok(envelope("A", 0.05)),
+      ok(envelope("B", 0.05)),
+      ok(judgeEnvelope("B", "ok", 0.02)),
+    ]);
+    const report = await runTournament(
+      [{ prompt: "x", currentClass: "standard", currentSpec: getSpec("standard") }],
+      { spawn, getSpec, matrix: true, budgetCapUsd: 0.10 },
+    );
+    expect(spawn.calls).toHaveLength(3);
+    expect(report.rows[0]!.effortDowngradedEffort).toBeUndefined();
+  });
+
+  test("matrix=true: effort judge fails → cell.failed incremented", async () => {
+    const spawn = makeMockSpawn([
+      ok(envelope("A")),
+      ok(envelope("B tier")),
+      ok(judgeEnvelope("A")),
+      ok(envelope("B effort")),
+      { stdout: "", exitCode: 1, timedOut: false }, // judge_effort fails
+    ]);
+    const report = await runTournament(
+      [{ prompt: "x", currentClass: "standard", currentSpec: getSpec("standard") }],
+      { spawn, getSpec, matrix: true },
+    );
+    const row = report.rows[0]!;
+    expect(row.judgeVerdictEffort).toBe("judge_failed");
+    expect(row.recommendEffortDowngrade).toBeUndefined();
+    const mr = report.matrixResults[0]!;
+    expect(mr.cells[0]!.failed).toBe(1);
+    expect(mr.cells[0]!.wins).toBe(0);
+  });
+
+  test("matrix=true: multiple prompts aggregate cells correctly", async () => {
+    const spawn = makeMockSpawn([
+      // prompt 1: standard
+      ok(envelope("A")), ok(envelope("B_tier")), ok(judgeEnvelope("A")),
+      ok(envelope("B_effort")), ok(judgeEnvelope("B", "effort win")),
+      // prompt 2: standard
+      ok(envelope("A")), ok(envelope("B_tier")), ok(judgeEnvelope("B")),
+      ok(envelope("B_effort")), ok(judgeEnvelope("tie", "effort tie")),
+    ]);
+    const report = await runTournament(
+      [
+        { prompt: "p1", currentClass: "standard", currentSpec: getSpec("standard") },
+        { prompt: "p2", currentClass: "standard", currentSpec: getSpec("standard") },
+      ],
+      { spawn, getSpec, matrix: true },
+    );
+    const mr = report.matrixResults.find((r) => r.class === "standard")!;
+    expect(mr).toBeDefined();
+    const cell = mr.cells.find((c) => c.model === getSpec("standard").model && c.effort === "low")!;
+    expect(cell).toBeDefined();
+    expect(cell.wins).toBe(1);
+    expect(cell.ties).toBe(1);
+    expect(cell.losses).toBe(0);
+  });
+
+  test("resume file includes effortDowngradedEffort when matrix=true", async () => {
+    const tmpFile = join(tmpdir(), `matrix-resume-${Date.now()}.jsonl`);
+    const spawn = makeMockSpawn([
+      ok(envelope("A")),
+      ok(envelope("B_tier")),
+      ok(judgeEnvelope("B")),
+      ok(envelope("B_effort")),
+      ok(judgeEnvelope("tie")),
+    ]);
+    try {
+      await runTournament(
+        [{ prompt: "matrix-resume-test", currentClass: "standard", currentSpec: getSpec("standard") }],
+        { spawn, getSpec, matrix: true, resumePath: tmpFile },
+      );
+      const line = readFileSync(tmpFile, "utf8").trim();
+      const saved = JSON.parse(line) as TournamentRowResult;
+      expect(saved.effortDowngradedEffort).toBe("low");
+      expect(saved.judgeVerdictEffort).toBe("tie");
+    } finally {
+      try { unlinkSync(tmpFile); } catch { /* ignore */ }
     }
   });
 });

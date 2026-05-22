@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractJSON } from "../core/extract.js";
 import { ALL_CLASSES } from "../core/profile.js";
-import type { Class, ClassSpec, HeuristicRule } from "../core/types.js";
+import type { Class, ClassSpec, Effort, HeuristicRule } from "../core/types.js";
 
 /**
  * One-tier-cheaper map. trivial has no cheaper tier — those inputs are
@@ -19,6 +19,19 @@ export const DOWNGRADE: Record<Class, Class | null> = {
   hard: "standard",
   reasoning: "hard",
   max: "reasoning",
+};
+
+/**
+ * One-effort-step-cheaper map. `low` is the floor — those inputs have no
+ * cheaper effort level and are skipped with reason `no cheaper effort`.
+ * Ordering (ascending cost): low < medium < high < xhigh < max.
+ */
+export const EFFORT_DOWNGRADE: Record<Effort, Effort | null> = {
+  low: null,
+  medium: "low",
+  high: "medium",
+  xhigh: "high",
+  max: "xhigh",
 };
 
 const DEFAULT_PER_CALL_TIMEOUT_MS = 60_000;
@@ -109,6 +122,8 @@ export type TournamentRunOptions = {
    * re-spending budget on rows that already have verdicts.
    */
   resumePath?: string;
+  /** When true, also test same-model one-effort-step-lower variant per prompt. Default false. */
+  matrix?: boolean;
 };
 
 export type TournamentProgress =
@@ -116,6 +131,8 @@ export type TournamentProgress =
   | { type: "a_done"; index: number; total: number; costUsd: number }
   | { type: "b_done"; index: number; total: number; costUsd: number }
   | { type: "judge_done"; index: number; total: number; verdict: TournamentDecision; costUsd: number; totalSpent: number }
+  | { type: "b_effort_done"; index: number; total: number; costUsd: number; effortLevel: Effort }
+  | { type: "judge_effort_done"; index: number; total: number; verdict: TournamentDecision; costUsd: number; totalSpent: number; effortLevel: Effort }
   | { type: "skipped"; index: number; total: number; reason: string }
   | { type: "budget_reached"; index: number; total: number; totalSpent: number };
 
@@ -135,6 +152,13 @@ export type TournamentRowResult = {
   judgeReason?: string;
   /** True if downgrade is recommended (B won or tied). undefined when judge failed/skipped. */
   recommendDowngrade?: boolean;
+  /** Matrix-only fields — present when matrix=true and effort is not at floor. */
+  effortDowngradedEffort?: Effort;
+  costBEffortUsd?: number;
+  costJudgeEffortUsd?: number;
+  judgeVerdictEffort?: TournamentDecision;
+  judgeReasonEffort?: string;
+  recommendEffortDowngrade?: boolean;
 };
 
 export type RecommendedDowngrade = {
@@ -153,6 +177,31 @@ export type PerClassWinRate = {
   aLosses: number;
 };
 
+/**
+ * Win-rate aggregation for a single (model, effort) cell in the matrix.
+ * `wins` counts B_wins; `ties` counts tie; `losses` counts A_wins.
+ * `failed` counts rows where the judge could not produce a verdict.
+ */
+export type MatrixCell = {
+  model: string;
+  effort: Effort;
+  wins: number;
+  ties: number;
+  losses: number;
+  failed: number;
+};
+
+/**
+ * Per-class matrix result — all cells tested for this class plus the
+ * (model, effort) pair that is currently in the active profile.
+ */
+export type MatrixResult = {
+  class: Class;
+  currentModel: string;
+  currentEffort: Effort;
+  cells: MatrixCell[];
+};
+
 export type TournamentReport = {
   totalPrompts: number;
   ran: number;
@@ -161,6 +210,8 @@ export type TournamentReport = {
   perClassWinRates: Record<Class, PerClassWinRate>;
   recommendedDowngrades: RecommendedDowngrade[];
   rows: TournamentRowResult[];
+  /** Populated when matrix=true; one entry per class that had prompts run. */
+  matrixResults: MatrixResult[];
 };
 
 type ClaudeEnvelope = {
@@ -385,6 +436,7 @@ export async function runTournament(
 
   const rows: TournamentRowResult[] = [];
   const perClassWinRates = emptyWinRates();
+  const matrixCellsByClass = new Map<Class, Map<string, MatrixCell>>();
   let totalCost = 0;
   let ran = 0;
   let skipped = 0;
@@ -547,14 +599,6 @@ export async function runTournament(
       row.judgeReason = judgeReason;
       row.recommendDowngrade = judgeVerdict === "B_wins" || judgeVerdict === "tie";
     }
-    rows.push(row);
-    if (opts.resumePath !== undefined) {
-      try {
-        appendFileSync(opts.resumePath, JSON.stringify(row) + "\n");
-      } catch {
-        // never block the tournament on a debug-write failure
-      }
-    }
 
     // Per-class win-rate aggregation only counts rows where the judge ruled.
     if (!judgeFailed) {
@@ -576,9 +620,118 @@ export async function runTournament(
     });
 
     if (budgetCap !== undefined && totalCost > budgetCap) budgetReached = true;
+
+    // --- Matrix effort-downgrade block ---
+    if (opts.matrix === true && !budgetReached) {
+      const effortTarget = EFFORT_DOWNGRADE[input.currentSpec.effort];
+      if (effortTarget !== null) {
+        const bEffortSpec: ClassSpec = { ...input.currentSpec, effort: effortTarget };
+        const bEffortArgs = buildResponseArgs(bEffortSpec);
+        let bEffortResp: ResponseExtraction | null = null;
+        try {
+          const bEffortResult = await spawn(bEffortArgs, { input: input.prompt, timeoutMs });
+          bEffortResp =
+            !bEffortResult.timedOut && bEffortResult.exitCode === 0
+              ? extractResponse(bEffortResult.stdout)
+              : null;
+        } catch {
+          bEffortResp = null;
+        }
+
+        if (bEffortResp) {
+          totalCost += bEffortResp.costUsd;
+          emit({ type: "b_effort_done", index, total, costUsd: bEffortResp.costUsd, effortLevel: effortTarget });
+
+          const judgeEffortInput = JUDGE_PROMPT_TEMPLATE(input.prompt, aResp.text, bEffortResp.text);
+          const judgeEffortArgs = buildJudgeArgs({ model: judgeModel, systemPrompt: JUDGE_SYSTEM_PROMPT });
+          let judgeEffortVerdict: TournamentDecision = "judge_failed";
+          let judgeEffortReason = "";
+          let judgeEffortCost = 0;
+          let judgeEffortFailed = false;
+          try {
+            const judgeEffortResult = await spawn(judgeEffortArgs, { input: judgeEffortInput, timeoutMs });
+            if (judgeEffortResult.timedOut || judgeEffortResult.exitCode !== 0) {
+              judgeEffortFailed = true;
+            } else {
+              const v = extractJudgeVerdict(judgeEffortResult.stdout);
+              if (v === null) {
+                judgeEffortFailed = true;
+              } else {
+                judgeEffortVerdict = v.verdict;
+                judgeEffortReason = v.reason;
+                judgeEffortCost = v.costUsd;
+              }
+            }
+          } catch {
+            judgeEffortFailed = true;
+          }
+          totalCost += judgeEffortCost;
+
+          row.effortDowngradedEffort = effortTarget;
+          row.costBEffortUsd = bEffortResp.costUsd;
+          row.costJudgeEffortUsd = judgeEffortCost;
+          row.judgeVerdictEffort = judgeEffortFailed ? "judge_failed" : judgeEffortVerdict;
+          if (!judgeEffortFailed) {
+            row.judgeReasonEffort = judgeEffortReason;
+            row.recommendEffortDowngrade =
+              judgeEffortVerdict === "B_wins" || judgeEffortVerdict === "tie";
+          }
+
+          // Matrix cell aggregation
+          let classCells = matrixCellsByClass.get(input.currentClass);
+          if (!classCells) {
+            classCells = new Map();
+            matrixCellsByClass.set(input.currentClass, classCells);
+          }
+          const cell = getOrCreateCell(classCells, input.currentSpec.model, effortTarget);
+          if (judgeEffortFailed) {
+            cell.failed++;
+          } else if (judgeEffortVerdict === "B_wins") {
+            cell.wins++;
+          } else if (judgeEffortVerdict === "tie") {
+            cell.ties++;
+          } else if (judgeEffortVerdict === "A_wins") {
+            cell.losses++;
+          }
+
+          emit({
+            type: "judge_effort_done",
+            index,
+            total,
+            verdict: judgeEffortFailed ? "judge_failed" : judgeEffortVerdict,
+            costUsd: judgeEffortCost,
+            totalSpent: totalCost,
+            effortLevel: effortTarget,
+          });
+
+          if (budgetCap !== undefined && totalCost > budgetCap) budgetReached = true;
+        }
+      }
+    }
+    // --- end matrix block ---
+
+    rows.push(row);
+    if (opts.resumePath !== undefined) {
+      try {
+        appendFileSync(opts.resumePath, JSON.stringify(row) + "\n");
+      } catch {
+        // never block the tournament on a debug-write failure
+      }
+    }
   }
 
   const recommendedDowngrades = mineRecommendations(rows);
+
+  const matrixResults: MatrixResult[] = [];
+  for (const [cls, cellMap] of matrixCellsByClass) {
+    const spec = opts.getSpec(cls);
+    matrixResults.push({
+      class: cls,
+      currentModel: spec.model,
+      currentEffort: spec.effort,
+      cells: Array.from(cellMap.values()),
+    });
+  }
 
   return {
     totalPrompts: inputs.length,
@@ -588,7 +741,22 @@ export async function runTournament(
     perClassWinRates,
     recommendedDowngrades,
     rows,
+    matrixResults,
   };
+}
+
+function getOrCreateCell(
+  cells: Map<string, MatrixCell>,
+  model: string,
+  effort: Effort,
+): MatrixCell {
+  const key = `${model}:${effort}`;
+  let cell = cells.get(key);
+  if (!cell) {
+    cell = { model, effort, wins: 0, ties: 0, losses: 0, failed: 0 };
+    cells.set(key, cell);
+  }
+  return cell;
 }
 
 /**

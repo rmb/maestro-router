@@ -37,7 +37,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prebuild": "tsx scripts/check-exemplars-checksum.ts",
-    "build": "tsc && chmod +x dist/cli/index.js",
+    "build": "tsc && cp src/classifiers/exemplars.json dist/classifiers/exemplars.json && chmod +x dist/cli/index.js",
     "embed": "tsx scripts/embed.ts",
     "eval": "tsx evals/run.ts",
     "verify": "pnpm dlx publint && pnpm dlx @arethetypeswrong/cli --pack ."
@@ -47,6 +47,7 @@
     "@types/node": "^22.10.5",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
+    "@xenova/transformers": "^2.17.2",
     "eslint": "^9.18.0",
     "publint": "^0.3.2",
     "tsx": "^4.19.2",

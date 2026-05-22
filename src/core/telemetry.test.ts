@@ -43,6 +43,19 @@ describe("createTelemetry", () => {
     expect(parsed.type).toBe("decision");
   });
 
+  test("persists optional prompt field on decision events", async () => {
+    const path = join(dir, "decisions.jsonl");
+    const configPath = join(dir, "config.json");
+    const tel = createTelemetry({ path, configPath });
+
+    await tel.log({ ...decisionEvent(), prompt: "hello world" });
+    const events = await tel.readAll();
+    expect(events).toHaveLength(1);
+    const evt = events[0]!;
+    expect(evt.type).toBe("decision");
+    expect((evt as { prompt?: string }).prompt).toBe("hello world");
+  });
+
   test("readAll returns parsed events", async () => {
     const tel = createTelemetry({
       path: join(dir, "decisions.jsonl"),

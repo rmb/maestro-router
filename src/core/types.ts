@@ -157,9 +157,24 @@ export type CostBreakdown = {
   serviceTier: string;
 };
 
+/**
+ * Max chars of a prompt persisted in telemetry. Truncates the head of the
+ * prompt to keep decisions.jsonl bounded — pathological large prompts
+ * (e.g. multi-MB pasted logs) would otherwise bloat the log. Consumers
+ * relabeling real prompts only need the leading window to identify intent.
+ */
+export const PROMPT_TRUNCATE_CHARS = 500;
+
 /** A single telemetry event written to ~/.maestro/decisions.jsonl. */
 export type TelemetryEvent =
-  | { type: "decision"; ts: string; decision: Decision; cost?: CostBreakdown }
+  | {
+      type: "decision";
+      ts: string;
+      decision: Decision;
+      cost?: CostBreakdown;
+      /** Truncated to PROMPT_TRUNCATE_CHARS to bound log growth. */
+      prompt?: string;
+    }
   | { type: "override"; ts: string; from: Class; to: Class; prompt: string }
   | {
       type: "feedback";

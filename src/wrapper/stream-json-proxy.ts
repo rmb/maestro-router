@@ -4,9 +4,13 @@ import readline from "node:readline";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import type { CostBreakdown, Decision, Profile, UserConfig } from "../core/types.js";
+import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Pipeline } from "../core/pipeline.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
 import { isSlashPrefix } from "./passthrough.js";
+
+const truncate = (s: string, max: number): string =>
+  s.length > max ? s.slice(0, max) : s;
 
 export type UserTurn = {
   promptText: string;
@@ -361,6 +365,7 @@ export async function runStreamJsonProxy(opts: StreamJsonProxyOptions): Promise<
           ts: new Date().toISOString(),
           decision: { ...decision, latencyMs: Date.now() - t0 },
           ...(result.cost ? { cost: result.cost } : {}),
+          prompt: truncate(turn.promptText, PROMPT_TRUNCATE_CHARS),
         });
       } catch { /* never blocks routing */ }
 

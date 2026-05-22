@@ -7,7 +7,11 @@ import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import type { Classifier } from "../core/types.js";
+import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
+
+const truncate = (s: string, max: number): string =>
+  s.length > max ? s.slice(0, max) : s;
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { parseOutput } from "../wrapper/output.js";
@@ -114,6 +118,7 @@ export function registerRunCommand(program: Command): void {
           ts: new Date().toISOString(),
           decision,
           cost: parsed.cost,
+          prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
 
         for (const d of parsed.diagnostics) {

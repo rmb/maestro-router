@@ -414,6 +414,64 @@ describe("runStreamJsonProxy", () => {
     expect(capturedArgs[1]?.[turn2SessionIdx + 1]).toBe("discovered-uuid");
   });
 
+  test("logs truncated prompt text on each decision event", async () => {
+    const tel = mockTelemetry();
+    const out = collector();
+    const err = collector();
+
+    const mockSpawn = vi.fn().mockResolvedValue({ exitCode: 0, cost: null, sessionId: "s1" });
+
+    const stdinData = [userLine("hello world")].join("\n") + "\n";
+    const stdin = Readable.from([stdinData]);
+
+    await runStreamJsonProxy({
+      realClaude: "node",
+      claudeArgs: ["--input-format", "stream-json"],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: err.stream,
+      spawnTurn: mockSpawn,
+    });
+
+    expect(tel.events).toHaveLength(1);
+    const evt = tel.events[0]!;
+    expect(evt.type).toBe("decision");
+    expect((evt as { prompt?: string }).prompt).toBe("hello world");
+  });
+
+  test("truncates prompt to 500 chars in decision telemetry", async () => {
+    const tel = mockTelemetry();
+    const out = collector();
+    const err = collector();
+
+    const mockSpawn = vi.fn().mockResolvedValue({ exitCode: 0, cost: null, sessionId: "s1" });
+
+    const longPrompt = "x".repeat(600);
+    const stdinData = [userLine(longPrompt)].join("\n") + "\n";
+    const stdin = Readable.from([stdinData]);
+
+    await runStreamJsonProxy({
+      realClaude: "node",
+      claudeArgs: ["--input-format", "stream-json"],
+      pipeline: mockPipeline(),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: err.stream,
+      spawnTurn: mockSpawn,
+    });
+
+    const evt = tel.events[0]!;
+    expect((evt as { prompt?: string }).prompt).toHaveLength(500);
+    expect((evt as { prompt?: string }).prompt).toBe("x".repeat(500));
+  });
+
   test("slash command turns bypass pipeline and use standard class", async () => {
     const tel = mockTelemetry();
     const out = collector();

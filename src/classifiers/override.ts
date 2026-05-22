@@ -10,6 +10,13 @@ import type { Class, ClassifyFn, Diagnostic, Request } from "../core/types.js";
  */
 const OVERRIDE_RE = /(?:^|\s)@(opus|deep|think|sonnet|fast\+context|fast|haiku)\b/i;
 
+/**
+ * Natural-language equivalents of @think/@deep. Requires an intensity
+ * modifier so "I think", "rethink", "overthink" are excluded.
+ */
+const NATURAL_THINK_RE =
+  /\bthink\s+(hard|harder|deeply|deep|carefully|more\s+carefully|step[\s-]+by[\s-]+step)\b/i;
+
 type Mapping = { class: Class; disableBare?: boolean };
 
 const MAPPING: Record<string, Mapping> = {
@@ -23,24 +30,40 @@ const MAPPING: Record<string, Mapping> = {
 };
 
 const classify: ClassifyFn = (req: Request) => {
+  // @-prefixed hint — checked first so @fast think hard stays trivial
   const match = req.prompt.match(OVERRIDE_RE);
-  if (!match) return null;
-  const hint = match[1]?.toLowerCase();
-  if (!hint) return null;
-  const mapping = MAPPING[hint];
-  if (!mapping) return null;
-
-  const diagnostics: Diagnostic[] = [
-    { severity: "info", code: "override.matched", message: `@${hint}` },
-  ];
-  if (mapping.disableBare) {
-    diagnostics.push({
-      severity: "info",
-      code: "override.disable_bare",
-      message: "preserve project context (@fast+context)",
-    });
+  if (match) {
+    const hint = match[1]?.toLowerCase();
+    if (hint) {
+      const mapping = MAPPING[hint];
+      if (mapping) {
+        const diagnostics: Diagnostic[] = [
+          { severity: "info", code: "override.matched", message: `@${hint}` },
+        ];
+        if (mapping.disableBare) {
+          diagnostics.push({
+            severity: "info",
+            code: "override.disable_bare",
+            message: "preserve project context (@fast+context)",
+          });
+        }
+        return { class: mapping.class, confidence: 1.0, diagnostics };
+      }
+    }
   }
-  return { class: mapping.class, confidence: 1.0, diagnostics };
+
+  // Natural-language think hint ("think hard", "think step by step", …)
+  if (NATURAL_THINK_RE.test(req.prompt)) {
+    return {
+      class: "max",
+      confidence: 1.0,
+      diagnostics: [
+        { severity: "info", code: "override.nl_think", message: "natural-language think hint" },
+      ],
+    };
+  }
+
+  return null;
 };
 
 export const overrideClassifier = createClassifier({

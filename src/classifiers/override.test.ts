@@ -98,6 +98,43 @@ describe("overrideClassifier", () => {
   });
 });
 
+describe("natural-language think hints", () => {
+  test("think hard → max", async () => {
+    expect(await call("think hard about this")).toMatchObject({ class: "max" });
+  });
+
+  test("think deeply → max", async () => {
+    expect(await call("think deeply about this")).toMatchObject({ class: "max" });
+  });
+
+  test("think step by step → max", async () => {
+    expect(await call("think step by step")).toMatchObject({ class: "max" });
+  });
+
+  test("reason through → max", async () => {
+    expect(await call("reason through this problem")).toMatchObject({ class: "max" });
+  });
+
+  test("case insensitive", async () => {
+    expect(await call("THINK HARD")).toMatchObject({ class: "max" });
+    expect(await call("Think Deeply")).toMatchObject({ class: "max" });
+    expect(await call("THINK STEP BY STEP")).toMatchObject({ class: "max" });
+  });
+
+  test("matches mid-sentence", async () => {
+    expect(await call("can you think hard about this architecture")).toMatchObject({ class: "max" });
+  });
+
+  test("natural hint does not block existing @-hint", async () => {
+    expect(await call("@fast think hard about this")).toMatchObject({ class: "trivial" });
+  });
+
+  test("returns confidence 1.0 on natural-language match", async () => {
+    const r = await call("think hard about this");
+    expect(r!.confidence).toBe(1.0);
+  });
+});
+
 describe("stripOverride", () => {
   test("removes leading override", () => {
     expect(stripOverride("@fast rename foo")).toBe("rename foo");

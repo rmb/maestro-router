@@ -95,6 +95,16 @@ export type UserConfig = {
    * an explicit opt-out (S2).
    */
   useEmbeddingClassifier?: boolean;
+  /**
+   * Text appended to Claude's system prompt on every spawn via
+   * `--append-system-prompt`. Use this to instruct Claude to keep responses
+   * brief, reducing output tokens and slowing context-window compaction.
+   *
+   * Example: "Be concise. Skip preambles and trailing summaries."
+   *
+   * Set to `""` (empty string) to disable. Defaults to a short brevity hint.
+   */
+  appendSystemPrompt?: string;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

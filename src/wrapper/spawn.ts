@@ -56,6 +56,15 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 
+  // Brevity hint — reduces output tokens, slows context compaction
+  const appendPrompt =
+    userConfig.appendSystemPrompt !== undefined
+      ? userConfig.appendSystemPrompt
+      : "Be concise. Avoid preambles and trailing summaries — the user can read the diff.";
+  if (appendPrompt.length > 0) {
+    args.push("--append-system-prompt", appendPrompt);
+  }
+
   // S6: --bare requires four conditions (R-auth: bare_supported by env)
   const codes = decision.diagnostics.map((d) => d.code);
   const bareSafe = codes.includes("heuristic.bare_safe");

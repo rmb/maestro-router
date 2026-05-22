@@ -48,6 +48,42 @@ export type LoadCliConfigOptions = {
 };
 
 /**
+ * Fields in UserConfig that a per-project .maestro/config.json is allowed
+ * to override. Everything not listed here stays global-only.
+ *
+ * Rationale:
+ *   - `profile` / `excludeDynamicSections` / `useEmbeddingClassifier` are
+ *     pure routing preferences safe to scope per-repo.
+ *   - `telemetryPath` must stay global so `maestro stats` / `maestro tune`
+ *     always find the same file regardless of cwd.
+ *   - `feedbackSampleRate` is a personal preference; varying it per-repo
+ *     produces surprising sampling behaviour for the individual user.
+ *   - `useLlmClassifierInWrapper` lives on the hot path and carries cold-cache
+ *     cost ($0.04/call) + latency (13-20s); project-level opt-in would silently
+ *     penalise every teammate who pulls that repo.
+ */
+export const PROJECT_CONFIG_ALLOWED_FIELDS: ReadonlySet<keyof UserConfig> = new Set([
+  "profile",
+  "excludeDynamicSections",
+  "useEmbeddingClassifier",
+]);
+
+/**
+ * Returns a copy of `project` with every key that is not in
+ * PROJECT_CONFIG_ALLOWED_FIELDS removed. Called before merging project
+ * config over user-global config in `loadCliConfig`.
+ */
+export function filterProjectConfig(project: UserConfig): UserConfig {
+  const result: UserConfig = {};
+  for (const key of PROJECT_CONFIG_ALLOWED_FIELDS) {
+    if (key in project) {
+      (result as Record<string, unknown>)[key] = project[key];
+    }
+  }
+  return result;
+}
+
+/**
  * Layered config loader (F2). Reads in priority order, project overrides global:
  *
  *   1. User-global  — ~/.maestro/{config,profile-overrides,heuristics}.json
@@ -102,7 +138,7 @@ export async function loadCliConfig(
   }
 
   return {
-    userConfig: { ...userGlobal, ...userProject },
+    userConfig: { ...userGlobal, ...filterProjectConfig(userProject) },
     profileOverrides: mergeProfileOverrides(overridesGlobal, overridesProject),
     userHeuristics: [...heuristicsGlobal, ...heuristicsProject],
     configPath,

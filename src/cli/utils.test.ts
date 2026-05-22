@@ -3,8 +3,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { format, loadCliConfig, wrap, writeUserConfig } from "./utils.js";
+import { dirname, join } from "node:path";
+import { filterProjectConfig, format, loadCliConfig, wrap, writeUserConfig } from "./utils.js";
 
 let dir: string;
 let prevMaestroHome: string | undefined;
@@ -158,6 +158,204 @@ describe("loadCliConfig (F2 per-project discovery)", () => {
       cwd: isolated,
     });
     expect(c.projectConfigDir).toBeNull();
+  });
+
+  test("project config does NOT override global telemetryPath", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ telemetryPath: "/global/decisions.jsonl" }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { telemetryPath: "/project/decisions.jsonl" } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.telemetryPath).toBe("/global/decisions.jsonl");
+  });
+
+  test("project config does NOT override global feedbackSampleRate", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ feedbackSampleRate: 0.1 }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { feedbackSampleRate: 0.99 } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.feedbackSampleRate).toBe(0.1);
+  });
+
+  test("project config does NOT override global useLlmClassifierInWrapper", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ useLlmClassifierInWrapper: false }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { useLlmClassifierInWrapper: true } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.useLlmClassifierInWrapper).toBe(false);
+  });
+
+  test("project config does NOT inject disallowed field when global is absent", async () => {
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { telemetryPath: "/injected/path.jsonl" } });
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: project,
+    });
+    expect(c.userConfig.telemetryPath).toBeUndefined();
+  });
+
+  test("project config DOES override global profile", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ profile: "balanced" }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { profile: "quality" } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.profile).toBe("quality");
+  });
+
+  test("project config DOES override global excludeDynamicSections", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ excludeDynamicSections: false }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { excludeDynamicSections: true } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.excludeDynamicSections).toBe(true);
+  });
+
+  test("project config DOES override global useEmbeddingClassifier", async () => {
+    const globalPath = join(dir, "global.json");
+    await writeFile(globalPath, JSON.stringify({ useEmbeddingClassifier: true }));
+    const project = join(dir, "myrepo");
+    await makeProjectConfig(project, { config: { useEmbeddingClassifier: false } });
+    const c = await loadCliConfig({ overridePath: globalPath, cwd: project });
+    expect(c.userConfig.useEmbeddingClassifier).toBe(false);
+  });
+});
+
+describe("loadCliConfig — allowed-field integration", () => {
+  async function writeJson(path: string, value: object): Promise<void> {
+    const { mkdir: mkdirFs, writeFile: wf } = await import("node:fs/promises");
+    await mkdirFs(dirname(path), { recursive: true });
+    await wf(path, JSON.stringify(value));
+  }
+
+  test("full layered merge: allowed fields from project win, disallowed fields stay global", async () => {
+    const globalConfigPath = join(dir, "home", "config.json");
+    await writeJson(globalConfigPath, {
+      profile: "balanced",
+      excludeDynamicSections: false,
+      useEmbeddingClassifier: false,
+      telemetryPath: "/global/decisions.jsonl",
+      feedbackSampleRate: 0.1,
+      useLlmClassifierInWrapper: false,
+      dailyCostCapUsd: 3,
+    });
+    const projectRoot = join(dir, "workspace", "my-repo");
+    const projectMaestro = join(projectRoot, ".maestro");
+    await writeJson(join(projectMaestro, "config.json"), {
+      profile: "quality",
+      excludeDynamicSections: true,
+      useEmbeddingClassifier: true,
+      telemetryPath: "/project/decisions.jsonl",
+      feedbackSampleRate: 0.99,
+      useLlmClassifierInWrapper: true,
+      dailyCostCapUsd: 99,
+    });
+
+    const c = await loadCliConfig({ overridePath: globalConfigPath, cwd: projectRoot });
+
+    expect(c.userConfig.profile).toBe("quality");
+    expect(c.userConfig.excludeDynamicSections).toBe(true);
+    expect(c.userConfig.useEmbeddingClassifier).toBe(true);
+
+    expect(c.userConfig.telemetryPath).toBe("/global/decisions.jsonl");
+    expect(c.userConfig.feedbackSampleRate).toBe(0.1);
+    expect(c.userConfig.useLlmClassifierInWrapper).toBe(false);
+    expect(c.userConfig.dailyCostCapUsd).toBe(3);
+  });
+
+  test("walk-up from deeply nested subdir finds grandparent .maestro/", async () => {
+    const repoRoot = join(dir, "monorepo");
+    const maestroDir = join(repoRoot, ".maestro");
+    await writeJson(join(maestroDir, "config.json"), { profile: "cheap" });
+    const deepCwd = join(repoRoot, "packages", "api", "src", "handlers");
+    await import("node:fs/promises").then(({ mkdir: mkd }) =>
+      mkd(deepCwd, { recursive: true }),
+    );
+
+    const c = await loadCliConfig({
+      overridePath: join(dir, "missing-global.json"),
+      cwd: deepCwd,
+    });
+
+    expect(c.projectConfigDir).toBe(maestroDir);
+    expect(c.userConfig.profile).toBe("cheap");
+  });
+
+  test("user-global ~/.maestro is never selected as project root when cwd is $HOME subdir", async () => {
+    const fakeHome = join(dir, "fake-home");
+    await writeJson(join(fakeHome, "config.json"), { profile: "global-only" });
+    const cwdInsideHome = join(fakeHome, "some-project");
+    await import("node:fs/promises").then(({ mkdir: mkd }) =>
+      mkd(cwdInsideHome, { recursive: true }),
+    );
+
+    const c = await loadCliConfig({
+      overridePath: join(fakeHome, "config.json"),
+      cwd: cwdInsideHome,
+    });
+
+    expect(c.projectConfigDir).toBeNull();
+    expect(c.userConfig.profile).toBe("global-only");
+  });
+
+  test("no project config at all — projectConfigDir is null and global applies unchanged", async () => {
+    const globalConfigPath = join(dir, "home", "config.json");
+    await writeJson(globalConfigPath, {
+      profile: "balanced",
+      telemetryPath: "/global/decisions.jsonl",
+    });
+    const emptyCwd = join(dir, "no-maestro-here", "sub");
+    await import("node:fs/promises").then(({ mkdir: mkd }) =>
+      mkd(emptyCwd, { recursive: true }),
+    );
+
+    const c = await loadCliConfig({ overridePath: globalConfigPath, cwd: emptyCwd });
+
+    expect(c.projectConfigDir).toBeNull();
+    expect(c.userConfig.profile).toBe("balanced");
+    expect(c.userConfig.telemetryPath).toBe("/global/decisions.jsonl");
+  });
+
+  test("filterProjectConfig returns only allowed keys, strips everything else", () => {
+    const input: Parameters<typeof filterProjectConfig>[0] = {
+      profile: "quality",
+      excludeDynamicSections: true,
+      useEmbeddingClassifier: false,
+      telemetryPath: "/should/be/removed",
+      feedbackSampleRate: 0.99,
+      useLlmClassifierInWrapper: true,
+      dailyCostCapUsd: 50,
+      aggressiveness: "aggressive",
+    };
+    const result = filterProjectConfig(input);
+    expect(result).toEqual({
+      profile: "quality",
+      excludeDynamicSections: true,
+      useEmbeddingClassifier: false,
+    });
+    expect("telemetryPath" in result).toBe(false);
+    expect("feedbackSampleRate" in result).toBe(false);
+    expect("useLlmClassifierInWrapper" in result).toBe(false);
+    expect("dailyCostCapUsd" in result).toBe(false);
+    expect("aggressiveness" in result).toBe(false);
+  });
+
+  test("filterProjectConfig with empty input returns empty object", () => {
+    expect(filterProjectConfig({})).toEqual({});
+  });
+
+  test("filterProjectConfig does not mutate the input", () => {
+    const input: Parameters<typeof filterProjectConfig>[0] = {
+      profile: "quality",
+      telemetryPath: "/some/path",
+    };
+    const original = { ...input };
+    filterProjectConfig(input);
+    expect(input).toEqual(original);
   });
 });
 

@@ -107,7 +107,7 @@ Force a class inline — Maestro strips the hint before forwarding:
 ~/.maestro/config.json              # global preferences
 ~/.maestro/profile-overrides.json   # per-class model/effort/budget tweaks
 ~/.maestro/heuristics.json          # custom regex rules (auto-written by tune --apply)
-<cwd>/.maestro/config.json          # per-project overrides (profile, excludeDynamicSections, useEmbeddingClassifier)
+<cwd>/.maestro/config.json          # per-project overrides (allowed fields only — see below)
 ```
 
 Example `~/.maestro/config.json`:
@@ -123,6 +123,53 @@ Example `~/.maestro/config.json`:
 ```
 
 Built-in profiles: `balanced` (default), `cheap` (Haiku-biased), `quality` (Opus-biased).
+
+### Per-project config
+
+Place a `.maestro/` directory anywhere in your repo tree. Maestro walks up
+from `cwd` on every invocation and loads the nearest `.maestro/` it finds,
+merging it on top of your user-global `~/.maestro/`. The user-global
+directory itself is never selected as a project root, so working inside
+`$HOME` doesn't double-count.
+
+```
+<your-repo>/
+  .maestro/
+    config.json              # per-project routing preferences (allowed fields only)
+    profile-overrides.json   # per-class model/effort/budget tweaks for this repo
+    heuristics.json          # extra regex rules (appended after global rules)
+```
+
+**Allowed fields in `<repo>/.maestro/config.json`:**
+
+| Field | Effect |
+|---|---|
+| `profile` | Use a different built-in profile for this repo (`balanced`, `cheap`, `quality`) |
+| `excludeDynamicSections` | Enable/disable `--exclude-dynamic-system-prompt-sections` for this repo |
+| `useEmbeddingClassifier` | Enable/disable the ONNX embedding stage for this repo |
+
+All other `UserConfig` fields (`telemetryPath`, `feedbackSampleRate`,
+`useLlmClassifierInWrapper`, `dailyCostCapUsd`, etc.) are silently ignored in
+project config — they belong in `~/.maestro/config.json` only. This prevents
+a `.maestro/config.json` committed to a shared repo from changing teammates'
+telemetry paths or hot-path latency.
+
+`profile-overrides.json` and `heuristics.json` are not field-filtered: every
+valid key in those files is applied (per-class for overrides, appended for
+heuristics).
+
+**Minimal example** — `<your-repo>/.maestro/config.json`:
+
+```json
+{
+  "profile": "quality"
+}
+```
+
+That repo's prompts use the `quality` profile; every other repo still uses
+your global defaults. Teammates who pull the same repo are unaffected on
+dimensions they control globally (telemetry path, feedback sampling, LLM
+wrapper opt-in).
 
 ---
 

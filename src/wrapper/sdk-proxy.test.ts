@@ -282,5 +282,84 @@ describe("runSdkProxy — control protocol passthrough", () => {
   });
 });
 
-// `vi` is referenced for parity with future expansion; keep import live.
-void vi;
+describe("runSdkProxy — multi-turn + slash commands", () => {
+  test("handles two user turns in sequence with separate set_model injections", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    // First "format" → trivial, second "design a sharding strategy" → standard.
+    let callCount = 0;
+    const pipeline: Pipeline = {
+      route: async () => {
+        callCount += 1;
+        return decisionFor(callCount === 1 ? "trivial" : "standard");
+      },
+    };
+
+    const stdin = Readable.from([
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"format file"}]}}\n',
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"design sharding"}]}}\n',
+    ]);
+    setTimeout(() => fc.close(0), 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Order: set_model(haiku), user1, set_model(sonnet), user2
+    expect(fc.stdinWrites).toHaveLength(4);
+    const sm1 = JSON.parse(fc.stdinWrites[0]!.trim());
+    const sm2 = JSON.parse(fc.stdinWrites[2]!.trim());
+    expect(sm1.request.model).toBe(balancedProfile.classes.trivial.model);
+    expect(sm2.request.model).toBe(balancedProfile.classes.standard.model);
+    expect(sm1.request_id).not.toBe(sm2.request_id);
+    expect(tel.events).toHaveLength(2);
+  });
+
+  test("slash-prefixed user messages bypass the classifier and use standard class", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const routeMock = vi.fn();
+    const pipeline: Pipeline = { route: routeMock };
+
+    const stdin = Readable.from([
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"/model haiku"}]}}\n',
+    ]);
+    setTimeout(() => fc.close(0), 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // pipeline.route must NOT have been called for a slash command.
+    expect(routeMock).not.toHaveBeenCalled();
+    // No set_model injected — slash commands route at "standard" with passthrough classifier.
+    // We still forward the user message untouched.
+    expect(fc.stdinWrites).toHaveLength(1);
+    const fwd = JSON.parse(fc.stdinWrites[0]!.trim());
+    expect(fwd.type).toBe("user");
+  });
+});

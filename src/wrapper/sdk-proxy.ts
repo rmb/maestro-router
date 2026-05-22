@@ -94,6 +94,16 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
     if (frame !== null && isUserTextMessage(frame)) {
       const promptText = extractPromptText(frame) ?? "";
       const t0 = Date.now();
+
+      // Slash commands (/model, /clear, /compact, etc.) are interactive
+      // directives handled by the SDK host. Don't classify them, and
+      // don't inject set_model — they should reach the SDK host's command
+      // handler unmodified.
+      if (promptText.startsWith("/")) {
+        child.stdin?.write(line + "\n");
+        continue;
+      }
+
       const decision: Decision = await opts.pipeline.route({ prompt: promptText });
 
       // Inject set_model BEFORE forwarding the user message so claude

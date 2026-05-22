@@ -37,7 +37,7 @@ import type { Classifier, Decision, Profile } from "../core/types.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
-import { runStreamJsonProxy } from "../wrapper/stream-json-proxy.js";
+import { runSdkProxy } from "../wrapper/sdk-proxy.js";
 import type { LoadedCliConfig } from "./utils.js";
 import { loadCliConfig } from "./utils.js";
 
@@ -277,51 +277,29 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     return res.exitCode ?? 0;
   }
 
-  // stream-json input mode is used by the VSCode panel SDK, which speaks
-  // a bidirectional control protocol over stdin/stdout (initialize /
-  // initialize_response / control_request / etc.). The per-turn proxy
-  // can't handle that — it treats stdin as a flat stream of user
-  // messages and silently drops control frames, causing VSCode's
-  // 60s subprocess-init deadline to fire ("Failed to load config cache").
-  //
-  // Solution: in stream-json mode, exec real claude as a transparent
-  // passthrough. Per-turn routing is sacrificed for this path; panel
-  // users still get profile-default cost savings (haiku for trivial
-  // via the existing profile defaults, etc.) but per-prompt
-  // classification doesn't fire here. Terminal `claude --print` flows
-  // continue to use the per-turn classifier below.
-  //
-  // Set MAESTRO_STREAM_JSON_PROXY=1 to opt back into the per-turn proxy.
+  // stream-json input is used by the VSCode panel SDK, which speaks a
+  // bidirectional control protocol over stdin/stdout. The SDK-aware
+  // proxy passes control frames through and injects a set_model
+  // control_request before each user message based on the pipeline's
+  // routing decision — per-turn cost optimization without breaking
+  // the SDK lifecycle.
   if (argsContainStreamJsonInput(claudeArgs)) {
-    if (process.env.MAESTRO_STREAM_JSON_PROXY === "1") {
-      const cli = await loadCliConfig();
-      const { pipeline, profile } = buildPipeline(cli);
-      const telemetry = createTelemetry(
-        cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
-      );
-      return runStreamJsonProxy({
-        realClaude,
-        claudeArgs,
-        pipeline,
-        profile,
-        userConfig: cli.userConfig,
-        telemetry,
-        stdin: process.stdin,
-        stdout: process.stdout,
-        stderr: process.stderr,
-      });
-    }
-    // Passthrough: exec real claude with the same args, inherit stdin/
-    // stdout/stderr. VSCode's SDK control protocol works unchanged.
-    const res = await streamClaude({
-      binary: realClaude,
-      args: claudeArgs,
-      inheritStdin: true,
+    const cli = await loadCliConfig();
+    const { pipeline, profile } = buildPipeline(cli);
+    const telemetry = createTelemetry(
+      cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+    );
+    return runSdkProxy({
+      realClaude,
+      claudeArgs,
+      pipeline,
+      profile,
+      userConfig: cli.userConfig,
+      telemetry,
+      stdin: process.stdin,
       stdout: process.stdout,
       stderr: process.stderr,
-      forwardSigint: true,
     });
-    return res.exitCode ?? 0;
   }
 
   // Text-input --print mode: read stdin, classify, modify args, exec real claude.

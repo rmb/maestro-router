@@ -11,6 +11,8 @@ const DEFAULT_REUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type SessionRecord = {
   sessionId: string;
   cwd: string;
+  /** Model alias used for this session. Legacy records missing this field are never reused (treated as unknown tier). */
+  modelTier?: string;
   createdAt: string;
   lastUsedAt: string;
 };
@@ -33,7 +35,7 @@ export type GetOrCreateResult = {
 };
 
 export type SessionStore = {
-  getOrCreate(cwd: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
+  getOrCreate(cwd: string, modelTier: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
   touch(sessionId: string): Promise<void>;
   list(): Promise<SessionRecord[]>;
 };
@@ -67,14 +69,19 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
   };
 
   return {
-    async getOrCreate(cwd, options) {
+    async getOrCreate(cwd, modelTier, options) {
       const records = await read();
       const nowIso = new Date(now()).toISOString();
 
       if (!options?.newSession) {
         const cutoff = now() - reuseWindowMs;
         const recent = records
-          .filter((r) => r.cwd === cwd && Date.parse(r.lastUsedAt) >= cutoff)
+          .filter(
+            (r) =>
+              r.cwd === cwd &&
+              r.modelTier === modelTier &&
+              Date.parse(r.lastUsedAt) >= cutoff,
+          )
           .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt));
         if (recent.length > 0) {
           const reused = recent[0]!;
@@ -90,6 +97,7 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       const created: SessionRecord = {
         sessionId,
         cwd,
+        modelTier,
         createdAt: nowIso,
         lastUsedAt: nowIso,
       };

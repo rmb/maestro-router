@@ -88,7 +88,7 @@ export function registerRunCommand(program: Command): void {
       );
 
       const sessions = createSessionStore();
-      const session = await sessions.getOrCreate(process.cwd(), {
+      const session = await sessions.getOrCreate(process.cwd(), decision.spec.model, {
         ...(cmdOpts.newSession ? { newSession: true } : {}),
       });
 

@@ -21,15 +21,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 describe("createSessionStore", () => {
   test("getOrCreate returns a UUID v4 and isNew=true on first call", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const result = await store.getOrCreate("/foo");
+    const result = await store.getOrCreate("/foo", "haiku");
     expect(result.sessionId).toMatch(UUID_RE);
     expect(result.isNew).toBe(true);
   });
 
   test("getOrCreate reuses the most-recent session for same cwd (F9)", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const first = await store.getOrCreate("/foo");
-    const second = await store.getOrCreate("/foo");
+    const first = await store.getOrCreate("/foo", "haiku");
+    const second = await store.getOrCreate("/foo", "haiku");
     expect(second.sessionId).toBe(first.sessionId);
     expect(first.isNew).toBe(true);
     expect(second.isNew).toBe(false);
@@ -37,8 +37,8 @@ describe("createSessionStore", () => {
 
   test("different cwds get different sessions", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const a = await store.getOrCreate("/foo");
-    const b = await store.getOrCreate("/bar");
+    const a = await store.getOrCreate("/foo", "haiku");
+    const b = await store.getOrCreate("/bar", "haiku");
     expect(a.sessionId).not.toBe(b.sessionId);
     expect(a.isNew).toBe(true);
     expect(b.isNew).toBe(true);
@@ -46,8 +46,8 @@ describe("createSessionStore", () => {
 
   test("newSession: true forces a fresh UUID even with recent session present", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    const a = await store.getOrCreate("/foo");
-    const b = await store.getOrCreate("/foo", { newSession: true });
+    const a = await store.getOrCreate("/foo", "haiku");
+    const b = await store.getOrCreate("/foo", "haiku", { newSession: true });
     expect(b.sessionId).not.toBe(a.sessionId);
     expect(b.isNew).toBe(true);
   });
@@ -60,9 +60,9 @@ describe("createSessionStore", () => {
       now: () => t,
     });
     t = 1_000_000;
-    const a = await store.getOrCreate("/foo");
+    const a = await store.getOrCreate("/foo", "haiku");
     t = 1_002_000; // 2s later, beyond window
-    const b = await store.getOrCreate("/foo");
+    const b = await store.getOrCreate("/foo", "haiku");
     expect(b.sessionId).not.toBe(a.sessionId);
     expect(b.isNew).toBe(true);
   });
@@ -73,9 +73,9 @@ describe("createSessionStore", () => {
       path: join(dir, "s.json"),
       now: () => t,
     });
-    const a = await store.getOrCreate("/foo");
+    const a = await store.getOrCreate("/foo", "haiku");
     t = 5000;
-    const b = await store.getOrCreate("/foo");
+    const b = await store.getOrCreate("/foo", "haiku");
     expect(b.sessionId).toBe(a.sessionId);
     const records = await store.list();
     const rec = records.find((r) => r.sessionId === a.sessionId)!;
@@ -85,7 +85,7 @@ describe("createSessionStore", () => {
   test("touch updates lastUsedAt without changing id", async () => {
     let t = 1000;
     const store = createSessionStore({ path: join(dir, "s.json"), now: () => t });
-    const a = await store.getOrCreate("/foo");
+    const a = await store.getOrCreate("/foo", "haiku");
     t = 9999;
     await store.touch(a.sessionId);
     const records = await store.list();
@@ -95,9 +95,9 @@ describe("createSessionStore", () => {
 
   test("list returns all stored sessions", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    await store.getOrCreate("/a");
-    await store.getOrCreate("/b");
-    await store.getOrCreate("/c");
+    await store.getOrCreate("/a", "haiku");
+    await store.getOrCreate("/b", "haiku");
+    await store.getOrCreate("/c", "haiku");
     const all = await store.list();
     expect(all).toHaveLength(3);
   });
@@ -127,7 +127,7 @@ describe("createSessionStore", () => {
   test("file contents are valid JSON", async () => {
     const path = join(dir, "s.json");
     const store = createSessionStore({ path });
-    await store.getOrCreate("/foo");
+    await store.getOrCreate("/foo", "haiku");
     const raw = await readFile(path, "utf8");
     expect(() => JSON.parse(raw)).not.toThrow();
   });
@@ -135,13 +135,51 @@ describe("createSessionStore", () => {
   test("most-recent reuse picks newest when multiple sessions exist for cwd", async () => {
     let t = 1000;
     const store = createSessionStore({ path: join(dir, "s.json"), now: () => t });
-    const a = await store.getOrCreate("/foo");
+    const a = await store.getOrCreate("/foo", "haiku");
     t = 2000;
-    const b = await store.getOrCreate("/foo", { newSession: true });
+    const b = await store.getOrCreate("/foo", "haiku", { newSession: true });
     t = 3000;
-    const c = await store.getOrCreate("/foo");
+    const c = await store.getOrCreate("/foo", "haiku");
     expect(c.sessionId).toBe(b.sessionId);
     expect(c.sessionId).not.toBe(a.sessionId);
     expect(c.isNew).toBe(false);
+  });
+});
+
+describe("model-tier affinity", () => {
+  test("same cwd, different modelTier → different sessions", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const haiku = await store.getOrCreate("/foo", "haiku");
+    const sonnet = await store.getOrCreate("/foo", "sonnet");
+    expect(haiku.sessionId).not.toBe(sonnet.sessionId);
+    expect(haiku.isNew).toBe(true);
+    expect(sonnet.isNew).toBe(true);
+  });
+
+  test("same cwd, same modelTier → session reused", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const first = await store.getOrCreate("/foo", "haiku");
+    const second = await store.getOrCreate("/foo", "haiku");
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.isNew).toBe(false);
+  });
+
+  test("legacy record without modelTier is not reused for any tier", async () => {
+    const path = join(dir, "s.json");
+    await writeFile(
+      path,
+      JSON.stringify([
+        {
+          sessionId: "old-uuid",
+          cwd: "/foo",
+          createdAt: new Date().toISOString(),
+          lastUsedAt: new Date().toISOString(),
+        },
+      ]),
+    );
+    const store = createSessionStore({ path });
+    const result = await store.getOrCreate("/foo", "haiku");
+    expect(result.sessionId).not.toBe("old-uuid");
+    expect(result.isNew).toBe(true);
   });
 });

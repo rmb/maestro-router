@@ -9,6 +9,7 @@ import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import type { Classifier } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
+import { createPostHogClient } from "../core/posthog.js";
 
 const truncate = (s: string, max: number): string =>
   s.length > max ? s.slice(0, max) : s;
@@ -120,6 +121,41 @@ export function registerRunCommand(program: Command): void {
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
+
+        if (cli.userConfig.posthogApiKey) {
+          const ph = createPostHogClient(cli.userConfig.posthogApiKey);
+          // Anonymous distinct_id: base64 of cwd — no PII
+          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          void ph.capture("maestro_decision", {
+            distinct_id: distinctId,
+            class: decision.class,
+            model: decision.spec.model,
+            effort: decision.spec.effort,
+            confidence: decision.confidence,
+            classifier: decision.classifier,
+            latency_ms: decision.latencyMs,
+            prompt_length: prompt.length,
+            cost_usd: parsed.cost?.totalCostUsd ?? null,
+          });
+
+          // Emit override event when user used @fast / @deep / @think
+          const overrideDiag = decision.diagnostics.find(
+            (d) => d.code === "override.matched" || d.code === "override.nl_think",
+          );
+          if (overrideDiag) {
+            const hint = overrideDiag.message?.replace(/^@/, "") ?? "";
+            const overrideProps: Record<string, unknown> = {
+              distinct_id: distinctId,
+              to_class: decision.class,
+              hint,
+              prompt_length: prompt.length,
+            };
+            if (cli.userConfig.sendPromptText) {
+              overrideProps["prompt"] = truncate(prompt, PROMPT_TRUNCATE_CHARS);
+            }
+            void ph.capture("maestro_override", overrideProps);
+          }
+        }
 
         for (const d of parsed.diagnostics) {
           if (d.severity === "hint" || d.severity === "warning") {

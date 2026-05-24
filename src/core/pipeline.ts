@@ -173,10 +173,26 @@ function voteDecision(args: {
   latencyMs: number;
   diagnostics: ReadonlyArray<Diagnostic>;
 }): Decision {
+  const ENTROPY_ESCALATION_THRESHOLD = 0.7;
+
   const votes = new Map<Class, number>();
+  let totalWeight = 0;
   for (const { weight, result } of args.collected) {
-    votes.set(result.class, (votes.get(result.class) ?? 0) + weight * result.confidence);
+    const score = weight * result.confidence;
+    votes.set(result.class, (votes.get(result.class) ?? 0) + score);
+    totalWeight += score;
   }
+
+  // Shannon entropy of the normalized vote distribution.
+  // H=0 → unanimous; H≈log2(N) → max disagreement.
+  const entropy =
+    totalWeight > 0
+      ? -Array.from(votes.values()).reduce((sum, score) => {
+          const p = score / totalWeight;
+          return p > 0 ? sum + p * Math.log2(p) : sum;
+        }, 0)
+      : 0;
+
   let winningClass: Class = DEFAULT_CLASS;
   let winningScore = 0;
   for (const [cls, score] of votes) {
@@ -185,15 +201,30 @@ function voteDecision(args: {
       winningScore = score;
     }
   }
+
   const topContributor = args.collected
     .filter((r) => r.result.class === winningClass)
     .sort((a, b) => b.weight * b.result.confidence - a.weight * a.result.confidence)[0];
+
+  const escalate = entropy > ENTROPY_ESCALATION_THRESHOLD;
+  const finalClass = escalate ? UPGRADE[winningClass] : winningClass;
+  const finalDiagnostics: Diagnostic[] = escalate
+    ? [
+        ...args.diagnostics,
+        {
+          severity: "info" as const,
+          code: "pipeline.entropy_escalation",
+          message: `${winningClass} → ${finalClass} (vote entropy ${entropy.toFixed(2)} > ${ENTROPY_ESCALATION_THRESHOLD})`,
+        },
+      ]
+    : [...args.diagnostics];
+
   return buildDecision({
-    cls: winningClass,
+    cls: finalClass,
     classifier: topContributor ? `vote:${topContributor.name}` : "vote",
     confidence: winningScore,
     profile: args.profile,
     latencyMs: args.latencyMs,
-    diagnostics: args.diagnostics,
+    diagnostics: finalDiagnostics,
   });
 }

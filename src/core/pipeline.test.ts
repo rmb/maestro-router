@@ -101,9 +101,9 @@ describe("createPipeline", () => {
     });
     // a: 1.0 * 0.5 = 0.5 (standard)
     // b: 0.5 * 0.5 = 0.25 (hard)
-    // standard wins
+    // standard wins the vote, but entropy ≈ 0.92 bits > 0.7 → escalates standard → hard
     const d = await p.route(req("hi"));
-    expect(d.class).toBe("standard");
+    expect(d.class).toBe("hard");
     expect(d.classifier).toMatch(/^vote:a$/);
   });
 
@@ -116,8 +116,8 @@ describe("createPipeline", () => {
       ],
       profile: balancedProfile,
     });
-    // simple: 0.5 * 0.55 + 0.5 * 0.55 = 0.55
-    // hard:   0.4 * 0.5 = 0.20
+    // a fires short-circuit at 0.55 (= SHORT_CIRCUIT_THRESHOLD); vote path never reached.
+    // non-LLM classifier → no upgrade → simple
     const d = await p.route(req("hi"));
     expect(d.class).toBe("simple");
   });
@@ -284,6 +284,49 @@ describe("pipeline property: order respected", () => {
     });
     await p.route(req("hi"));
     expect(calls).toEqual(["a", "b"]);
+  });
+});
+
+describe("entropy escalation in vote", () => {
+  test("high entropy (50/50 split) escalates the winning class one tier up", async () => {
+    // trivial vs standard, equal weight and equal confidence → H = log2(2) = 1.0 > 0.7
+    // whichever class wins the vote (map iteration gives trivial first), it gets UPGRADE'd
+    const p = createPipeline({
+      classifiers: [
+        fixed("a", { class: "trivial", confidence: 0.4 }, 0.5),
+        fixed("b", { class: "standard", confidence: 0.4 }, 0.5),
+      ],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("split-prompt"));
+    // trivial wins the vote (inserted first); entropy = 1.0 → escalates trivial → simple
+    expect(d.class).toBe("simple");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.entropy_escalation")).toBe(true);
+  });
+
+  test("low entropy (consensus) does NOT escalate", async () => {
+    // Both classifiers agree on standard → H = 0 → no escalation
+    const p = createPipeline({
+      classifiers: [
+        fixed("a", { class: "standard", confidence: 0.4 }, 0.5),
+        fixed("b", { class: "standard", confidence: 0.45 }, 0.5),
+      ],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("consensus-prompt"));
+    expect(d.class).toBe("standard");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.entropy_escalation")).toBe(false);
+  });
+
+  test("single classifier in collected → entropy = 0 → no escalation", async () => {
+    // Only one classifier, so all weight is on one class → H = 0
+    const p = createPipeline({
+      classifiers: [fixed("only", { class: "hard", confidence: 0.4 }, 0.5)],
+      profile: balancedProfile,
+    });
+    const d = await p.route(req("single-classifier"));
+    expect(d.class).toBe("hard");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.entropy_escalation")).toBe(false);
   });
 });
 

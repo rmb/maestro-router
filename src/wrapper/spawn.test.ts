@@ -238,6 +238,38 @@ describe("buildClaudeArgs — S6 --bare", () => {
   });
 });
 
+describe("maxOutputTokens", () => {
+  test("emits --max-output-tokens when spec sets it", () => {
+    const decision: Decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, maxOutputTokens: 200 },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "test-session",
+      isResume: false,
+    });
+    const idx = args.indexOf("--max-output-tokens");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("200");
+  });
+
+  test("omits --max-output-tokens when spec does not set it", () => {
+    const decision: Decision = {
+      ...baseDecision("hard"),
+      spec: { ...balancedProfile.classes.hard },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "test-session",
+      isResume: false,
+    });
+    expect(args).not.toContain("--max-output-tokens");
+  });
+});
+
 describe("spawnClaude", () => {
   test("captures stdout from a fake binary", async () => {
     const result = await spawnClaude({

@@ -56,6 +56,11 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 
+  // Output ceiling — prevents over-explanation on trivial/simple prompts
+  if (spec.maxOutputTokens !== undefined) {
+    args.push("--max-output-tokens", String(spec.maxOutputTokens));
+  }
+
   // Brevity hint — reduces output tokens, slows context compaction
   const appendPrompt =
     userConfig.appendSystemPrompt !== undefined

@@ -31,6 +31,8 @@ export type ClassSpec = {
   mcpConfig?: string;
   /** Override global `--exclude-dynamic-system-prompt-sections` (S7). */
   excludeDynamicSections?: boolean;
+  /** Hard ceiling on output tokens. Omit for uncapped (hard/reasoning/max). */
+  maxOutputTokens?: number;
 };
 
 /** Built-in / user profile — every class fully specified. */

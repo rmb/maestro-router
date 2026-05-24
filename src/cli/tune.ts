@@ -2,6 +2,7 @@
 
 import type { Command } from "commander";
 import { createTelemetry } from "../core/telemetry.js";
+import { createPostHogQueryClient } from "../core/posthog.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, HeuristicRule, ProfileOverride, TelemetryEvent } from "../core/types.js";
 import {
@@ -47,16 +48,46 @@ export function registerTuneCommand(program: Command): void {
     .description("Analyze telemetry, suggest profile + heuristic tweaks")
     .option("--apply", "write suggestions to ~/.maestro/profile-overrides.json and heuristics.json")
     .option("--learn", "focus on mining new heuristic patterns from override events")
+    .option("--posthog", "pull override events from PostHog instead of local telemetry (requires posthogQueryKey + posthogProjectId in config)")
     .option("--since <days>", "telemetry window in days", String(PATTERN_WINDOW_DAYS))
-    .action(async (cmdOpts: { apply?: boolean; learn?: boolean; since: string }) => {
+    .action(async (cmdOpts: { apply?: boolean; learn?: boolean; posthog?: boolean; since: string }) => {
       const parent = program.opts<ParentOptions>();
       const cli = await loadCliConfig(parent.config);
-      const path = cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
       const since = Math.max(1, parseInt(cmdOpts.since, 10) || PATTERN_WINDOW_DAYS);
       const cutoff = Date.now() - since * 24 * 60 * 60 * 1000;
 
-      const t = createTelemetry({ path });
-      const events = (await t.readAll()).filter((e) => Date.parse(e.ts) >= cutoff);
+      let events: TelemetryEvent[];
+
+      if (cmdOpts.posthog) {
+        const { posthogQueryKey, posthogProjectId } = cli.userConfig;
+        if (!posthogQueryKey || !posthogProjectId) {
+          process.stderr.write(
+            "maestro tune --posthog: set posthogQueryKey and posthogProjectId in ~/.maestro/config.json\n" +
+              "  posthogQueryKey: personal API key from PostHog → Settings → Personal API Keys\n" +
+              "  posthogProjectId: numeric project ID from PostHog → Project Settings\n",
+          );
+          process.exit(1);
+        }
+        const queryClient = createPostHogQueryClient({ queryKey: posthogQueryKey, projectId: posthogProjectId });
+        const overrides = await queryClient.fetchOverrides({ since: new Date(cutoff) });
+        events = overrides.map(
+          (o): TelemetryEvent => ({
+            type: "override",
+            ts: o.ts,
+            from: o.toClass,
+            to: o.toClass,
+            prompt: o.prompt,
+          }),
+        );
+        if (!parent.quiet) {
+          process.stderr.write(`[maestro] fetched ${events.length} override event(s) from PostHog\n`);
+        }
+      } else {
+        const path = cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
+        const t = createTelemetry({ path });
+        events = (await t.readAll()).filter((e) => Date.parse(e.ts) >= cutoff);
+      }
+
       const suggestion = computeSuggestions(events, { learnOnly: cmdOpts.learn === true });
 
       if (parent.json) {

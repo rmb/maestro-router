@@ -330,6 +330,41 @@ describe("entropy escalation in vote", () => {
   });
 });
 
+describe("markov prior fallback", () => {
+  // Build a pipeline with no classifiers — guaranteed to hit fallback
+  function makeFallbackPipeline() {
+    return createPipeline({ classifiers: [], profile: balancedProfile });
+  }
+
+  test("consistent last-3 trivial → prior routes to trivial", async () => {
+    const pipeline = makeFallbackPipeline();
+    const d = await pipeline.route(
+      { prompt: "do something" },
+      { sessionContext: { recentClasses: ["trivial", "trivial", "trivial"] } },
+    );
+    expect(d.class).toBe("trivial");
+    expect(d.classifier).toBe("markov");
+    expect(d.diagnostics.some((x) => x.code === "pipeline.markov_prior")).toBe(true);
+  });
+
+  test("inconsistent last-3 → standard default", async () => {
+    const pipeline = makeFallbackPipeline();
+    const d = await pipeline.route(
+      { prompt: "do something" },
+      { sessionContext: { recentClasses: ["trivial", "hard", "standard"] } },
+    );
+    expect(d.class).toBe("standard");
+    expect(d.classifier).toBe("default");
+  });
+
+  test("empty session history → standard default", async () => {
+    const pipeline = makeFallbackPipeline();
+    const d = await pipeline.route({ prompt: "do something" });
+    expect(d.class).toBe("standard");
+    expect(d.classifier).toBe("default");
+  });
+});
+
 describe("pipeline property: meets 50ms p95 budget with fast classifiers", () => {
   test("3 sync classifiers run well under 50ms over 50 samples", async () => {
     const p = createPipeline({

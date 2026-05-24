@@ -13,6 +13,8 @@ export type SessionRecord = {
   cwd: string;
   /** Model alias used for this session. Legacy records missing this field are never reused (treated as unknown tier). */
   modelTier?: string;
+  /** Last ≤5 routing classes, oldest first. Used for Markov prior. */
+  recentClasses?: string[];
   createdAt: string;
   lastUsedAt: string;
 };
@@ -37,6 +39,7 @@ export type GetOrCreateResult = {
 export type SessionStore = {
   getOrCreate(cwd: string, modelTier: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
   touch(sessionId: string): Promise<void>;
+  appendClass(sessionId: string, cls: string): Promise<void>;
   list(): Promise<SessionRecord[]>;
 };
 
@@ -111,6 +114,17 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       const updated = records.map((r) =>
         r.sessionId === sessionId ? { ...r, lastUsedAt: nowIso } : r,
       );
+      await write(updated);
+    },
+
+    async appendClass(sessionId, cls) {
+      const records = await read();
+      const updated = records.map((r) => {
+        if (r.sessionId !== sessionId) return r;
+        const prev = r.recentClasses ?? [];
+        const next = [...prev, cls].slice(-5); // keep last 5
+        return { ...r, recentClasses: next };
+      });
       await write(updated);
     },
 

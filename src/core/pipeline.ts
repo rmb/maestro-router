@@ -128,25 +128,51 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
         return decision;
       }
 
-      const decision = buildDecision({
-        cls: DEFAULT_CLASS,
-        classifier: "default",
-        confidence: 0,
-        profile,
-        latencyMs: Date.now() - start,
-        diagnostics: [
-          ...diagnostics,
-          {
-            severity: "info",
+      // No signal from any classifier. Apply Markov prior from session history.
+      const recentClasses = classifyOpts?.sessionContext?.recentClasses ?? [];
+      const markovClass = markovPrior(recentClasses);
+      const cls = markovClass ?? DEFAULT_CLASS;
+      const markovDiag: Diagnostic = markovClass
+        ? {
+            severity: "info" as const,
+            code: "pipeline.markov_prior",
+            message: `no classifier matched; prior → ${markovClass} from last ${recentClasses.length} turn(s)`,
+          }
+        : {
+            severity: "info" as const,
             code: "fallback.default",
             message: "no classifier returned a signal",
-          },
-        ],
+          };
+
+      const decision = buildDecision({
+        cls,
+        classifier: markovClass ? "markov" : "default",
+        confidence: markovClass ? 0.35 : 0,
+        profile,
+        latencyMs: Date.now() - start,
+        diagnostics: [...diagnostics, markovDiag],
       });
       if (cache) cache.set(key, decision);
       return decision;
     },
   };
+}
+
+/**
+ * Returns the consensus class from recentClasses if the last 3 entries all agree.
+ * Uses only last 3 to stay responsive to mode switches.
+ * Returns null when there's no strong prior.
+ */
+function markovPrior(recentClasses: ReadonlyArray<string>): Class | null {
+  if (recentClasses.length < 2) return null;
+  const last3 = recentClasses.slice(-3);
+  const unique = new Set(last3);
+  if (unique.size !== 1) return null;
+  const cls = last3[0] as Class;
+  const VALID: ReadonlySet<Class> = new Set<Class>([
+    "trivial", "simple", "standard", "hard", "reasoning", "max",
+  ]);
+  return VALID.has(cls) ? cls : null;
 }
 
 function buildDecision(args: {

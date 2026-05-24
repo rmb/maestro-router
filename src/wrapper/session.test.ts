@@ -146,6 +146,30 @@ describe("createSessionStore", () => {
   });
 });
 
+describe("appendClass", () => {
+  test("appends class, caps at 5 entries (oldest dropped)", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "sonnet");
+    for (const cls of ["trivial", "simple", "standard", "hard", "reasoning", "max"]) {
+      await store.appendClass(sessionId, cls);
+    }
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.recentClasses).toHaveLength(5);
+    expect(rec?.recentClasses?.at(-1)).toBe("max");
+    // "trivial" was the first pushed and should have been dropped
+    expect(rec?.recentClasses?.[0]).toBe("simple");
+  });
+
+  test("new session starts with no recentClasses", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "sonnet");
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.recentClasses ?? []).toHaveLength(0);
+  });
+});
+
 describe("model-tier affinity", () => {
   test("same cwd, different modelTier → different sessions", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });

@@ -81,13 +81,24 @@ export function registerRunCommand(program: Command): void {
         profile,
       });
 
-      const decision = await pipeline.route({ prompt });
+      // Read Markov prior from any recent session for this cwd
+      const sessions = createSessionStore();
+      const allSessions = await sessions.list();
+      const cwd = process.cwd();
+      const priorSession = allSessions
+        .filter((s) => s.cwd === cwd)
+        .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt))[0];
+      const recentClasses: string[] = priorSession?.recentClasses ?? [];
+
+      const decision = await pipeline.route(
+        { prompt },
+        { sessionContext: { recentClasses } },
+      );
       log(
         `route: ${decision.classifier} → class=${decision.class} conf=${decision.confidence.toFixed(2)} model=${decision.spec.model} effort=${decision.spec.effort} budget=$${decision.spec.maxBudgetUsd}`,
         quiet,
       );
 
-      const sessions = createSessionStore();
       const session = await sessions.getOrCreate(process.cwd(), decision.spec.model, {
         ...(cmdOpts.newSession ? { newSession: true } : {}),
       });
@@ -121,6 +132,8 @@ export function registerRunCommand(program: Command): void {
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
+
+        await sessions.appendClass(session.sessionId, decision.class);
 
         if (cli.userConfig.posthogApiKey) {
           const ph = createPostHogClient(cli.userConfig.posthogApiKey);

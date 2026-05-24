@@ -159,6 +159,10 @@ export type Classification = {
 /** Options threaded through classifier invocations. */
 export type ClassifyOptions = {
   signal?: AbortSignal;
+  /** Markov prior from session history — used as tiebreaker when no classifier fires. */
+  sessionContext?: {
+    recentClasses: ReadonlyArray<string>;
+  };
 };
 
 /** Pure function: request → classification or null. */

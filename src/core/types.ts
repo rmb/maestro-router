@@ -105,6 +105,28 @@ export type UserConfig = {
    * Set to `""` (empty string) to disable. Defaults to a short brevity hint.
    */
   appendSystemPrompt?: string;
+  /**
+   * PostHog project API key (starts with `phc_`). When set, Maestro emits
+   * `maestro_decision` and `maestro_override` events to PostHog on every spawn.
+   * Leave unset to disable remote telemetry entirely.
+   */
+  posthogApiKey?: string;
+  /**
+   * PostHog personal API key (starts with `phx_`). Required only for
+   * `maestro tune --posthog`. Obtain at posthog.com → Settings → Personal API Keys.
+   */
+  posthogQueryKey?: string;
+  /**
+   * PostHog numeric project ID. Required only for `maestro tune --posthog`.
+   * Find it in PostHog → Project Settings → Project ID.
+   */
+  posthogProjectId?: string;
+  /**
+   * When true, include the raw prompt text in PostHog `maestro_override` events.
+   * Default false. Only enable if you consent to sending prompt snippets to PostHog.
+   * Required for `maestro tune --posthog` to mine patterns from cross-user data.
+   */
+  sendPromptText?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

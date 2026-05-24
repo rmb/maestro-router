@@ -49,6 +49,10 @@ type Summary = {
     }
   >;
   topOverrides: { from: Class; to: Class; count: number }[];
+  /** Fraction of decisions where no classifier matched (classifier === "default"). */
+  fallbackRate: number;
+  /** p90 output token count per class — quality proxy. 0 = no data. */
+  outputTokensP90ByClass: Record<Class, number>;
 };
 
 export function registerStatsCommand(program: Command): void {
@@ -86,6 +90,10 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   }> = makePerClass();
 
   const overridePairs = new Map<string, { from: Class; to: Class; count: number }>();
+  let fallbackCount = 0;
+  const outputTokensByClass = Object.fromEntries(
+    ALL_CLASSES.map((c) => [c, [] as number[]])
+  ) as Record<Class, number[]>;
   let totalCost = 0;
   let totalRequests = 0;
   let cacheReadTokens = 0;
@@ -104,6 +112,10 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
       totalCost += cost;
       perClass[cls].count++;
       perClass[cls].totalCost += cost;
+      if (e.decision.classifier === "default") fallbackCount++;
+      if (e.cost?.outputTokens && e.cost.outputTokens > 0) {
+        outputTokensByClass[cls].push(e.cost.outputTokens);
+      }
       if (e.cost) {
         perClass[cls].cacheCreations.push(e.cost.cacheCreationInputTokens);
         cacheReadTokens += e.cost.cacheReadInputTokens;
@@ -156,6 +168,10 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     cacheReadSavingsTokens: cacheReadTokens,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
+    fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
+    outputTokensP90ByClass: Object.fromEntries(
+      ALL_CLASSES.map((c) => [c, p90(outputTokensByClass[c])])
+    ) as Record<Class, number>,
   };
 }
 
@@ -172,6 +188,13 @@ function percentile(sorted: number[], p: number): number {
   const arr = [...sorted].sort((a, b) => a - b);
   const idx = Math.min(arr.length - 1, Math.floor(arr.length * p));
   return arr[idx] ?? 0;
+}
+
+function p90(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.floor(sorted.length * 0.9);
+  return sorted[Math.min(idx, sorted.length - 1)] ?? 0;
 }
 
 function round(n: number, digits: number): number {
@@ -251,5 +274,27 @@ function renderHuman(s: Summary): string {
     lines.push("");
     lines.push(green("  → run `maestro tune --learn` to fold these into heuristics"));
   }
+
+  // Classifier health
+  lines.push("");
+  lines.push(header("classifier health"));
+  const fallbackPct = (s.fallbackRate * 100).toFixed(1);
+  const fallbackWarning = s.fallbackRate > 0.1;
+  lines.push(
+    `  fallback rate     ${fallbackWarning ? yellow(fallbackPct + "%") : green(fallbackPct + "%")}  ${gray("(target < 5%)")}`,
+  );
+
+  // Output token p90
+  const hasOutputData = ALL_CLASSES.some((c) => s.outputTokensP90ByClass[c] > 0);
+  if (hasOutputData) {
+    lines.push("");
+    lines.push(header("output tokens p90"));
+    for (const cls of ALL_CLASSES) {
+      const val = s.outputTokensP90ByClass[cls];
+      if (val === 0) continue;
+      lines.push(`  ${cls.padEnd(12)}  ${String(val).padStart(6)} tok`);
+    }
+  }
+
   return lines.join("\n");
 }

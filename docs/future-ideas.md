@@ -75,15 +75,18 @@ Expand `bench --tournament` from single-axis model-tier downgrade to a model
 × effort matrix per class. Surfaces wins from budget reduction independent
 of model tier.
 
-### Per-tool profile overrides (C12)
-Adapter-layer hook to detect upcoming tool call in conversation and apply
-tool-specific class: Read/Grep/LS/Glob → trivial, Edit → simple, Bash →
-simple unless chained, Write → standard. v0.2 has no adapter layer; rebuild
-as a Claude Code hook integration in v0.3.
+### ~~Per-tool profile overrides (C12)~~ — Already shipped
+Implemented in `src/classifiers/tool-override.ts`. Uses sdk-proxy metadata
+injection to track tool_use_id → tool_name, then classifies: Read/Grep/LS/Glob
+→ trivial, Edit/Write/MultiEdit → simple, Bash → simple. Confidence 1.0,
+<1ms budget. Integrated in pipeline after override/turn-type classifiers.
 
-### Per-project config (F2 hook)
-`<cwd>/.maestro/config.json` discovered by walking up from cwd. Config
-loader has the hook in v0.2 but discovery is disabled until v0.3.
+### ~~Per-project config (F2)~~ — Already shipped
+Walk-up discovery from cwd in `src/cli/utils.ts::loadCliConfig()`. Finds
+`.maestro/config.json` up to root (excludes `~/.maestro`). Merges: project
+wins ties on UserConfig keys; per-class ProfileOverride stacks on top of
+global; heuristics lists concatenate. Field filtering blocks unsafe overrides
+(telemetryPath, feedbackSampleRate, useLlmClassifierInWrapper stay global).
 
 ### ~~Interactive feedback Stop-hook (F7)~~ — Shipped in v0.2.1
 `hooks/stop-feedback.sh` runs on Claude Code's Stop event; sampling controlled
@@ -97,10 +100,12 @@ manual ratings by `source: "auto"`. Install with `maestro install-hook`
 Convention setup + environment diagnostics. Manual setup works in v0.2 via
 README instructions.
 
-### `--fast-mode` cost profile (S13)
-Spike 2 output included `"fast_mode_state": "off"`. Anthropic's fast mode
-may be a speed-only tier or may have a separate cost dimension. One quick
-spike to clarify before deciding whether to expose per-class.
+### `--fast-mode` cost profile (S13) — blocked on Anthropic
+Spiked 2026-05-25: `--fast-mode` CLI flag not yet available. JSON output
+already includes `fast_mode_state: "off"` and `speed` fields, so the
+infrastructure is there. When the flag ships, check if cost differs from
+standard mode — if so, add as a per-class routing dimension. See
+`docs/spike-fast-mode-s13.md` for full spike notes.
 
 ### API mode (CCR adapter, SDK middleware)
 For users with API access who want lower per-prompt latency. The wrapper has

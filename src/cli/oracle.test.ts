@@ -4,6 +4,23 @@ import { Command } from "commander";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { registerOracleCommand } from "./oracle.js";
 
+// Mock the quality dimension to avoid expensive in-process eval + real claude spawns
+vi.mock("../eval/oracle/output-quality.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../eval/oracle/output-quality.js")>();
+  return {
+    ...actual,
+    runOutputQuality: vi.fn().mockResolvedValue({
+      dimension: "quality",
+      pass: true,
+      checks: [
+        { name: "truncation-rate", pass: true, value: "n/a (no data)", gate: "<5%" },
+        { name: "bench-accuracy", pass: true, value: "skipped", gate: "≤2% regression" },
+        { name: "e1-quality-probe", pass: true, value: "n/a (no data)", gate: "≥60% B-win" },
+      ],
+    }),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

@@ -191,23 +191,32 @@ describe("checkTruncationRate", () => {
 // ---------------------------------------------------------------------------
 
 describe("checkBenchAccuracy", () => {
-  test("resolves with pass and 'not-run' value", async () => {
-    const result = await checkBenchAccuracy("some/path/eval.json", noopSpawn);
+  test("returns 'skipped' when evalSetPath is empty", async () => {
+    const result = await checkBenchAccuracy("", noopSpawn);
     expect(result.pass).toBe(true);
-    expect(result.value).toBe("not-run");
+    expect(result.value).toBe("skipped");
     expect(result.name).toBe("bench-accuracy");
     expect(result.gate).toBe("≤2% regression");
-    expect(result.detail).toContain("--confirm-cost");
+    expect(result.detail).toContain("No eval set path");
   });
 
-  test("never calls spawnFn", async () => {
+  test("never calls spawnFn (bench runs in-process)", async () => {
     let called = false;
     const spy: SpawnFn = async () => {
       called = true;
       return { stdout: "", exitCode: 0 };
     };
-    await checkBenchAccuracy("path", spy);
+    // Empty path → skipped without calling spawnFn
+    await checkBenchAccuracy("", spy);
     expect(called).toBe(false);
+  });
+
+  test("returns error result when eval file does not exist", async () => {
+    const result = await checkBenchAccuracy("/nonexistent/path/eval.jsonl", noopSpawn);
+    expect(result.pass).toBe(false);
+    expect(result.value).toBe("error");
+    expect(result.name).toBe("bench-accuracy");
+    expect(result.detail).toMatch(/Bench run failed/);
   });
 });
 
@@ -215,24 +224,125 @@ describe("checkBenchAccuracy", () => {
 // checkE1QualityProbe
 // ---------------------------------------------------------------------------
 
+function makeStandardDecisionWithPrompt(prompt: string): Extract<TelemetryEvent, { type: "decision" }> {
+  return {
+    type: "decision",
+    ts: new Date().toISOString(),
+    prompt,
+    decision: {
+      class: "standard",
+      classifier: "heuristic",
+      confidence: 0.8,
+      spec: { model: "sonnet", effort: "medium", maxBudgetUsd: 0.1 },
+      latencyMs: 5,
+      diagnostics: [],
+    },
+  };
+}
+
 describe("checkE1QualityProbe", () => {
-  test("resolves with pass and 'not-run' value", async () => {
-    const result = await checkE1QualityProbe([], 50, noopSpawn);
+  test("returns 'n/a (no data)' when sampleSize is 0", async () => {
+    const result = await checkE1QualityProbe([], 0, noopSpawn);
     expect(result.pass).toBe(true);
-    expect(result.value).toBe("not-run");
+    expect(result.value).toBe("n/a (no data)");
     expect(result.name).toBe("e1-quality-probe");
     expect(result.gate).toBe("≥60% B-win");
-    expect(result.detail).toContain("--confirm-cost");
   });
 
-  test("never calls spawnFn", async () => {
+  test("returns 'n/a (no data)' when no eligible events", async () => {
+    const result = await checkE1QualityProbe([], 10, noopSpawn);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("n/a (no data)");
+  });
+
+  test("never calls spawnFn when sampleSize is 0", async () => {
     let called = false;
     const spy: SpawnFn = async () => {
       called = true;
       return { stdout: "", exitCode: 0 };
     };
-    await checkE1QualityProbe([], 10, spy);
+    await checkE1QualityProbe([], 0, spy);
     expect(called).toBe(false);
+  });
+
+  test("never calls spawnFn when no eligible events (empty prompt events filtered out)", async () => {
+    let called = false;
+    const spy: SpawnFn = async () => {
+      called = true;
+      return { stdout: "", exitCode: 0 };
+    };
+    // Events without prompt field
+    const events: TelemetryEvent[] = [
+      makeStandardDecision({ outputTokens: 100, maxOutputTokens: 8000 }),
+    ];
+    await checkE1QualityProbe(events, 10, spy);
+    expect(called).toBe(false);
+  });
+
+  test("calls spawnFn twice per eligible event (B-run + judge)", async () => {
+    const calls: string[] = [];
+    const spy: SpawnFn = async (opts) => {
+      calls.push(opts.prompt.slice(0, 30));
+      return { stdout: "PASS", exitCode: 0 };
+    };
+    const events: TelemetryEvent[] = [makeStandardDecisionWithPrompt("fix the bug")];
+    await checkE1QualityProbe(events, 5, spy);
+    // 2 calls: one for B-run, one for judge
+    expect(calls).toHaveLength(2);
+  });
+
+  test("passes when all sampled turns return PASS from judge", async () => {
+    const spy: SpawnFn = async () => ({ stdout: "PASS", exitCode: 0 });
+    const events: TelemetryEvent[] = [
+      makeStandardDecisionWithPrompt("explain this"),
+      makeStandardDecisionWithPrompt("refactor that"),
+    ];
+    const result = await checkE1QualityProbe(events, 5, spy);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("100% B-win");
+    expect(result.gate).toBe("≥60% B-win");
+  });
+
+  test("fails when fewer than 60% of sampled turns are judged PASS", async () => {
+    let callCount = 0;
+    const spy: SpawnFn = async (opts) => {
+      callCount++;
+      // B-run calls are odd (1st, 3rd, 5th...), judge calls are even
+      // Alternate: first event judge=FAIL, second event judge=PASS → 1/2 = 50%
+      const isJudge = opts.prompt.includes("Is this answer adequate");
+      if (isJudge && callCount <= 4) {
+        return { stdout: callCount <= 2 ? "FAIL" : "PASS", exitCode: 0 };
+      }
+      return { stdout: "answer here", exitCode: 0 };
+    };
+    // 3 events; judge returns FAIL for first two, PASS for third → 1/3 ≈ 33%
+    const events: TelemetryEvent[] = [
+      makeStandardDecisionWithPrompt("prompt A"),
+      makeStandardDecisionWithPrompt("prompt B"),
+      makeStandardDecisionWithPrompt("prompt C"),
+    ];
+    const spy2: SpawnFn = async (opts) => {
+      const isJudge = opts.prompt.includes("Is this answer adequate");
+      if (isJudge) return { stdout: "FAIL", exitCode: 0 };
+      return { stdout: "answer here", exitCode: 0 };
+    };
+    const result = await checkE1QualityProbe(events, 5, spy2);
+    expect(result.pass).toBe(false);
+    expect(result.value).toBe("0% B-win");
+    expect(result.detail).toContain("0/3");
+  });
+
+  test("skips events where spawnFn returns non-zero exit code", async () => {
+    const spy: SpawnFn = async (opts) => {
+      const isJudge = opts.prompt.includes("Is this answer adequate");
+      if (!isJudge) return { stdout: "", exitCode: 1 }; // B-run fails
+      return { stdout: "PASS", exitCode: 0 };
+    };
+    const events: TelemetryEvent[] = [makeStandardDecisionWithPrompt("do something")];
+    const result = await checkE1QualityProbe(events, 5, spy);
+    // B-run failed → ran=0 → error result
+    expect(result.pass).toBe(false);
+    expect(result.detail).toContain("claude binary");
   });
 });
 
@@ -289,8 +399,9 @@ describe("runOutputQuality", () => {
     expect(names).toContain("e1-quality-probe");
   });
 
-  test("works without spawnFn in params (uses internal noop)", async () => {
-    const result = await runOutputQuality([], { evalSetPath: "path", sampleSize: 10 });
+  test("works without spawnFn in params (uses internal noop, skips bench when no evalSetPath)", async () => {
+    // Empty evalSetPath → bench-accuracy returns 'skipped' (pass), e1 returns 'n/a' (pass)
+    const result = await runOutputQuality([], { evalSetPath: "", sampleSize: 0 });
     expect(result.pass).toBe(true);
   });
 });

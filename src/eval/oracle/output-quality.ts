@@ -1,6 +1,19 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
+import { readFile } from "node:fs/promises";
+import { overrideClassifier } from "../../classifiers/override.js";
+import { turnTypeClassifier } from "../../classifiers/turn-type.js";
+import { markovClassifier } from "../../classifiers/markov.js";
+import { heuristicClassifier } from "../../classifiers/heuristic.js";
+import { createPipeline } from "../../core/pipeline.js";
+import { loadProfile } from "../../core/profile.js";
 import type { TelemetryEvent } from "../../core/types.js";
+import {
+  runEval,
+  readBaseline,
+  resolveBundledBaseline,
+  type LabeledEntry,
+} from "../../cli/bench.js";
 import type { CheckResult, DimensionResult } from "./telemetry-correctness.js";
 
 // ---------------------------------------------------------------------------
@@ -73,47 +86,184 @@ export function checkTruncationRate(events: TelemetryEvent[]): CheckResult {
 }
 
 // ---------------------------------------------------------------------------
-// checkBenchAccuracy (stub)
+// checkBenchAccuracy
 // ---------------------------------------------------------------------------
 
 /**
- * Stub — the real implementation runs `maestro bench` against the locked
- * eval set. Returns not-run until --confirm-cost is wired in the CLI.
+ * Runs the bundled eval set through the default pipeline and checks for
+ * >2% accuracy regression against the locked baseline.
+ *
+ * When evalSetPath is empty, returns "skipped" (no eval set configured).
+ * When no baseline exists, reports current accuracy without a regression check.
+ *
+ * budget: 5000ms p95 (depends on eval set size; pure in-process, no spawns)
  */
 export async function checkBenchAccuracy(
-  _evalSetPath: string,
+  evalSetPath: string,
   _spawnFn: SpawnFn,
 ): Promise<CheckResult> {
-  return {
-    name: "bench-accuracy",
-    pass: true,
-    value: "not-run",
-    gate: "≤2% regression",
-    detail: "Run with --confirm-cost to execute bench accuracy probe.",
-  };
+  if (!evalSetPath) {
+    return {
+      name: "bench-accuracy",
+      pass: true,
+      value: "skipped",
+      gate: "≤2% regression",
+      detail: "No eval set path configured — pass evalSetPath to enable this check.",
+    };
+  }
+
+  try {
+    const data = await readFile(evalSetPath, "utf8");
+    const entries = data
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as LabeledEntry);
+
+    const { profile } = loadProfile({ userConfig: {} });
+    const pipeline = createPipeline({
+      classifiers: [overrideClassifier, turnTypeClassifier, markovClassifier, heuristicClassifier],
+      profile,
+    });
+
+    const report = await runEval(entries, pipeline);
+    const baselinePath = resolveBundledBaseline(undefined);
+    const baseline = await readBaseline(baselinePath);
+
+    if (!baseline) {
+      return {
+        name: "bench-accuracy",
+        pass: true,
+        value: `${(report.accuracy * 100).toFixed(1)}%`,
+        gate: "≤2% regression",
+        detail: "No baseline found — run maestro bench --update-baseline to establish one.",
+      };
+    }
+
+    const delta = baseline.accuracy - report.accuracy;
+    const pass = delta <= 0.02;
+    const base: CheckResult = {
+      name: "bench-accuracy",
+      pass,
+      value: `${(delta * 100).toFixed(2)}pp Δ`,
+      gate: "≤2% regression",
+    };
+    if (!pass) {
+      return {
+        ...base,
+        detail: `Accuracy dropped from ${(baseline.accuracy * 100).toFixed(1)}% to ${(report.accuracy * 100).toFixed(1)}%. Regression exceeds 2pp gate.`,
+      };
+    }
+    return base;
+  } catch (err) {
+    return {
+      name: "bench-accuracy",
+      pass: false,
+      value: "error",
+      gate: "≤2% regression",
+      detail: `Bench run failed: ${(err as Error).message}`,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
-// checkE1QualityProbe (stub)
+// checkE1QualityProbe
 // ---------------------------------------------------------------------------
 
 /**
- * Stub — the real implementation runs a tournament quality probe against
- * sampled E1 (standard/low) turns. Returns not-run until --confirm-cost is
- * wired in the CLI.
+ * Samples the most recent `sampleSize` standard-class decision events that
+ * have a prompt, re-runs each through the cheaper haiku/low tier via
+ * spawnFn, then judges the output with a second haiku call.
+ *
+ * Pass gate: ≥60% of sampled turns produce output the judge rates PASS.
+ *
+ * When sampleSize is 0 or no eligible events exist, returns "n/a (no data)".
+ *
+ * budget: depends on sampleSize × 2 model calls; caller must obtain
+ * --confirm-cost before wiring a real spawnFn.
  */
 export async function checkE1QualityProbe(
-  _events: TelemetryEvent[],
-  _sampleSize: number,
-  _spawnFn: SpawnFn,
+  events: TelemetryEvent[],
+  sampleSize: number,
+  spawnFn: SpawnFn,
 ): Promise<CheckResult> {
-  return {
+  if (sampleSize === 0) {
+    return {
+      name: "e1-quality-probe",
+      pass: true,
+      value: "n/a (no data)",
+      gate: "≥60% B-win",
+    };
+  }
+
+  const eligible = events
+    .filter(
+      (e): e is DecisionEvent =>
+        e.type === "decision" &&
+        e.decision.class === "standard" &&
+        typeof e.prompt === "string" &&
+        e.prompt.length > 0,
+    )
+    .slice(-sampleSize);
+
+  if (eligible.length === 0) {
+    return {
+      name: "e1-quality-probe",
+      pass: true,
+      value: "n/a (no data)",
+      gate: "≥60% B-win",
+    };
+  }
+
+  let wins = 0;
+  let ran = 0;
+
+  for (const event of eligible) {
+    const prompt = event.prompt ?? "";
+
+    const bResult = await spawnFn({
+      args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.02", "--print", "--output-format", "json"],
+      prompt,
+    });
+    if (bResult.exitCode !== 0) continue;
+
+    ran++;
+    const judgePrompt =
+      `Original request: ${prompt}\n\nHaiku answer:\n${bResult.stdout}\n\n` +
+      `Is this answer adequate (correct and helpful)? Reply with exactly: PASS or FAIL`;
+
+    const judgeResult = await spawnFn({
+      args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.01", "--print"],
+      prompt: judgePrompt,
+    });
+
+    if (judgeResult.stdout.includes("PASS")) wins++;
+  }
+
+  if (ran === 0) {
+    return {
+      name: "e1-quality-probe",
+      pass: false,
+      value: "0% B-win",
+      gate: "≥60% B-win",
+      detail: `All ${eligible.length} sampled turns failed to spawn. Check that the claude binary is reachable.`,
+    };
+  }
+
+  const winRate = wins / ran;
+  const pass = winRate >= 0.6;
+  const base: CheckResult = {
     name: "e1-quality-probe",
-    pass: true,
-    value: "not-run",
+    pass,
+    value: `${(winRate * 100).toFixed(0)}% B-win`,
     gate: "≥60% B-win",
-    detail: "Run with --confirm-cost to execute E1 tournament quality probe.",
   };
+  if (!pass) {
+    return {
+      ...base,
+      detail: `Only ${wins}/${ran} sampled standard turns showed adequate haiku output.`,
+    };
+  }
+  return base;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,9 @@ import { loadWindow, pairDecisionsWithOutcomes } from "../eval/oracle/reader.js"
 import { runToolCorrectness } from "../eval/oracle/tool-correctness.js";
 import { runTelemetryCorrectness, type StatsSummary, type DimensionResult } from "../eval/oracle/telemetry-correctness.js";
 import { runTokensSaved, DEFAULT_PRICING } from "../eval/oracle/tokens-saved.js";
-import { runOutputQuality } from "../eval/oracle/output-quality.js";
+import { runOutputQuality, type SpawnFn } from "../eval/oracle/output-quality.js";
+import { spawnClaude } from "../wrapper/spawn.js";
+import { resolveBundledEval } from "./bench.js";
 import { buildReport, printReport } from "../eval/oracle/report.js";
 import type { SessionRecord } from "../wrapper/session.js";
 
@@ -113,8 +115,12 @@ export function registerOracleCommand(program: Command): void {
         } else if (dim === "tokens") {
           dimensionResults.push(runTokensSaved(events, baselineDate, DEFAULT_PRICING));
         } else if (dim === "quality") {
+          const spawnFn: SpawnFn = (opts) =>
+            spawnClaude({ args: [...opts.args], prompt: opts.prompt });
           dimensionResults.push(await runOutputQuality(events, {
+            evalSetPath: resolveBundledEval(undefined),
             sampleSize: parseInt(cmdOpts.qualitySample, 10) || 20,
+            spawnFn,
           }));
         }
       }

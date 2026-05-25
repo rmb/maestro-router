@@ -43,14 +43,14 @@ import { format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 
-type LabeledEntry = {
+export type LabeledEntry = {
   prompt: string;
   expectedClass: Class;
   lastRole?: "user" | "assistant" | "tool" | "system";
   source: string;
 };
 
-type BenchReport = {
+export type BenchReport = {
   total: number;
   correct: number;
   accuracy: number;
@@ -504,11 +504,11 @@ function renderTournamentHuman(report: TournamentReport): string {
  * (cwd-relative or absolute). Otherwise look for the bundled `evals/labeled.jsonl`
  * relative to the maestro package install dir, falling back to cwd-relative.
  */
-function resolveBundledEval(userPath: string | undefined): string {
+export function resolveBundledEval(userPath: string | undefined): string {
   return resolveBundled(userPath, "evals/labeled.jsonl");
 }
 
-function resolveBundledBaseline(userPath: string | undefined): string {
+export function resolveBundledBaseline(userPath: string | undefined): string {
   return resolveBundled(userPath, "evals/baseline.json");
 }
 
@@ -528,7 +528,7 @@ function resolveBundled(userPath: string | undefined, relative: string): string 
   return resolve(relative);
 }
 
-async function readBaseline(path: string): Promise<{ accuracy: number } | null> {
+export async function readBaseline(path: string): Promise<{ accuracy: number } | null> {
   try {
     const raw = await readFile(resolve(path), "utf8");
     return JSON.parse(raw) as { accuracy: number };
@@ -538,7 +538,7 @@ async function readBaseline(path: string): Promise<{ accuracy: number } | null> 
   }
 }
 
-async function runEval(
+export async function runEval(
   entries: LabeledEntry[],
   pipeline: ReturnType<typeof createPipeline>,
 ): Promise<BenchReport> {

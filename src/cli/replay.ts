@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
+import { markovClassifier } from "../classifiers/markov.js";
 import { overrideClassifier } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { createPipeline } from "../core/pipeline.js";
@@ -39,7 +40,8 @@ export function registerReplayCommand(program: Command): void {
           : heuristicClassifier;
       const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
       const useLlm = cli.userConfig.useLlmClassifier !== false;
-      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      // K2: markov prior in classifiers array (pipeline only uses it when sessionContext.recentClasses present)
+      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, markovClassifier, heuristic];
       if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({

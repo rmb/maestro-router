@@ -24,6 +24,10 @@ export {
   cosineSimilarity,
 } from "./embedding.js";
 export {
+  markovClassifier as markov,
+  predictFromMarkov,
+} from "./markov.js";
+export {
   EXEMPLAR_SEEDS,
   EXEMPLAR_SEEDS_VERSION,
 } from "./exemplars-seeds.js";

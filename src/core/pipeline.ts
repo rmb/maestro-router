@@ -81,7 +81,45 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
       const diagnostics: Diagnostic[] = [];
       const collected: Array<{ name: string; weight: number; result: Classification }> = [];
 
+      // K2: markov prior from session history — short-circuit if high-confidence
+      if (classifyOpts?.sessionContext?.recentClasses) {
+        // Find markov classifier in the pipeline
+        const markovC = classifiers.find((c) => c.name === "markov");
+        if (markovC) {
+          let markovResult: Classification | null;
+          try {
+            markovResult = await markovC.classify(req, classifyOpts);
+          } catch (err) {
+            diagnostics.push({
+              severity: "warning",
+              code: "error.markov",
+              message: (err as Error).message ?? String(err),
+            });
+            markovResult = null;
+          }
+          if (markovResult !== null) {
+            if (markovResult.diagnostics) diagnostics.push(...markovResult.diagnostics);
+            if (markovResult.confidence >= 0.75) {
+              // High-confidence markov prediction — short-circuit
+              const decision = buildDecision({
+                cls: markovResult.class,
+                classifier: "markov",
+                confidence: markovResult.confidence,
+                profile,
+                latencyMs: Date.now() - start,
+                diagnostics,
+              });
+              if (cache) cache.set(key, decision);
+              return applyE3Escalation(decision, classifyOpts);
+            }
+          }
+        }
+      }
+
       for (const c of classifiers) {
+        // Skip markov — we already evaluated it above if applicable
+        if (c.name === "markov") continue;
+
         let result: Classification | null;
         try {
           result = await c.classify(req, classifyOpts);

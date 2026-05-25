@@ -6,6 +6,7 @@ import type { Command } from "commander";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
+import { markovClassifier } from "../classifiers/markov.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import type { Classifier, Class, Decision } from "../core/types.js";
@@ -79,7 +80,8 @@ export function registerRunCommand(program: Command): void {
       const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
       // useLlmClassifierInWrapper defaults true — accuracy gain (~$0.001/uncertain prompt) justifies latency
       const useLlm = cli.userConfig.useLlmClassifierInWrapper !== false;
-      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
+      // K2: markov prior in classifiers array (pipeline only uses it when sessionContext.recentClasses present)
+      const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, markovClassifier, heuristic];
       if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({

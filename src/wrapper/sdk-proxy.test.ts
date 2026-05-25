@@ -142,7 +142,11 @@ describe("runSdkProxy — user message routing", () => {
     const stdin = Readable.from([
       '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}\n',
     ]);
-    setTimeout(() => fc.close(0), 10);
+    // Emit result frame after routing so pending telemetry entry is flushed.
+    setTimeout(() => {
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.close(0);
+    }, 10);
 
     await runSdkProxy({
       realClaude: "node",
@@ -302,7 +306,12 @@ describe("runSdkProxy — multi-turn + slash commands", () => {
       '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"format file"}]}}\n',
       '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"design sharding"}]}}\n',
     ]);
-    setTimeout(() => fc.close(0), 10);
+    // Emit two result frames (one per turn) then close.
+    setTimeout(() => {
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.close(0);
+    }, 10);
 
     await runSdkProxy({
       realClaude: "node",
@@ -529,8 +538,13 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
       spawn: fc.spawn,
     });
 
+    // assistantLine populates toolUseMap synchronously.
+    // Delay result frame so the tool_result stdin line is processed first.
     fc.emit(assistantLine);
-    fc.close(0);
+    setTimeout(() => {
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.close(0);
+    }, 10);
     await proxyP;
 
     expect(tel.events).toHaveLength(1);

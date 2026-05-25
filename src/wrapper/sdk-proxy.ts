@@ -21,6 +21,7 @@ import type { Pipeline } from "../core/pipeline.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
+import { parseOutput } from "./output.js";
 import {
   buildSetModelRequest,
   extractPromptText,
@@ -75,8 +76,20 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
    */
   const toolUseMap = new Map<string, string>();
 
-  // ── stdout: filter our injected control_responses, populate toolUseMap
-  // from assistant frames, forward everything else.
+  /**
+   * Queue of pending telemetry entries. Each user/tool_result turn pushes one
+   * entry; each result frame on stdout shifts the oldest off and logs it with
+   * cost data. Deferred logging captures token counts even on subscription
+   * plans where total_cost_usd is always 0.
+   */
+  const pendingQueue: Array<{
+    decision: Decision;
+    ts: string;
+    prompt: string;
+  }> = [];
+
+  // ── stdout: filter injected control_responses, populate toolUseMap,
+  // flush pending telemetry entries when result frames arrive.
   if (child.stdout) {
     child.stdout.setEncoding("utf8");
     let buf = "";
@@ -97,6 +110,20 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
               if (firstKey !== undefined) toolUseMap.delete(firstKey);
             }
             toolUseMap.set(id, name);
+          }
+          // Flush oldest pending entry with cost data when a turn result arrives.
+          if (frame.type === "result") {
+            const p = pendingQueue.shift();
+            if (p !== undefined) {
+              const parsed = parseOutput(JSON.stringify(frame), opts.userConfig);
+              opts.telemetry.log({
+                type: "decision",
+                ts: p.ts,
+                decision: p.decision,
+                ...(parsed ? { cost: parsed.cost } : {}),
+                ...(p.prompt ? { prompt: p.prompt } : {}),
+              }).catch(() => { /* telemetry must never block routing */ });
+            }
           }
         }
         opts.stdout.write(line + "\n");
@@ -145,13 +172,12 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       child.stdin?.write(JSON.stringify(setModel) + "\n");
       child.stdin?.write(line + "\n");
 
-      try {
-        await opts.telemetry.log({
-          type: "decision",
-          ts: new Date().toISOString(),
-          decision: { ...decision, latencyMs: Date.now() - t0 },
-        });
-      } catch { /* telemetry must never block routing */ }
+      // Defer telemetry: flush when result frame arrives on stdout.
+      pendingQueue.push({
+        decision: { ...decision, latencyMs: Date.now() - t0 },
+        ts: new Date().toISOString(),
+        prompt: "",
+      });
 
       continue;
     }
@@ -178,14 +204,12 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       child.stdin?.write(JSON.stringify(setModel) + "\n");
       child.stdin?.write(line + "\n");
 
-      try {
-        await opts.telemetry.log({
-          type: "decision",
-          ts: new Date().toISOString(),
-          decision: { ...decision, latencyMs: Date.now() - t0 },
-          prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
-        });
-      } catch { /* telemetry must never block routing */ }
+      // Defer telemetry: flush when result frame arrives on stdout.
+      pendingQueue.push({
+        decision: { ...decision, latencyMs: Date.now() - t0 },
+        ts: new Date().toISOString(),
+        prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
+      });
 
       continue;
     }

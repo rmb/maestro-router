@@ -8,10 +8,11 @@ import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/h
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
-import type { Classifier, Class } from "../core/types.js";
+import type { Classifier, Class, Decision } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
 import { createPostHogClient } from "../core/posthog.js";
+import { classifierCache } from "../core/classifier-cache.js";
 
 const truncate = (s: string, max: number): string =>
   s.length > max ? s.slice(0, max) : s;
@@ -22,6 +23,8 @@ import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
 import { buildClaudeArgs } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
+import { computeFingerprint, prewarmFingerprints } from "../wrapper/prewarm.js";
+import { detectContinuation } from "../wrapper/continuation.js";
 import { format, loadCliConfig, readState } from "./utils.js";
 
 const log = (msg: string, quiet?: boolean): void => {
@@ -102,10 +105,53 @@ export function registerRunCommand(program: Command): void {
           ? { prompt: priorSession.lastPrompt, cls: priorSession.lastDecisionClass as Class, ts: priorSession.lastDecisionAt }
           : null;
 
-      const decision = await pipeline.route(
-        { prompt },
-        { sessionContext: { recentClasses } },
-      );
+      // K1: classifier cache — bypass for overrides and short continuation phrases
+      const stripped = stripOverride(prompt);
+      const promptHash = classifierCache.promptHash(prompt);
+      const shouldBypassCache =
+        prompt.trim().startsWith("@") ||
+        /^(continue|keep going|go on|and[?]?)\b/i.test(prompt.trim());
+
+      // Read lastStopReason from prior session for E1/E3 signals
+      const priorStopReason = priorSession?.lastStopReason ?? null;
+
+      // Detect M1 continuation before routing
+      const continuationResult = detectContinuation(stripped, priorStopReason);
+
+      let decision: Decision;
+      const cachedClass = shouldBypassCache ? null : classifierCache.get(promptHash);
+      if (cachedClass) {
+        // Build decision from cached classification (K1 hit)
+        const spec = profile.classes[cachedClass.class];
+        decision = {
+          class: cachedClass.class,
+          classifier: `cache:${cachedClass.classifier}`,
+          confidence: cachedClass.confidence,
+          spec,
+          latencyMs: 0,
+          diagnostics: [{ severity: "info" as const, code: "cache.classifier_hit", message: "classifier cache hit" }],
+        };
+      } else {
+        decision = await pipeline.route(
+          { prompt },
+          {
+            sessionContext: {
+              recentClasses,
+              ...(priorStopReason ? { lastStopReason: priorStopReason } : {}),
+            },
+          },
+        );
+        // Store result in classifier cache after routing (K1 set)
+        if (!shouldBypassCache && decision.classifier !== "cache") {
+          classifierCache.set(promptHash, {
+            class: decision.class,
+            classifier: decision.classifier,
+            confidence: decision.confidence,
+            cachedAt: new Date().toISOString(),
+          });
+        }
+      }
+
       log(
         `route: ${decision.classifier} → class=${decision.class} conf=${decision.confidence.toFixed(2)} model=${decision.spec.model} effort=${decision.spec.effort} budget=$${decision.spec.maxBudgetUsd}`,
         quiet,
@@ -150,19 +196,76 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      const session = await sessions.getOrCreate(process.cwd(), decision.spec.model, {
-        ...(cmdOpts.newSession ? { newSession: true } : {}),
+      // Compute system-prompt fingerprint for Track Z session keying
+      const fp = computeFingerprint({
+        model: decision.spec.model,
+        ...(decision.spec.tools !== undefined ? { tools: decision.spec.tools } : {}),
+        ...(decision.spec.mcpConfig !== undefined ? { mcpConfig: decision.spec.mcpConfig } : {}),
+        ...(decision.spec.bare !== undefined ? { bare: decision.spec.bare } : {}),
+        excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
+        appendSystemPrompt:
+          decision.spec.appendSystemPrompt ??
+          cli.userConfig.appendSystemPrompt ??
+          "Be concise. Avoid preambles and trailing summaries — the user can read the diff.",
       });
 
+      // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set
+      const session = process.env["MAESTRO_DISABLE_TRACK_Z"]
+        ? await sessions.getOrCreate(process.cwd(), decision.spec.model, {
+            ...(cmdOpts.newSession ? { newSession: true } : {}),
+          })
+        : await sessions.getByFingerprint(process.cwd(), fp, {
+            ...(cmdOpts.newSession ? { newSession: true } : {}),
+          });
+
+      // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens
+      const isEscalated = session.isNew ? false : await sessions.getEffortEscalated(session.sessionId);
+      let effectiveDecision = decision;
+      if (isEscalated && decision.class === "standard" && decision.spec.effort === "low") {
+        effectiveDecision = {
+          ...decision,
+          spec: { ...decision.spec, effort: "medium" as const },
+          diagnostics: [
+            ...decision.diagnostics,
+            {
+              severity: "info" as const,
+              code: "e1.escalated",
+              message: "effort upgraded low→medium (session escalation from prior max_tokens)",
+            },
+          ],
+        };
+      }
+
+      // M1 continuation: inject hint when prior turn was truncated and prompt signals continuation
+      if (continuationResult) {
+        effectiveDecision = {
+          ...effectiveDecision,
+          spec: { ...effectiveDecision.spec, appendSystemPrompt: continuationResult.hint },
+        };
+      }
+
       const args = buildClaudeArgs({
-        decision,
+        decision: effectiveDecision,
         userConfig: cli.userConfig,
         sessionId: session.sessionId,
         isResume: !session.isNew,
         bareSupported: pre.bareSupported,
       });
 
-      const stripped = stripOverride(prompt);
+      // Prewarm adjacent fingerprints (other model tiers) fire-and-forget
+      const PREWARM_MODELS = ["haiku", "sonnet", "opus"] as const;
+      const prewarmSpecs = PREWARM_MODELS
+        .filter((m) => m !== decision.spec.model)
+        .map((m) => ({
+          fingerprint: computeFingerprint({
+            model: m,
+            excludeDynamicSections: true,
+          }),
+          model: m,
+          effort: "low",
+        }));
+      void prewarmFingerprints(process.cwd(), prewarmSpecs);
+
       const result = await streamClaude({
         args,
         prompt: stripped,
@@ -174,9 +277,9 @@ export function registerRunCommand(program: Command): void {
       // Markov prior depends on a complete history — record the decided class
       // regardless of whether Claude returned parseable output (it may error,
       // hit a budget cap, or be interrupted — the routing decision still happened).
-      await sessions.appendClass(session.sessionId, decision.class);
+      await sessions.appendClass(session.sessionId, effectiveDecision.class);
       // Buffer this turn's prompt + class so the next turn can emit a correction event.
-      void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), decision.class);
+      void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), effectiveDecision.class);
 
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
       if (parsed) {
@@ -186,7 +289,7 @@ export function registerRunCommand(program: Command): void {
         await telemetry.log({
           type: "decision",
           ts: new Date().toISOString(),
-          decision,
+          decision: effectiveDecision,
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
@@ -197,13 +300,23 @@ export function registerRunCommand(program: Command): void {
             type: "outcome",
             ts: new Date().toISOString(),
             sessionId: session.sessionId,
-            decidedClass: decision.class,
+            decidedClass: effectiveDecision.class,
             stopReason: parsed.cost.stopReason,
             outputTokens: parsed.cost.outputTokens,
             cacheCreationTokens: parsed.cost.cacheCreationInputTokens,
             totalCostUsd: parsed.cost.totalCostUsd,
             durationApiMs: parsed.cost.durationApiMs,
           });
+
+          // E1/E3: persist stop reason for next-turn escalation decisions
+          void sessions.updateStopReason(session.sessionId, parsed.cost.stopReason);
+
+          // E1.escalate: flag session for effort upgrade on next standard turn
+          if (parsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {
+            void sessions.setEffortEscalated(session.sessionId);
+            // K1.invalidate: drop cached classification so next identical prompt re-routes
+            classifierCache.invalidate(promptHash);
+          }
         }
 
         if (cli.userConfig.posthogApiKey) {
@@ -212,12 +325,12 @@ export function registerRunCommand(program: Command): void {
           const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
           void ph.capture("maestro_decision", {
             distinct_id: distinctId,
-            class: decision.class,
-            model: decision.spec.model,
-            effort: decision.spec.effort,
-            confidence: decision.confidence,
-            classifier: decision.classifier,
-            latency_ms: decision.latencyMs,
+            class: effectiveDecision.class,
+            model: effectiveDecision.spec.model,
+            effort: effectiveDecision.spec.effort,
+            confidence: effectiveDecision.confidence,
+            classifier: effectiveDecision.classifier,
+            latency_ms: effectiveDecision.latencyMs,
             prompt_length: prompt.length,
             cost_usd: parsed.cost?.totalCostUsd ?? null,
           });
@@ -225,7 +338,7 @@ export function registerRunCommand(program: Command): void {
           if (parsed.cost) {
             void ph.capture("maestro_outcome", {
               distinct_id: distinctId,
-              class: decision.class,
+              class: effectiveDecision.class,
               stop_reason: parsed.cost.stopReason,
               output_tokens: parsed.cost.outputTokens,
               cache_creation_tokens: parsed.cost.cacheCreationInputTokens,
@@ -235,14 +348,14 @@ export function registerRunCommand(program: Command): void {
           }
 
           // Emit override event when user used @fast / @deep / @think
-          const overrideDiag = decision.diagnostics.find(
+          const overrideDiag = effectiveDecision.diagnostics.find(
             (d) => d.code === "override.matched" || d.code === "override.nl_think",
           );
           if (overrideDiag) {
             const hint = overrideDiag.message?.replace(/^@/, "") ?? "";
             const overrideProps: Record<string, unknown> = {
               distinct_id: distinctId,
-              to_class: decision.class,
+              to_class: effectiveDecision.class,
               hint,
               prompt_length: prompt.length,
             };
@@ -260,7 +373,7 @@ export function registerRunCommand(program: Command): void {
         }
 
         if (globalOpts.json) {
-          process.stdout.write(format({ decision, cost: parsed.cost }, { json: true }) + "\n");
+          process.stdout.write(format({ decision: effectiveDecision, cost: parsed.cost }, { json: true }) + "\n");
         }
       }
 

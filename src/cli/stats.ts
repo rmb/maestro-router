@@ -112,7 +112,8 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
       totalCost += cost;
       perClass[cls].count++;
       perClass[cls].totalCost += cost;
-      if (e.decision.classifier === "default") fallbackCount++;
+      // Count as fallback: pipeline found no signal ("default" pre-v4, "forced.standard" v4+, "markov" is acceptable fallback)
+      if (e.decision.classifier === "default" || e.decision.classifier === "forced.standard") fallbackCount++;
       if (e.cost?.outputTokens && e.cost.outputTokens > 0) {
         outputTokensByClass[cls].push(e.cost.outputTokens);
       }
@@ -273,6 +274,16 @@ function renderHuman(s: Summary): string {
     }
     lines.push("");
     lines.push(green("  → run `maestro tune --learn` to fold these into heuristics"));
+  }
+
+  // Cache locality warning — the dominant cost vector
+  if (s.cacheCreationCostUsd > 0 && s.totalCostUsd > 0) {
+    const bootRatio = s.cacheCreationCostUsd / s.totalCostUsd;
+    if (bootRatio > 0.9) {
+      lines.push("");
+      lines.push(yellow("  ⚠ session boot dominates: " + (bootRatio * 100).toFixed(0) + "% of spend is cache_creation"));
+      lines.push(dim("  → Track Z (fingerprint sessions) should fix this — run `maestro health`"));
+    }
   }
 
   // Classifier health

@@ -238,35 +238,113 @@ describe("buildClaudeArgs — S6 --bare", () => {
   });
 });
 
-describe("maxOutputTokens", () => {
-  test("emits --max-output-tokens when spec sets it", () => {
-    const decision: Decision = {
-      ...baseDecision("trivial"),
-      spec: { ...balancedProfile.classes.trivial, maxOutputTokens: 200 },
-    };
+describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
+  test("trivial class gets terse output-only hint", () => {
     const args = buildClaudeArgs({
-      decision,
+      decision: baseDecision("trivial"),
       userConfig: emptyConfig,
-      sessionId: "test-session",
+      sessionId: "x",
       isResume: false,
     });
-    const idx = args.indexOf("--max-output-tokens");
+    const idx = args.indexOf("--append-system-prompt");
     expect(idx).toBeGreaterThan(-1);
-    expect(args[idx + 1]).toBe("200");
+    expect(args[idx + 1]).toBe("Output only the answer. No explanation. No formatting.");
   });
 
-  test("omits --max-output-tokens when spec does not set it", () => {
-    const decision: Decision = {
-      ...baseDecision("hard"),
-      spec: { ...balancedProfile.classes.hard },
+  test("simple class gets concise hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("simple"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("Be concise. Skip preamble.");
+  });
+
+  test("standard class gets global default hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("Be concise");
+  });
+
+  test("hard class emits no --append-system-prompt (empty string = suppressed)", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("hard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("reasoning class emits no --append-system-prompt", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("reasoning"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("max class emits no --append-system-prompt", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("max"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("per-class spec.appendSystemPrompt wins over class hint", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, appendSystemPrompt: "custom hint" },
     };
     const args = buildClaudeArgs({
       decision,
       userConfig: emptyConfig,
-      sessionId: "test-session",
+      sessionId: "x",
       isResume: false,
     });
-    expect(args).not.toContain("--max-output-tokens");
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("custom hint");
+  });
+
+  test("userConfig.appendSystemPrompt is used for standard when no class hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: { appendSystemPrompt: "user default" },
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("user default");
+  });
+
+  test("spec.appendSystemPrompt empty string suppresses flag even for trivial", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, appendSystemPrompt: "" },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
   });
 });
 

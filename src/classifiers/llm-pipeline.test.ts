@@ -101,8 +101,8 @@ describe("pipeline with LLM classifier", () => {
       prompt: "outline the failure modes of two-phase commit across shard boundaries",
     });
     expect(count()).toBe(0);
-    // Falls through to default class
-    expect(decision.classifier).toBe("default");
+    // Falls through to forced.standard class
+    expect(decision.classifier).toBe("forced.standard");
     expect(decision.class).toBe("standard");
   });
 
@@ -149,6 +149,6 @@ describe("pipeline with LLM classifier", () => {
     // LLM returned null after timeout; nothing else matched; pipeline picks default.
     expect(count()).toBe(1);
     expect(decision.class).toBe("standard");
-    expect(decision.classifier).toBe("default");
+    expect(decision.classifier).toBe("forced.standard");
   });
 });

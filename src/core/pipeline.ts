@@ -36,6 +36,20 @@ export type Pipeline = {
 };
 
 /**
+ * Check if markov lock-in should be broken. Returns true when the prompt
+ * shows signals of a complexity shift that should force full re-evaluation.
+ */
+function shouldBreakMarkovLock(prompt: string, sessionRecentAvgLength?: number): boolean {
+  // Prompt is much longer than session average — signals scope shift
+  if (sessionRecentAvgLength !== undefined && prompt.length > sessionRecentAvgLength * 2.5) return true;
+  // Hard escalation keywords
+  if (/\b(bug|race|deadlock|crash|fail|broken|error|prod|incident|outage|regression)\b/i.test(prompt)) return true;
+  // Override hint present — user is manually routing
+  if (/^@(fast|think|deep|slow)\b/i.test(prompt.trim())) return true;
+  return false;
+}
+
+/**
  * Build a pipeline that iterates classifiers in declared order. The cheap-first
  * ordering invariant (C2) is the caller's responsibility — the pipeline executes
  * exactly the order it receives. Sub-threshold results from each classifier are
@@ -112,7 +126,7 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
             diagnostics: finalDiagnostics,
           });
           if (cache) cache.set(key, decision);
-          return decision;
+          return applyE3Escalation(decision, classifyOpts);
         }
         collected.push({ name: c.name, weight: c.weight, result });
       }
@@ -125,54 +139,81 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
           diagnostics,
         });
         if (cache) cache.set(key, decision);
-        return decision;
+        return applyE3Escalation(decision, classifyOpts);
       }
 
-      // No signal from any classifier. Apply Markov prior from session history.
-      const recentClasses = classifyOpts?.sessionContext?.recentClasses ?? [];
-      const markovClass = markovPrior(recentClasses);
-      const cls = markovClass ?? DEFAULT_CLASS;
-      const markovDiag: Diagnostic = markovClass
-        ? {
-            severity: "info" as const,
-            code: "pipeline.markov_prior",
-            message: `no classifier matched; prior → ${markovClass} from last ${recentClasses.length} turn(s)`,
-          }
-        : {
-            severity: "info" as const,
-            code: "fallback.default",
-            message: "no classifier returned a signal",
-          };
+      // Y.guarantee: "forced.standard" — explicit label distinguishes this from a true
+      // classification. Confidence 0.1 (not 0) signals "we had no data" without being
+      // indistinguishable from an error. K2: break markov lock-in when prompt signals
+      // complexity shift, even here in the all-null fallback path.
+      const breakMarkov = shouldBreakMarkovLock(
+        req.prompt,
+        classifyOpts?.sessionContext?.recentAvgPromptLength,
+      );
+      const fallbackDiagCode = breakMarkov
+        ? "fallback.forced_standard.markov_break"
+        : "fallback.forced_standard";
+      const fallbackDiagMessage = breakMarkov
+        ? "markov lock-in broken — complexity shift detected; forced standard"
+        : "no classifier returned a signal; forced standard";
 
       const decision = buildDecision({
-        cls,
-        classifier: markovClass ? "markov" : "default",
-        confidence: markovClass ? 0.35 : 0,
+        cls: DEFAULT_CLASS,
+        classifier: "forced.standard",
+        confidence: 0.1,
         profile,
         latencyMs: Date.now() - start,
-        diagnostics: [...diagnostics, markovDiag],
+        diagnostics: [
+          ...diagnostics,
+          {
+            severity: "info",
+            code: fallbackDiagCode,
+            message: fallbackDiagMessage,
+          },
+        ],
       });
       if (cache) cache.set(key, decision);
-      return decision;
+      return applyE3Escalation(decision, classifyOpts);
     },
   };
 }
 
 /**
- * Returns the consensus class from recentClasses if the last 3 entries all agree.
- * Uses only last 3 to stay responsive to mode switches.
- * Returns null when there's no strong prior.
+ * E3: reasoning class signal escalation — upgrade effort when session signals complexity.
+ * Applied post-decision, before return. Only acts on class === "reasoning".
  */
-function markovPrior(recentClasses: ReadonlyArray<string>): Class | null {
-  if (recentClasses.length < 2) return null;
-  const last3 = recentClasses.slice(-3);
-  const unique = new Set(last3);
-  if (unique.size !== 1) return null;
-  const cls = last3[0] as Class;
-  const VALID: ReadonlySet<Class> = new Set<Class>([
-    "trivial", "simple", "standard", "hard", "reasoning", "max",
-  ]);
-  return VALID.has(cls) ? cls : null;
+function applyE3Escalation(decision: Decision, classifyOpts?: ClassifyOptions): Decision {
+  if (decision.class !== "reasoning" || !classifyOpts?.sessionContext) return decision;
+
+  const ctx = classifyOpts.sessionContext;
+  let escalationSignals = 0;
+
+  // Signal 1: entropy was high (already escalated via pipeline.entropy_escalation diag)
+  if (decision.diagnostics.some((d) => d.code === "pipeline.entropy_escalation")) escalationSignals++;
+  // Signal 2: markov shows sustained hard/reasoning mode
+  const last5 = ctx.recentClasses?.slice(-5) ?? [];
+  if (last5.filter((c) => c === "reasoning" || c === "max").length >= 3) escalationSignals++;
+  // Signal 3: prior session stop was max_tokens (passed in sessionContext)
+  if (ctx.lastStopReason === "max_tokens") escalationSignals++;
+
+  // Need 2+ signals to escalate (AND-of-2 logic). A single signal at strength 0.9+ also escalates.
+  if (escalationSignals >= 2 || (escalationSignals === 1 && decision.confidence >= 0.9)) {
+    const escalatedSpec = { ...decision.spec, effort: "high" as const };
+    return {
+      ...decision,
+      spec: escalatedSpec,
+      diagnostics: [
+        ...decision.diagnostics,
+        {
+          severity: "info" as const,
+          code: "pipeline.effort_escalation",
+          message: `reasoning effort → high (${escalationSignals} escalation signals)`,
+        },
+      ],
+    };
+  }
+
+  return decision;
 }
 
 function buildDecision(args: {
@@ -199,26 +240,10 @@ function voteDecision(args: {
   latencyMs: number;
   diagnostics: ReadonlyArray<Diagnostic>;
 }): Decision {
-  const ENTROPY_ESCALATION_THRESHOLD = 0.7;
-
   const votes = new Map<Class, number>();
-  let totalWeight = 0;
   for (const { weight, result } of args.collected) {
-    const score = weight * result.confidence;
-    votes.set(result.class, (votes.get(result.class) ?? 0) + score);
-    totalWeight += score;
+    votes.set(result.class, (votes.get(result.class) ?? 0) + weight * result.confidence);
   }
-
-  // Shannon entropy of the normalized vote distribution.
-  // H=0 → unanimous; H≈log2(N) → max disagreement.
-  const entropy =
-    totalWeight > 0
-      ? -Array.from(votes.values()).reduce((sum, score) => {
-          const p = score / totalWeight;
-          return p > 0 ? sum + p * Math.log2(p) : sum;
-        }, 0)
-      : 0;
-
   let winningClass: Class = DEFAULT_CLASS;
   let winningScore = 0;
   for (const [cls, score] of votes) {
@@ -227,30 +252,15 @@ function voteDecision(args: {
       winningScore = score;
     }
   }
-
   const topContributor = args.collected
     .filter((r) => r.result.class === winningClass)
     .sort((a, b) => b.weight * b.result.confidence - a.weight * a.result.confidence)[0];
-
-  const escalate = entropy > ENTROPY_ESCALATION_THRESHOLD;
-  const finalClass = escalate ? UPGRADE[winningClass] : winningClass;
-  const finalDiagnostics: Diagnostic[] = escalate
-    ? [
-        ...args.diagnostics,
-        {
-          severity: "info" as const,
-          code: "pipeline.entropy_escalation",
-          message: `${winningClass} → ${finalClass} (vote entropy ${entropy.toFixed(2)} > ${ENTROPY_ESCALATION_THRESHOLD})`,
-        },
-      ]
-    : [...args.diagnostics];
-
   return buildDecision({
-    cls: finalClass,
+    cls: winningClass,
     classifier: topContributor ? `vote:${topContributor.name}` : "vote",
     confidence: winningScore,
     profile: args.profile,
     latencyMs: args.latencyMs,
-    diagnostics: finalDiagnostics,
+    diagnostics: args.diagnostics,
   });
 }

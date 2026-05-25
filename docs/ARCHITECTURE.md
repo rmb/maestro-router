@@ -93,9 +93,13 @@ Three constraints ruled out an HTTP proxy approach:
 
 ## Session reuse and cost amortization
 
-The single largest cost driver is `cache_creation_input_tokens` — Claude Code's system prompt is ~37k tokens and gets cached on the first turn of every new session. Maestro reuses the same `--session-id` for all prompts in the same `cwd` within a 24-hour window, regardless of which model handles each turn. This amortizes the cache creation cost across the session rather than paying it per turn.
+The single largest cost driver is `cache_creation_input_tokens` — Claude Code's system prompt is ~37k tokens and gets cached on the first turn of every new session. A naive implementation pays this cost on every class transition because different classes use different flags (`--bare`, `--tools`, `--append-system-prompt`), which changes the system-prompt prefix and busts Anthropic's cache.
 
-Model swaps within a session are safe — verified by spike: Haiku → Sonnet preserves conversation context via `--session-id` + `--resume`.
+**Track Z — system-prompt fingerprinting.** `wrapper/session.ts` keys sessions by `sha256([model, tools, mcpConfig, bare, excludeDynamic, appendSystemPrompt]).slice(0,16)` — a hash of every flag that affects the system-prompt prefix. `getByFingerprint(cwd, fingerprint)` reuses the same session ID whenever the fingerprint matches, regardless of which class produced each turn. Sessions with different fingerprints (e.g. trivial's `--bare` vs standard's full tool set) get separate IDs so they never cross-contaminate. Adjacent-tier fingerprints are prewarmed in the background after each turn via `wrapper/prewarm.ts`, so the next model tier's cache entry is warm before it's needed.
+
+Model swaps within a fingerprint group are safe — verified by spike: Haiku → Sonnet preserves conversation context via `--session-id` + `--resume`.
+
+**E1.escalate.** When a `max_tokens` stop reason is recorded on a `standard` turn, the session is flagged as escalated. On the next turn, `effort: low` is promoted to `effort: medium` for that session, capping the regression at one turn's extra cost. The classifier cache entry for that prompt is also invalidated so the pipeline re-classifies upward.
 
 ## Community tuning loop
 
@@ -120,13 +124,14 @@ Pattern mining over tied/B-win rows surfaces heuristic candidates. Requires `--c
 ```
 src/
   core/             Pure logic, zero internal deps.
-    types.ts        Domain types: Class, Profile, Decision, …
-    cache.ts        LRU + TTL + sha256 keying
-    telemetry.ts    JSONL writer
-    posthog.ts      Fire-and-forget capture + HogQL query client
-    pipeline.ts     Short-circuit + weighted vote + cache integration
-    profile.ts      Built-in profiles + layered loader
-    extract.ts      JSON extraction (fenced + brace-balanced fallback)
+    types.ts            Domain types: Class, Profile, Decision, SessionContext, …
+    cache.ts            LRU + TTL + sha256 keying (pipeline decision cache)
+    classifier-cache.ts In-process LRU prompt→class cache; K1 self-invalidation on max_tokens
+    telemetry.ts        JSONL writer
+    posthog.ts          Fire-and-forget capture + HogQL query client
+    pipeline.ts         Short-circuit + weighted vote; Y.guarantee; K2 markov escape; E3 escalation
+    profile.ts          Built-in profiles + layered loader (E1: standard effort=low, X: output caps)
+    extract.ts          JSON extraction (fenced + brace-balanced fallback)
 
   classifiers/      Pipeline stages. Depend only on core/.
     override.ts     @fast / @deep / @think
@@ -137,17 +142,20 @@ src/
 
   wrapper/          Subprocess concerns.
     preflight.ts        Verify Claude CLI version + required flags
-    session.ts          UUID store with aggressive cwd reuse
-    spawn.ts            buildClaudeArgs (pure) + spawnClaude
+    session.ts          Fingerprint-keyed session store (Track Z); getByFingerprint; updateStopReason
+    prewarm.ts          Background prewarm of adjacent fingerprint tiers (Z.bootstrap)
+    continuation.ts     Two-signal continuation detection (M1); CONTINUATION_HINT injection
+    spawn.ts            buildClaudeArgs (pure) + spawnClaude; X.soft class-specific brevity hints
     stream.ts           Live pipe + capture + signal forwarding
     stream-json-proxy.ts  Per-turn VSCode panel proxy
     passthrough.ts      Slash-command bypass
     output.ts           Parse --output-format json → CostBreakdown
 
   cli/              Commander shell.
-    run-cmd.ts      maestro run — classify and forward a prompt
+    run-cmd.ts      maestro run — K1 cache; M1 continuation; Track Z fingerprint; E1.escalate post-turn
     tune.ts         Telemetry analysis, community fetch, auto-tune
-    stats.ts        Cost vs Opus-everywhere baseline
+    stats.ts        Cost vs Opus-everywhere baseline; session boot dominance warning
+    health.ts       Baseline snapshot comparison; regression detection >10%
     bench.ts        Eval + tournament
     replay.ts       JSONL replay against current pipeline
 ```
@@ -163,6 +171,24 @@ Loaded in priority order (later layers override earlier):
 5. **Per-project config** (`<repo>/.maestro/`) — allowed fields only (`profile`, `excludeDynamicSections`, `useEmbeddingClassifier`)
 
 Fields that affect telemetry paths, billing caps, and hot-path latency are global-only. A committed `.maestro/config.json` in a shared repo cannot silently affect teammates on those dimensions.
+
+## Pipeline hardening (Sprint 0/1)
+
+**Y.guarantee.** When no classifier fires above threshold and the weighted vote produces no clear winner, the pipeline previously fell back to `class: "standard", classifier: "default", confidence: 0`. This was indistinguishable from a genuine standard classification in telemetry, hiding the true fallback rate (measured at 67.9% in production). Y.guarantee renames the fallback to `classifier: "forced.standard"`, sets `confidence: 0.1`, and attaches a `fallback.forced_standard` diagnostic. `maestro stats` now tracks this separately, giving a debuggable signal for classifier coverage gaps.
+
+**K2 — Markov lock-in escape.** Repeated turns in the same session can lock the route into a low class even as the problem scope grows. `pipeline.ts` breaks the markov chain when the current prompt is >2.5× the rolling session average length, contains escalation keywords (`architect`, `design`, `production`, `incident`, etc.), includes an `@override` directive, or the prior turn stopped at `max_tokens`. When any escape condition fires, the cached classification is discarded and the full pipeline runs.
+
+**E3 — Reasoning effort escalation.** When a turn is classified as `reasoning` or `max`, E3 checks three signals: an `entropy_escalation` diagnostic from any classifier, 3+ consecutive reasoning/max turns in the last 5, and a prior `max_tokens` stop reason. When 2 of 3 signals fire, the effort is promoted to `high` and a `reasoning.effort_escalated` diagnostic is emitted.
+
+**X — Output token discipline.** Hard caps per class: `standard → 8000`, `hard → 4000`, `reasoning → 6000`, `max` uncapped. Class-specific brevity hints appended to the system prompt: trivial gets "Output only the answer. No explanation.", simple gets "Be concise. Skip preamble.", hard/reasoning/max get no hint (suppress constraint on complex tasks). Caps are passed via `--append-system-prompt` — they do not affect the system-prompt cache fingerprint because they are applied at generation time.
+
+**K1 — Classifier result cache.** An in-process LRU cache (`src/core/classifier-cache.ts`) stores `sha256(prompt) → Classification` with a 24-hour TTL and 1000-entry limit. Cache hits skip the full pipeline on repeated or near-identical prompts. When a turn completes with `stopReason: "max_tokens"` on a `standard` class, the cache entry for that prompt is invalidated so the next identical prompt re-classifies upward.
+
+**M1 — Two-signal continuation.** Prior implementation routed any short prompt matching `/^(continue|keep going|…)/` to simple class. This conflated genuine brevity (a user continuing work) with prompt padding. M1 requires two simultaneous signals: the linguistic pattern match AND `priorStopReason === "max_tokens"`. Single-signal matches now proceed to the normal pipeline. When both signals fire, `wrapper/continuation.ts` injects `CONTINUATION_HINT` ("Resume from where you stopped. No recap. Continue directly.") as the `appendSystemPrompt`, overriding the standard brevity hint.
+
+## Health monitoring
+
+`maestro health` snapshots six metrics: total requests, cache hit rate, fallback rate, session boot ratio (cache_creation cost / total cost), per-class average cost, and output tokens p90 by class. `maestro health --set-baseline` saves the current snapshot to `~/.maestro/health-baseline.json`. On subsequent runs, `maestro health` computes regressions (>10% change) and improvements against the baseline. CI pipelines can use `--json` + a non-zero exit check to gate on regressions.
 
 ## Known behavioral notes
 

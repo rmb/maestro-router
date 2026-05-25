@@ -56,17 +56,28 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 
-  // Output ceiling — prevents over-explanation on trivial/simple prompts
-  if (spec.maxOutputTokens !== undefined) {
-    args.push("--max-output-tokens", String(spec.maxOutputTokens));
-  }
-
-  // Brevity hint — reduces output tokens, slows context compaction
+  // X.soft: class-specific brevity hints. trivial/simple get tighter instructions;
+  // hard/reasoning/max get nothing (don't constrain thinking). standard falls
+  // through to global user default. Per-class spec.appendSystemPrompt wins first.
+  const CLASS_BREVITY: Partial<Record<string, string>> = {
+    trivial: "Output only the answer. No explanation. No formatting.",
+    simple: "Be concise. Skip preamble.",
+    // standard: falls through to global userConfig default
+    hard: "",
+    reasoning: "",
+    max: "",
+  };
+  const classHint = CLASS_BREVITY[decision.class];
   const appendPrompt =
-    userConfig.appendSystemPrompt !== undefined
-      ? userConfig.appendSystemPrompt
-      : "Be concise. Avoid preambles and trailing summaries — the user can read the diff.";
-  if (appendPrompt.length > 0) {
+    spec.appendSystemPrompt !== undefined
+      ? spec.appendSystemPrompt
+      : classHint !== undefined
+        ? classHint
+        : (userConfig.appendSystemPrompt !== undefined
+            ? userConfig.appendSystemPrompt
+            : "Be concise. Avoid preambles and trailing summaries — the user can read the diff.");
+  // Only emit the flag when there is a non-empty string (empty = intentional suppression)
+  if (appendPrompt !== "") {
     args.push("--append-system-prompt", appendPrompt);
   }
 

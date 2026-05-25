@@ -58,6 +58,20 @@ For every prompt, Maestro runs a 5-stage classifier pipeline — cheapest stages
 
 The winner maps to one of six classes: **trivial → simple → standard → hard → reasoning → max**, each with a configured model, effort level, and cost ceiling. No match defaults to `standard`.
 
+### Session fingerprinting (Track Z)
+
+Anthropic's prompt cache is keyed by the exact system-prompt prefix — any flag change (`--tools`, `--bare`, `--append-system-prompt`, `--mcp-config`) creates a new cache entry and pays the full `cache_creation` cost (~$0.035 per session start). Maestro fingerprints each session by hashing all system-prompt-affecting flags together: `sha256([model, tools, mcpConfig, bare, excludeDynamic, appendSystemPrompt])`. Sessions with an identical fingerprint reuse the same `--session-id` even across class transitions, keeping the cache prefix stable. Sessions with different fingerprints (e.g. trivial's `--bare` vs standard's full tool set) get separate IDs so they never cross-contaminate.
+
+This is the single largest cost lever. A session boot (`cache_creation`) typically dominates 80–99% of first-turn cost. Track Z eliminates redundant boots across the most common class transitions.
+
+### Cost-reduction layers applied per turn
+
+- **E1** — `standard` class runs at `effort: low` (was `medium`), cutting thinking tokens 60–80% for the highest-volume class without measurable accuracy loss on typical dev tasks.
+- **X** — Hard output caps: standard → 8000 tokens, hard → 4000, reasoning → 6000. Brevity hints appended to system prompt for trivial/simple classes.
+- **K1** — In-process classifier cache: `sha256(prompt) → class`. Max-tokens outcomes invalidate the entry so a truncated response forces re-classification upward.
+- **M1** — Continuation detection requires two signals (linguistic match + prior `max_tokens` stop) before injecting a "resume" hint. Single-signal matches no longer downgrade to simple.
+- **K2** — Markov lock-in escape: if the prompt is >2.5× the session rolling average length, contains escalation keywords, or follows a `max_tokens` stop, Maestro ignores the cached class and re-classifies.
+
 ---
 
 ## Commands
@@ -70,6 +84,8 @@ maestro run --new-session "fresh start"   # force a new session
 # Cost and savings
 maestro stats                             # savings vs Opus-everywhere baseline
 maestro stats --since 30                  # last 30 days
+maestro health                            # compare current metrics against saved baseline
+maestro health --set-baseline             # save current state as the new health baseline
 
 # Tuning
 maestro tune                              # show suggested heuristic improvements

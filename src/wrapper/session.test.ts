@@ -170,6 +170,155 @@ describe("appendClass", () => {
   });
 });
 
+describe("getByFingerprint", () => {
+  test("creates new session for a new fingerprint", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const result = await store.getByFingerprint("/foo", "abc123def456abcd");
+    expect(result.sessionId).toMatch(UUID_RE);
+    expect(result.isNew).toBe(true);
+  });
+
+  test("reuses session for same cwd + fingerprint", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const first = await store.getByFingerprint("/foo", "abc123def456abcd");
+    const second = await store.getByFingerprint("/foo", "abc123def456abcd");
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.isNew).toBe(false);
+  });
+
+  test("different fingerprints for same cwd get different sessions", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const a = await store.getByFingerprint("/foo", "fingerprint-aaa");
+    const b = await store.getByFingerprint("/foo", "fingerprint-bbb");
+    expect(a.sessionId).not.toBe(b.sessionId);
+    expect(a.isNew).toBe(true);
+    expect(b.isNew).toBe(true);
+  });
+
+  test("newSession: true forces fresh session even with matching fingerprint", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const a = await store.getByFingerprint("/foo", "abc123def456abcd");
+    const b = await store.getByFingerprint("/foo", "abc123def456abcd", { newSession: true });
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.isNew).toBe(true);
+  });
+
+  test("expired fingerprint sessions are not reused", async () => {
+    let t = 0;
+    const store = createSessionStore({
+      path: join(dir, "s.json"),
+      reuseWindowMs: 1000,
+      now: () => t,
+    });
+    t = 1_000_000;
+    const a = await store.getByFingerprint("/foo", "fp-expiry-test");
+    t = 1_002_000; // 2s later, beyond 1s window
+    const b = await store.getByFingerprint("/foo", "fp-expiry-test");
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.isNew).toBe(true);
+  });
+
+  test("getOrCreate and getByFingerprint use independent key namespaces (no cross-reuse)", async () => {
+    // A session created via getOrCreate with modelTier "haiku" must NOT be reused
+    // by getByFingerprint even if the derived fingerprint happened to collide.
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    // Create via legacy API
+    const legacy = await store.getOrCreate("/foo", "haiku");
+    // Look up via fingerprint using a known fingerprint string (not the derived one)
+    const fp = await store.getByFingerprint("/foo", "totally-different-fp");
+    expect(fp.sessionId).not.toBe(legacy.sessionId);
+    expect(fp.isNew).toBe(true);
+  });
+});
+
+describe("stop reason and effort escalation", () => {
+  test("updateStopReason persists and is readable via list()", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+    await store.updateStopReason(sessionId, "max_tokens");
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.lastStopReason).toBe("max_tokens");
+  });
+
+  test("updateStopReason on unknown sessionId is a no-op (no throw)", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    await expect(store.updateStopReason("nonexistent-uuid", "end_turn")).resolves.toBeUndefined();
+  });
+
+  test("setEffortEscalated marks session; getEffortEscalated returns true", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "sonnet");
+    expect(await store.getEffortEscalated(sessionId)).toBe(false);
+    await store.setEffortEscalated(sessionId);
+    expect(await store.getEffortEscalated(sessionId)).toBe(true);
+  });
+
+  test("getEffortEscalated returns false for unknown sessionId", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    expect(await store.getEffortEscalated("no-such-uuid")).toBe(false);
+  });
+
+  test("setEffortEscalated is idempotent", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "opus");
+    await store.setEffortEscalated(sessionId);
+    await store.setEffortEscalated(sessionId);
+    expect(await store.getEffortEscalated(sessionId)).toBe(true);
+  });
+});
+
+describe("backward compat: legacy records without systemPromptFingerprint", () => {
+  test("old record with only modelTier is NOT reused by getByFingerprint", async () => {
+    const path = join(dir, "s.json");
+    await writeFile(
+      path,
+      JSON.stringify([
+        {
+          sessionId: "legacy-session-id",
+          cwd: "/foo",
+          modelTier: "haiku",
+          createdAt: new Date().toISOString(),
+          lastUsedAt: new Date().toISOString(),
+        },
+      ]),
+    );
+    const store = createSessionStore({ path });
+    const result = await store.getByFingerprint("/foo", "some-fingerprint");
+    expect(result.sessionId).not.toBe("legacy-session-id");
+    expect(result.isNew).toBe(true);
+  });
+
+  test("old record with only modelTier is still returned by list()", async () => {
+    const path = join(dir, "s.json");
+    await writeFile(
+      path,
+      JSON.stringify([
+        {
+          sessionId: "legacy-session-id",
+          cwd: "/foo",
+          modelTier: "haiku",
+          createdAt: new Date().toISOString(),
+          lastUsedAt: new Date().toISOString(),
+        },
+      ]),
+    );
+    const store = createSessionStore({ path });
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0]!.sessionId).toBe("legacy-session-id");
+  });
+
+  test("getOrCreate (deprecated) creates sessions with systemPromptFingerprint set", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.systemPromptFingerprint).toBeDefined();
+    expect(typeof rec?.systemPromptFingerprint).toBe("string");
+  });
+});
+
 describe("model-tier affinity", () => {
   test("same cwd, different modelTier → different sessions", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });

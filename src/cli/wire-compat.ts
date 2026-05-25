@@ -35,6 +35,7 @@ import type { Pipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { createTelemetry } from "../core/telemetry.js";
 import type { Classifier, Decision, Profile } from "../core/types.js";
+import { classifierCache } from "../core/classifier-cache.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
@@ -52,6 +53,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "run",
   "telemetry",
   "stats",
+  "health",
   "tune",
   "replay",
   "bench",
@@ -317,8 +319,39 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   }
 
   const cli = await loadCliConfig();
-  const { pipeline } = buildPipeline(cli);
-  const decision = await pipeline.route({ prompt });
+  const { pipeline, profile } = buildPipeline(cli);
+
+  // K1: classifier cache — bypass for overrides and continuation patterns
+  const promptHash = classifierCache.promptHash(prompt);
+  const shouldBypassCache =
+    prompt.trim().startsWith("@") ||
+    /^(continue|keep going|go on|and[?]?)\b/i.test(prompt.trim());
+
+  let decision: Decision;
+  const cachedClass = shouldBypassCache ? null : classifierCache.get(promptHash);
+  if (cachedClass) {
+    const spec = profile.classes[cachedClass.class];
+    decision = {
+      class: cachedClass.class,
+      classifier: `cache:${cachedClass.classifier}`,
+      confidence: cachedClass.confidence,
+      spec,
+      latencyMs: 0,
+      diagnostics: [{ severity: "info" as const, code: "cache.classifier_hit", message: "classifier cache hit" }],
+    };
+  } else {
+    decision = await pipeline.route({ prompt });
+    // Store in classifier cache after routing
+    if (!shouldBypassCache) {
+      classifierCache.set(promptHash, {
+        class: decision.class,
+        classifier: decision.classifier,
+        confidence: decision.confidence,
+        cachedAt: new Date().toISOString(),
+      });
+    }
+  }
+
   const modifiedArgs = applyRouting(
     claudeArgs,
     decision,

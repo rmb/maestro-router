@@ -95,7 +95,7 @@ const classify: ClassifyFn = (req: Request) => {
       diagnostics: [
         {
           severity: "info",
-          code: "turn-type.empty_prompt",
+          code: "turn_type.empty_prompt",
           message: "empty prompt (tool_result or continuation without signal)",
         },
       ],

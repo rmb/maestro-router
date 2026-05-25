@@ -92,7 +92,7 @@ describe("turnTypeClassifier", () => {
     expect(result?.confidence).toBe(1.0);
     expect(result?.diagnostics).toContainEqual(
       expect.objectContaining({
-        code: "turn-type.empty_prompt",
+        code: "turn_type.empty_prompt",
         severity: "info",
       })
     );

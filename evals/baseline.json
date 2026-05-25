@@ -1,49 +1,90 @@
 {
-  "total": 327,
-  "correct": 327,
-  "accuracy": 1,
+  "total": 378,
+  "correct": 373,
+  "accuracy": 0.9868,
   "perClass": {
     "trivial": {
-      "total": 68,
-      "correct": 68,
-      "accuracy": 1
+      "total": 73,
+      "correct": 71,
+      "accuracy": 0.9726
     },
     "simple": {
-      "total": 54,
-      "correct": 54,
-      "accuracy": 1
+      "total": 59,
+      "correct": 58,
+      "accuracy": 0.9831
     },
     "standard": {
-      "total": 61,
-      "correct": 61,
+      "total": 69,
+      "correct": 69,
       "accuracy": 1
     },
     "hard": {
-      "total": 55,
-      "correct": 55,
+      "total": 78,
+      "correct": 78,
       "accuracy": 1
     },
     "reasoning": {
-      "total": 51,
-      "correct": 51,
+      "total": 56,
+      "correct": 56,
       "accuracy": 1
     },
     "max": {
-      "total": 38,
-      "correct": 38,
-      "accuracy": 1
+      "total": 43,
+      "correct": 41,
+      "accuracy": 0.9535
     }
   },
   "confusion": {
-    "trivial>trivial": 68,
-    "simple>simple": 54,
-    "standard>standard": 61,
-    "hard>hard": 55,
-    "reasoning>reasoning": 51,
-    "max>max": 38
+    "trivial>trivial": 71,
+    "simple>simple": 58,
+    "standard>standard": 69,
+    "hard>hard": 78,
+    "reasoning>reasoning": 56,
+    "max>max": 41,
+    "simple>standard": 1,
+    "max>hard": 2,
+    "trivial>standard": 1,
+    "trivial>simple": 1
   },
   "latencyMs": {
     "p50": 0,
     "p95": 0
-  }
+  },
+  "failures": [
+    {
+      "prompt": "do a thorough refactor of this 3-line function",
+      "expected": "simple",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "intermittent 503s on the payment endpoint, 0.3% error rate, no pattern yet",
+      "expected": "max",
+      "predicted": "hard",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "update the env variable",
+      "expected": "trivial",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "change the color",
+      "expected": "trivial",
+      "predicted": "simple",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "it crashed again",
+      "expected": "max",
+      "predicted": "hard",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    }
+  ]
 }

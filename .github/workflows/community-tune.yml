@@ -1,0 +1,53 @@
+name: Community tune
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 06:00 UTC
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Mine community heuristics from PostHog
+        run: node dist/cli.js tune --posthog --learn --community-output community/heuristics.json
+        env:
+          MAESTRO_POSTHOG_QUERY_KEY: ${{ secrets.POSTHOG_QUERY_KEY }}
+          MAESTRO_POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
+
+      - name: Eval gate — reject if accuracy regresses >2%
+        run: |
+          # Merge candidate community heuristics and run eval against locked baseline.
+          # bench --gate 0.02 exits non-zero when accuracy drops >2% vs baseline.json.
+          node dist/cli.js bench --eval-heuristics community/heuristics.json --gate 0.02 || {
+            echo "Community heuristics failed eval gate — aborting commit." >&2
+            exit 1
+          }
+
+      - name: Commit if changed
+        run: |
+          git config user.name "maestro-bot"
+          git config user.email "bot@maestro-router"
+          git add community/heuristics.json
+          git diff --cached --quiet || git commit -m "chore: update community heuristics [skip ci]"
+          git diff HEAD~1..HEAD --quiet || git push

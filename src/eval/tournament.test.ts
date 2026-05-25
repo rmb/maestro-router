@@ -673,7 +673,13 @@ describe("runTournament matrix — effort downgrade", () => {
     expect(report.matrixResults).toHaveLength(0);
   });
 
-  test("matrix=true: standard/medium → also tests standard/low; 5 spawns", async () => {
+  test("matrix=true: standard/medium (custom spec) → also tests standard/low; 5 spawns", async () => {
+    // Use a custom spec with effort=medium so the effort-downgrade logic has room to fire.
+    // balancedProfile.standard now uses effort=low (E1 change), which is the floor,
+    // so we supply both a custom currentSpec and a custom getSpec to keep this test meaningful.
+    const mediumStandardSpec: ClassSpec = { ...getSpec("standard"), effort: "medium" };
+    const getSpecMedium = (c: Class): ClassSpec =>
+      c === "standard" ? mediumStandardSpec : getSpec(c);
     const spawn = makeMockSpawn([
       ok(envelope("A response")),
       ok(envelope("B tier response")),
@@ -682,8 +688,8 @@ describe("runTournament matrix — effort downgrade", () => {
       ok(judgeEnvelope("tie", "effort tie")),
     ]);
     const report = await runTournament(
-      [{ prompt: "format this file", currentClass: "standard", currentSpec: getSpec("standard") }],
-      { spawn, getSpec, matrix: true },
+      [{ prompt: "format this file", currentClass: "standard", currentSpec: mediumStandardSpec }],
+      { spawn, getSpec: getSpecMedium, matrix: true },
     );
     expect(spawn.calls).toHaveLength(5);
     const row = report.rows[0]!;
@@ -694,11 +700,11 @@ describe("runTournament matrix — effort downgrade", () => {
     expect(report.matrixResults).toHaveLength(1);
     const mr = report.matrixResults[0]!;
     expect(mr.class).toBe("standard");
-    expect(mr.currentModel).toBe(getSpec("standard").model);
-    expect(mr.currentEffort).toBe(getSpec("standard").effort);
+    expect(mr.currentModel).toBe(mediumStandardSpec.model);
+    expect(mr.currentEffort).toBe("medium");
     expect(mr.cells).toHaveLength(1);
     const cell = mr.cells[0]!;
-    expect(cell.model).toBe(getSpec("standard").model);
+    expect(cell.model).toBe(mediumStandardSpec.model);
     expect(cell.effort).toBe("low");
     expect(cell.ties).toBe(1);
     expect(cell.wins).toBe(0);
@@ -721,6 +727,10 @@ describe("runTournament matrix — effort downgrade", () => {
   });
 
   test("matrix=true: B_effort spawn fails → effort fields not set, budget continues", async () => {
+    // Use a custom spec with effort=medium so the effort-downgrade logic fires.
+    // balancedProfile.standard now uses effort=low (E1 change — floor), so no B_effort
+    // spawn would be attempted without this override.
+    const mediumStandardSpec: ClassSpec = { ...getSpec("standard"), effort: "medium" };
     const spawn = makeMockSpawn([
       ok(envelope("A")),
       ok(envelope("B tier")),
@@ -728,7 +738,7 @@ describe("runTournament matrix — effort downgrade", () => {
       { stdout: "", exitCode: 1, timedOut: false }, // B_effort fails
     ]);
     const report = await runTournament(
-      [{ prompt: "design cache", currentClass: "standard", currentSpec: getSpec("standard") }],
+      [{ prompt: "design cache", currentClass: "standard", currentSpec: mediumStandardSpec }],
       { spawn, getSpec, matrix: true },
     );
     // B_effort failed → no judge_effort spawn
@@ -754,6 +764,7 @@ describe("runTournament matrix — effort downgrade", () => {
   });
 
   test("matrix=true: effort judge fails → cell.failed incremented", async () => {
+    const mediumStandardSpec: ClassSpec = { ...getSpec("standard"), effort: "medium" };
     const spawn = makeMockSpawn([
       ok(envelope("A")),
       ok(envelope("B tier")),
@@ -762,7 +773,7 @@ describe("runTournament matrix — effort downgrade", () => {
       { stdout: "", exitCode: 1, timedOut: false }, // judge_effort fails
     ]);
     const report = await runTournament(
-      [{ prompt: "x", currentClass: "standard", currentSpec: getSpec("standard") }],
+      [{ prompt: "x", currentClass: "standard", currentSpec: mediumStandardSpec }],
       { spawn, getSpec, matrix: true },
     );
     const row = report.rows[0]!;
@@ -774,18 +785,19 @@ describe("runTournament matrix — effort downgrade", () => {
   });
 
   test("matrix=true: multiple prompts aggregate cells correctly", async () => {
+    const mediumStandardSpec: ClassSpec = { ...getSpec("standard"), effort: "medium" };
     const spawn = makeMockSpawn([
-      // prompt 1: standard
+      // prompt 1: standard/medium → tests standard/low
       ok(envelope("A")), ok(envelope("B_tier")), ok(judgeEnvelope("A")),
       ok(envelope("B_effort")), ok(judgeEnvelope("B", "effort win")),
-      // prompt 2: standard
+      // prompt 2: standard/medium → tests standard/low
       ok(envelope("A")), ok(envelope("B_tier")), ok(judgeEnvelope("B")),
       ok(envelope("B_effort")), ok(judgeEnvelope("tie", "effort tie")),
     ]);
     const report = await runTournament(
       [
-        { prompt: "p1", currentClass: "standard", currentSpec: getSpec("standard") },
-        { prompt: "p2", currentClass: "standard", currentSpec: getSpec("standard") },
+        { prompt: "p1", currentClass: "standard", currentSpec: mediumStandardSpec },
+        { prompt: "p2", currentClass: "standard", currentSpec: mediumStandardSpec },
       ],
       { spawn, getSpec, matrix: true },
     );
@@ -799,6 +811,7 @@ describe("runTournament matrix — effort downgrade", () => {
   });
 
   test("resume file includes effortDowngradedEffort when matrix=true", async () => {
+    const mediumStandardSpec: ClassSpec = { ...getSpec("standard"), effort: "medium" };
     const tmpFile = join(tmpdir(), `matrix-resume-${Date.now()}.jsonl`);
     const spawn = makeMockSpawn([
       ok(envelope("A")),
@@ -809,7 +822,7 @@ describe("runTournament matrix — effort downgrade", () => {
     ]);
     try {
       await runTournament(
-        [{ prompt: "matrix-resume-test", currentClass: "standard", currentSpec: getSpec("standard") }],
+        [{ prompt: "matrix-resume-test", currentClass: "standard", currentSpec: mediumStandardSpec }],
         { spawn, getSpec, matrix: true, resumePath: tmpFile },
       );
       const line = readFileSync(tmpFile, "utf8").trim();

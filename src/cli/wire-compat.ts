@@ -35,6 +35,7 @@ import type { Pipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { createTelemetry } from "../core/telemetry.js";
 import type { Classifier, Decision, Profile } from "../core/types.js";
+import { classifierCache } from "../core/classifier-cache.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
@@ -52,10 +53,12 @@ const KNOWN_SUBCOMMANDS = new Set([
   "run",
   "telemetry",
   "stats",
+  "health",
   "tune",
   "replay",
   "bench",
   "install-vscode",
+  "oracle",
   "help",
 ]);
 
@@ -230,15 +233,11 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
       : heuristicClassifier;
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolOverrideClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
-  // Wrapper-hot-path discipline: the LLM stage adds 13-20s of cold-call
-  // latency and ~$0.04 of cache_creation cost per VSCode prompt. With
-  // VSCode's 60s subprocess-init deadline, that's too tight a margin and
-  // caused real timeouts in production. Heuristic + embedding + the
-  // pipeline default-class fallback cover the wrapper case well enough;
-  // the LLM stage stays available for `bench --llm` / `tune` where
-  // accuracy matters more than latency. Opt back in with
-  // useLlmClassifierInWrapper: true.
-  if (cli.userConfig.useLlmClassifierInWrapper === true) classifiers.push(llmClassifier);
+  // LLM stage is on by default. Cold-cache penalty (~$0.04, 13-20s) only hits
+  // the first turn after a VSCode restart; subsequent turns hit cache_read and
+  // resolve in <1s. Opt out with useLlmClassifierInWrapper: false if latency
+  // on first turn is unacceptable for your workflow.
+  if (cli.userConfig.useLlmClassifierInWrapper !== false) classifiers.push(llmClassifier);
   return { pipeline: createPipeline({ classifiers, profile }), profile };
 }
 
@@ -321,8 +320,39 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
   }
 
   const cli = await loadCliConfig();
-  const { pipeline } = buildPipeline(cli);
-  const decision = await pipeline.route({ prompt });
+  const { pipeline, profile } = buildPipeline(cli);
+
+  // K1: classifier cache — bypass for overrides and continuation patterns
+  const promptHash = classifierCache.promptHash(prompt);
+  const shouldBypassCache =
+    prompt.trim().startsWith("@") ||
+    /^(continue|keep going|go on|and[?]?)\b/i.test(prompt.trim());
+
+  let decision: Decision;
+  const cachedClass = shouldBypassCache ? null : classifierCache.get(promptHash);
+  if (cachedClass) {
+    const spec = profile.classes[cachedClass.class];
+    decision = {
+      class: cachedClass.class,
+      classifier: `cache:${cachedClass.classifier}`,
+      confidence: cachedClass.confidence,
+      spec,
+      latencyMs: 0,
+      diagnostics: [{ severity: "info" as const, code: "cache.classifier_hit", message: "classifier cache hit" }],
+    };
+  } else {
+    decision = await pipeline.route({ prompt });
+    // Store in classifier cache after routing
+    if (!shouldBypassCache) {
+      classifierCache.set(promptHash, {
+        class: decision.class,
+        classifier: decision.classifier,
+        confidence: decision.confidence,
+        cachedAt: new Date().toISOString(),
+      });
+    }
+  }
+
   const modifiedArgs = applyRouting(
     claudeArgs,
     decision,
@@ -348,7 +378,10 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
       await telemetry.log({
         type: "decision",
         ts: new Date().toISOString(),
-        decision,
+        decision: {
+          ...decision,
+          cacheHit: (parsed.cost?.cacheReadInputTokens ?? 0) > 0,
+        },
         cost: parsed.cost,
       });
     }

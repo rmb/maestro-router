@@ -48,9 +48,9 @@ export const balancedProfile: Profile = {
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.3,
     },
-    standard: { model: "sonnet", effort: "medium", tools: "default", maxBudgetUsd: 1.0 },
-    hard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0 },
-    reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
+    standard: { model: "sonnet", effort: "low", tools: "default", maxBudgetUsd: 1.0, maxOutputTokens: 8000 },
+    hard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
+    reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
     max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };

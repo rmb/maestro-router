@@ -36,6 +36,20 @@ export type Pipeline = {
 };
 
 /**
+ * Check if markov lock-in should be broken. Returns true when the prompt
+ * shows signals of a complexity shift that should force full re-evaluation.
+ */
+function shouldBreakMarkovLock(prompt: string, sessionRecentAvgLength?: number): boolean {
+  // Prompt is much longer than session average — signals scope shift
+  if (sessionRecentAvgLength !== undefined && prompt.length > sessionRecentAvgLength * 2.5) return true;
+  // Hard escalation keywords
+  if (/\b(bug|race|deadlock|crash|fail|broken|error|prod|incident|outage|regression)\b/i.test(prompt)) return true;
+  // Override hint present — user is manually routing
+  if (/^@(fast|think|deep|slow)\b/i.test(prompt.trim())) return true;
+  return false;
+}
+
+/**
  * Build a pipeline that iterates classifiers in declared order. The cheap-first
  * ordering invariant (C2) is the caller's responsibility — the pipeline executes
  * exactly the order it receives. Sub-threshold results from each classifier are
@@ -112,7 +126,7 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
             diagnostics: finalDiagnostics,
           });
           if (cache) cache.set(key, decision);
-          return decision;
+          return applyE3Escalation(decision, classifyOpts);
         }
         collected.push({ name: c.name, weight: c.weight, result });
       }
@@ -125,28 +139,81 @@ export function createPipeline(opts: PipelineOptions): Pipeline {
           diagnostics,
         });
         if (cache) cache.set(key, decision);
-        return decision;
+        return applyE3Escalation(decision, classifyOpts);
       }
+
+      // Y.guarantee: "forced.standard" — explicit label distinguishes this from a true
+      // classification. Confidence 0.1 (not 0) signals "we had no data" without being
+      // indistinguishable from an error. K2: break markov lock-in when prompt signals
+      // complexity shift, even here in the all-null fallback path.
+      const breakMarkov = shouldBreakMarkovLock(
+        req.prompt,
+        classifyOpts?.sessionContext?.recentAvgPromptLength,
+      );
+      const fallbackDiagCode = breakMarkov
+        ? "fallback.forced_standard.markov_break"
+        : "fallback.forced_standard";
+      const fallbackDiagMessage = breakMarkov
+        ? "markov lock-in broken — complexity shift detected; forced standard"
+        : "no classifier returned a signal; forced standard";
 
       const decision = buildDecision({
         cls: DEFAULT_CLASS,
-        classifier: "default",
-        confidence: 0,
+        classifier: "forced.standard",
+        confidence: 0.1,
         profile,
         latencyMs: Date.now() - start,
         diagnostics: [
           ...diagnostics,
           {
             severity: "info",
-            code: "fallback.default",
-            message: "no classifier returned a signal",
+            code: fallbackDiagCode,
+            message: fallbackDiagMessage,
           },
         ],
       });
       if (cache) cache.set(key, decision);
-      return decision;
+      return applyE3Escalation(decision, classifyOpts);
     },
   };
+}
+
+/**
+ * E3: reasoning class signal escalation — upgrade effort when session signals complexity.
+ * Applied post-decision, before return. Only acts on class === "reasoning".
+ */
+function applyE3Escalation(decision: Decision, classifyOpts?: ClassifyOptions): Decision {
+  if (decision.class !== "reasoning" || !classifyOpts?.sessionContext) return decision;
+
+  const ctx = classifyOpts.sessionContext;
+  let escalationSignals = 0;
+
+  // Signal 1: entropy was high (already escalated via pipeline.entropy_escalation diag)
+  if (decision.diagnostics.some((d) => d.code === "pipeline.entropy_escalation")) escalationSignals++;
+  // Signal 2: markov shows sustained hard/reasoning mode
+  const last5 = ctx.recentClasses?.slice(-5) ?? [];
+  if (last5.filter((c) => c === "reasoning" || c === "max").length >= 3) escalationSignals++;
+  // Signal 3: prior session stop was max_tokens (passed in sessionContext)
+  if (ctx.lastStopReason === "max_tokens") escalationSignals++;
+
+  // Need 2+ signals to escalate (AND-of-2 logic). A single signal at strength 0.9+ also escalates.
+  if (escalationSignals >= 2 || (escalationSignals === 1 && decision.confidence >= 0.9)) {
+    const escalatedSpec = { ...decision.spec, effort: "high" as const };
+    return {
+      ...decision,
+      spec: escalatedSpec,
+      diagnostics: [
+        ...decision.diagnostics,
+        {
+          severity: "info" as const,
+          code: "pipeline.effort_escalation",
+          message: `reasoning effort → high (${escalationSignals} escalation signals)`,
+        },
+      ],
+    };
+  }
+
+  return decision;
 }
 
 function buildDecision(args: {

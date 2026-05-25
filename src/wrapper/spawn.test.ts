@@ -238,6 +238,119 @@ describe("buildClaudeArgs — S6 --bare", () => {
   });
 });
 
+describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
+  test("trivial class gets terse output-only hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("Output only the answer. No explanation. No formatting.");
+  });
+
+  test("simple class gets concise hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("simple"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("Be concise. Skip preamble.");
+  });
+
+  test("standard class gets explicit 4000-token brevity hint", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("under 4000 tokens");
+  });
+
+  test("hard class emits no --append-system-prompt (empty string = suppressed)", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("hard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("reasoning class emits no --append-system-prompt", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("reasoning"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("max class emits no --append-system-prompt", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("max"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("per-class spec.appendSystemPrompt wins over class hint", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, appendSystemPrompt: "custom hint" },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("custom hint");
+  });
+
+  test("standard class hint wins over userConfig.appendSystemPrompt", () => {
+    // standard now has an explicit CLASS_BREVITY entry, so the class hint
+    // takes precedence over userConfig.appendSystemPrompt — same resolution
+    // order as every other class.
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: { appendSystemPrompt: "user default" },
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("under 4000 tokens");
+  });
+
+  test("spec.appendSystemPrompt empty string suppresses flag even for trivial", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, appendSystemPrompt: "" },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+});
+
 describe("spawnClaude", () => {
   test("captures stdout from a fake binary", async () => {
     const result = await spawnClaude({

@@ -23,6 +23,12 @@ export type ClassSpec = {
   model: string;
   effort: Effort;
   maxBudgetUsd: number;
+  /**
+   * Hard ceiling on output tokens (G2). Passed via --append-system-prompt
+   * as a generation hint — does NOT affect cache fingerprint. Uncapped when
+   * omitted (e.g. max class).
+   */
+  maxOutputTokens?: number;
   /** Comma-separated tool list for `--tools`, or "default". */
   tools?: string;
   /** Enable `--bare` mode (S6). Only safe for definite-trivial. */
@@ -31,6 +37,41 @@ export type ClassSpec = {
   mcpConfig?: string;
   /** Override global `--exclude-dynamic-system-prompt-sections` (S7). */
   excludeDynamicSections?: boolean;
+  /** Class-specific append to system prompt (X.soft). */
+  appendSystemPrompt?: string;
+  /**
+   * PostHog project API key (starts with `phc_`). When set, Maestro emits
+   * `maestro_decision` and `maestro_override` events to PostHog on every spawn.
+   * Leave unset to disable remote telemetry entirely.
+   */
+  posthogApiKey?: string;
+  /**
+   * PostHog personal API key (starts with `phx_`). Required only for
+   * `maestro tune --posthog`. Obtain at posthog.com → Settings → Personal API Keys.
+   */
+  posthogQueryKey?: string;
+  /**
+   * URL serving the community-mined HeuristicRule[] JSON, refreshed weekly
+   * by the maintainer's CI. Defaults to the project's GitHub raw URL.
+   * Set to `""` to disable community heuristic fetching.
+   */
+  communityHeuristicsUrl?: string;
+  /**
+   * How often (in days) the background auto-tune runs. Default: 7.
+   * Auto-tune fetches community heuristics and applies local patterns.
+   */
+  autoTuneIntervalDays?: number;
+  /**
+   * PostHog numeric project ID. Required only for `maestro tune --posthog`.
+   * Find it in PostHog → Project Settings → Project ID.
+   */
+  posthogProjectId?: string;
+  /**
+   * When true, include the raw prompt text in PostHog `maestro_override` events.
+   * Default false. Only enable if you consent to sending prompt snippets to PostHog.
+   * Required for `maestro tune --posthog` to mine patterns from cross-user data.
+   */
+  sendPromptText?: boolean;
 };
 
 /** Built-in / user profile — every class fully specified. */
@@ -96,13 +137,8 @@ export type UserConfig = {
    */
   useEmbeddingClassifier?: boolean;
   /**
-   * Text appended to Claude's system prompt on every spawn via
-   * `--append-system-prompt`. Use this to instruct Claude to keep responses
-   * brief, reducing output tokens and slowing context-window compaction.
-   *
-   * Example: "Be concise. Skip preambles and trailing summaries."
-   *
-   * Set to `""` (empty string) to disable. Defaults to a short brevity hint.
+   * Global default append-system-prompt text (X.soft). Overridden per-class
+   * by CLASS_BREVITY in spawn.ts. When empty string, no flag is emitted.
    */
   appendSystemPrompt?: string;
   /**
@@ -116,6 +152,17 @@ export type UserConfig = {
    * `maestro tune --posthog`. Obtain at posthog.com → Settings → Personal API Keys.
    */
   posthogQueryKey?: string;
+  /**
+   * URL serving the community-mined HeuristicRule[] JSON, refreshed weekly
+   * by the maintainer's CI. Defaults to the project's GitHub raw URL.
+   * Set to `""` to disable community heuristic fetching.
+   */
+  communityHeuristicsUrl?: string;
+  /**
+   * How often (in days) the background auto-tune runs. Default: 7.
+   * Auto-tune fetches community heuristics and applies local patterns.
+   */
+  autoTuneIntervalDays?: number;
   /**
    * PostHog numeric project ID. Required only for `maestro tune --posthog`.
    * Find it in PostHog → Project Settings → Project ID.
@@ -154,9 +201,23 @@ export type Classification = {
   diagnostics?: ReadonlyArray<Diagnostic>;
 };
 
+/**
+ * Per-session context passed through classify options. Used by K2 Markov
+ * lock-in escape and E3 reasoning effort escalation.
+ */
+export type SessionContext = {
+  /** Rolling average prompt length for the current session. K2 escape. */
+  recentAvgPromptLength?: number;
+  /** Last N class decisions in this session (oldest-first). E3 escalation. */
+  recentClasses?: ReadonlyArray<string>;
+  /** Stop reason from the previous turn's Claude invocation. E3 escalation. */
+  lastStopReason?: string;
+};
+
 /** Options threaded through classifier invocations. */
 export type ClassifyOptions = {
   signal?: AbortSignal;
+  sessionContext?: SessionContext;
 };
 
 /** Pure function: request → classification or null. */
@@ -227,4 +288,28 @@ export type TelemetryEvent =
       note?: string;
       /** "auto" = via Stop-hook sampling; "manual" = user invoked CLI directly. */
       source?: "auto" | "manual";
+    }
+  | {
+      /** Emitted after spawn finishes. Captures stop_reason + output token ratio.
+       *  Joins to a "decision" event by sessionId + ts proximity. */
+      type: "outcome";
+      ts: string;
+      sessionId: string;
+      decidedClass: Class;
+      stopReason: string;
+      outputTokens: number;
+      cacheCreationTokens: number;
+      totalCostUsd: number;
+      durationApiMs: number;
+    }
+  | {
+      /** Emitted at turn N+1 when the user uses @deep/@fast/@think after an
+       *  auto-routed turn — strongest implicit mis-classification signal. */
+      type: "correction";
+      ts: string;
+      sessionId: string;
+      prevClass: Class;
+      correctedToClass: Class;
+      hint: string;
+      prevPrompt: string;
     };

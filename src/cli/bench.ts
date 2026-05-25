@@ -66,6 +66,7 @@ export function registerBenchCommand(program: Command): void {
     .option("--baseline <path>", "baseline JSON for regression check (default: bundled evals/baseline.json)")
     .option("--gate <pct>", "regression gate (0-1)", "0.02")
     .option("--propose <path>", "validate a proposed profile-overrides.json before applying")
+    .option("--eval-heuristics <path>", "merge a bare HeuristicRule[] JSON (community/heuristics.json) before evaling — used by CI gate")
     .option("--tournament", "run model-tier downgrade tournament with real Claude calls (S4)")
     .option("--tournament-sample <n>", "tournament: number of prompts to run", "10")
     .option("--tournament-budget <usd>", "tournament: cost cap before aborting", "5")
@@ -83,6 +84,7 @@ export function registerBenchCommand(program: Command): void {
         baseline: string;
         gate: string;
         propose?: string;
+        evalHeuristics?: string;
         tournament?: boolean;
         tournamentSample?: string;
         tournamentBudget?: string;
@@ -108,6 +110,13 @@ export function registerBenchCommand(program: Command): void {
         // Apply --propose overlay if given
         let overrides: ProfileOverride = cli.profileOverrides;
         let extraHeuristics: HeuristicRule[] = cli.userHeuristics;
+        if (cmdOpts.evalHeuristics) {
+          const raw = await readFile(resolve(cmdOpts.evalHeuristics), "utf8");
+          const communityRules = JSON.parse(raw) as HeuristicRule[];
+          if (Array.isArray(communityRules)) {
+            extraHeuristics = [...extraHeuristics, ...communityRules];
+          }
+        }
         if (cmdOpts.propose) {
           const proposedRaw = await readFile(resolve(cmdOpts.propose), "utf8");
           const proposed = JSON.parse(proposedRaw) as

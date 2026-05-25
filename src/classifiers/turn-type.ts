@@ -87,6 +87,22 @@ function priorToolName(msgs: ReadonlyArray<Message>): string | null {
 }
 
 const classify: ClassifyFn = (req: Request) => {
+  // Empty or whitespace-only prompt (tool_result routing)
+  // Yield if resolvedToolName is present — toolOverrideClassifier is authoritative there.
+  if (req.prompt.trim() === "" && !req.metadata?.resolvedToolName) {
+    return {
+      class: "standard",
+      confidence: 1.0,
+      diagnostics: [
+        {
+          severity: "info",
+          code: "turn_type.empty_prompt",
+          message: "empty prompt (tool_result or continuation without signal)",
+        },
+      ],
+    };
+  }
+
   const type = detectTurnType(req);
   const diagnostics: Diagnostic[] = [
     { severity: "info", code: `turn_type.${type}`, message: type },

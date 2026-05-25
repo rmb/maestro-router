@@ -1,15 +1,18 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { Command } from "commander";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
-import type { Classifier } from "../core/types.js";
+import type { Classifier, Class, Decision } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
 import { createPostHogClient } from "../core/posthog.js";
+import { classifierCache } from "../core/classifier-cache.js";
 
 const truncate = (s: string, max: number): string =>
   s.length > max ? s.slice(0, max) : s;
@@ -18,9 +21,11 @@ import { loadProfile } from "../core/profile.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
-import { buildClaudeArgs } from "../wrapper/spawn.js";
+import { buildClaudeArgs, resolveAppendSystemPrompt } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
-import { format, loadCliConfig } from "./utils.js";
+import { computeFingerprint, prewarmFingerprints } from "../wrapper/prewarm.js";
+import { detectContinuation } from "../wrapper/continuation.js";
+import { format, loadCliConfig, readState } from "./utils.js";
 
 const log = (msg: string, quiet?: boolean): void => {
   if (!quiet) process.stderr.write(`[maestro] ${msg}\n`);
@@ -72,7 +77,8 @@ export function registerRunCommand(program: Command): void {
           : heuristicClassifier;
 
       const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
-      const useLlm = cli.userConfig.useLlmClassifier !== false;
+      // useLlmClassifierInWrapper defaults true — accuracy gain (~$0.001/uncertain prompt) justifies latency
+      const useLlm = cli.userConfig.useLlmClassifierInWrapper !== false;
       const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
       if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
@@ -81,26 +87,186 @@ export function registerRunCommand(program: Command): void {
         profile,
       });
 
-      const decision = await pipeline.route({ prompt });
+      // Read Markov prior from any recent session for this cwd
+      const sessions = createSessionStore();
+      const allSessions = await sessions.list();
+      const cwd = process.cwd();
+      const CORRECTION_WINDOW_MS = 60 * 60 * 1000; // only correlate turns within 1h
+      const priorSession = allSessions
+        .filter((s) => s.cwd === cwd)
+        .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt))[0];
+      const recentClasses: string[] = priorSession?.recentClasses ?? [];
+      // Buffer prev-turn decision for correction detection after routing
+      const prevDecision =
+        priorSession?.lastPrompt &&
+        priorSession?.lastDecisionClass &&
+        priorSession?.lastDecisionAt &&
+        Date.now() - Date.parse(priorSession.lastDecisionAt) < CORRECTION_WINDOW_MS
+          ? { prompt: priorSession.lastPrompt, cls: priorSession.lastDecisionClass as Class, ts: priorSession.lastDecisionAt }
+          : null;
+
+      // K1: classifier cache — bypass for overrides and short continuation phrases
+      const stripped = stripOverride(prompt);
+      const promptHash = classifierCache.promptHash(prompt);
+      const shouldBypassCache =
+        prompt.trim().startsWith("@") ||
+        /^(continue|keep going|go on|and[?]?)\b/i.test(prompt.trim());
+
+      // Read lastStopReason from prior session for E1/E3 signals
+      const priorStopReason = priorSession?.lastStopReason ?? null;
+
+      // Detect M1 continuation before routing
+      const continuationResult = detectContinuation(stripped, priorStopReason);
+
+      let decision: Decision;
+      const cachedClass = shouldBypassCache ? null : classifierCache.get(promptHash);
+      if (cachedClass) {
+        // Build decision from cached classification (K1 hit)
+        const spec = profile.classes[cachedClass.class];
+        decision = {
+          class: cachedClass.class,
+          classifier: `cache:${cachedClass.classifier}`,
+          confidence: cachedClass.confidence,
+          spec,
+          latencyMs: 0,
+          diagnostics: [{ severity: "info" as const, code: "cache.classifier_hit", message: "classifier cache hit" }],
+        };
+      } else {
+        decision = await pipeline.route(
+          { prompt },
+          {
+            sessionContext: {
+              recentClasses,
+              ...(priorStopReason ? { lastStopReason: priorStopReason } : {}),
+            },
+          },
+        );
+        // Store result in classifier cache after routing (K1 set)
+        if (!shouldBypassCache && decision.classifier !== "cache") {
+          classifierCache.set(promptHash, {
+            class: decision.class,
+            classifier: decision.classifier,
+            confidence: decision.confidence,
+            cachedAt: new Date().toISOString(),
+          });
+        }
+      }
+
       log(
         `route: ${decision.classifier} → class=${decision.class} conf=${decision.confidence.toFixed(2)} model=${decision.spec.model} effort=${decision.spec.effort} budget=$${decision.spec.maxBudgetUsd}`,
         quiet,
       );
 
-      const sessions = createSessionStore();
-      const session = await sessions.getOrCreate(process.cwd(), {
-        ...(cmdOpts.newSession ? { newSession: true } : {}),
+      // Emit correction event when user uses @deep/@fast to correct a prior auto-routed turn.
+      // This is the strongest implicit mis-classification signal: prev prompt was under/over-routed.
+      const overrideDiagEarly = decision.diagnostics.find(
+        (d) => d.code === "override.matched" || d.code === "override.nl_think",
+      );
+      if (overrideDiagEarly && prevDecision && prevDecision.cls !== decision.class) {
+        const hint = overrideDiagEarly.message?.replace(/^@/, "") ?? "";
+        const ts = new Date().toISOString();
+        const correctionEvent = {
+          type: "correction" as const,
+          ts,
+          sessionId: priorSession?.sessionId ?? "",
+          prevClass: prevDecision.cls,
+          correctedToClass: decision.class,
+          hint,
+          prevPrompt: prevDecision.prompt,
+        };
+        const telEarly = createTelemetry(
+          cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+        );
+        void telEarly.log(correctionEvent);
+
+        if (cli.userConfig.posthogApiKey) {
+          const phEarly = createPostHogClient(cli.userConfig.posthogApiKey);
+          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          const corrProps: Record<string, unknown> = {
+            distinct_id: distinctId,
+            prev_class: prevDecision.cls,
+            corrected_to_class: decision.class,
+            hint,
+            prev_prompt_length: prevDecision.prompt.length,
+          };
+          if (cli.userConfig.sendPromptText) {
+            corrProps["prev_prompt"] = prevDecision.prompt;
+          }
+          void phEarly.capture("maestro_correction", corrProps);
+        }
+      }
+
+      // Resolve the effective appendSystemPrompt once and store it on the
+      // decision spec so telemetry-logged specs are self-contained — the oracle
+      // can recompute the same fingerprint from the spec without needing
+      // userConfig. Same value flows to spawn.ts via decision.spec.
+      const resolvedAppendPrompt = resolveAppendSystemPrompt(decision, cli.userConfig);
+      const fp = computeFingerprint({
+        model: decision.spec.model,
+        bare: decision.spec.bare ?? false,
+        excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
       });
 
+      // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set
+      const session = process.env["MAESTRO_DISABLE_TRACK_Z"]
+        ? await sessions.getOrCreate(process.cwd(), decision.spec.model, {
+            ...(cmdOpts.newSession ? { newSession: true } : {}),
+          })
+        : await sessions.getByFingerprint(process.cwd(), fp, {
+            ...(cmdOpts.newSession ? { newSession: true } : {}),
+          });
+
+      // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens
+      const isEscalated = session.isNew ? false : await sessions.getEffortEscalated(session.sessionId);
+      let effectiveDecision: Decision = {
+        ...decision,
+        spec: { ...decision.spec, appendSystemPrompt: resolvedAppendPrompt },
+      };
+      if (isEscalated && effectiveDecision.class === "standard" && effectiveDecision.spec.effort === "low") {
+        effectiveDecision = {
+          ...effectiveDecision,
+          spec: { ...effectiveDecision.spec, effort: "medium" as const },
+          diagnostics: [
+            ...effectiveDecision.diagnostics,
+            {
+              severity: "info" as const,
+              code: "e1.escalated",
+              message: "effort upgraded low→medium (session escalation from prior max_tokens)",
+            },
+          ],
+        };
+      }
+
+      // M1 continuation: inject hint when prior turn was truncated and prompt signals continuation
+      if (continuationResult) {
+        effectiveDecision = {
+          ...effectiveDecision,
+          spec: { ...effectiveDecision.spec, appendSystemPrompt: continuationResult.hint },
+        };
+      }
+
       const args = buildClaudeArgs({
-        decision,
+        decision: effectiveDecision,
         userConfig: cli.userConfig,
         sessionId: session.sessionId,
         isResume: !session.isNew,
         bareSupported: pre.bareSupported,
       });
 
-      const stripped = stripOverride(prompt);
+      // Prewarm adjacent fingerprints (other model tiers) fire-and-forget
+      const PREWARM_MODELS = ["haiku", "sonnet", "opus"] as const;
+      const prewarmSpecs = PREWARM_MODELS
+        .filter((m) => m !== decision.spec.model)
+        .map((m) => ({
+          fingerprint: computeFingerprint({
+            model: m,
+            excludeDynamicSections: true,
+          }),
+          model: m,
+          effort: "low",
+        }));
+      void prewarmFingerprints(process.cwd(), prewarmSpecs);
+
       const result = await streamClaude({
         args,
         prompt: stripped,
@@ -109,44 +275,95 @@ export function registerRunCommand(program: Command): void {
         forwardSigint: true,
       });
 
+      // Markov prior depends on a complete history — record the decided class
+      // regardless of whether Claude returned parseable output (it may error,
+      // hit a budget cap, or be interrupted — the routing decision still happened).
+      await sessions.appendClass(session.sessionId, effectiveDecision.class);
+      // Buffer this turn's prompt + class so the next turn can emit a correction event.
+      void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), effectiveDecision.class);
+
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
       if (parsed) {
         const telemetry = createTelemetry(
           cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
         );
+        // Set cacheHit when Anthropic returned cached prefix tokens — this is the
+        // ground truth for telemetry's cacheHitRate. Without this, decision.cacheHit
+        // is always undefined and oracle's cache-hit-rate-accuracy check fails.
+        const decisionWithCacheHit: Decision = {
+          ...effectiveDecision,
+          cacheHit: (parsed.cost?.cacheReadInputTokens ?? 0) > 0,
+        };
         await telemetry.log({
           type: "decision",
           ts: new Date().toISOString(),
-          decision,
+          decision: decisionWithCacheHit,
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
 
+        // Outcome event: stop_reason + output token ratio reveals over/under-routing.
+        if (parsed.cost) {
+          void telemetry.log({
+            type: "outcome",
+            ts: new Date().toISOString(),
+            sessionId: session.sessionId,
+            decidedClass: effectiveDecision.class,
+            stopReason: parsed.cost.stopReason,
+            outputTokens: parsed.cost.outputTokens,
+            cacheCreationTokens: parsed.cost.cacheCreationInputTokens,
+            totalCostUsd: parsed.cost.totalCostUsd,
+            durationApiMs: parsed.cost.durationApiMs,
+          });
+
+          // E1/E3: persist stop reason for next-turn escalation decisions
+          void sessions.updateStopReason(session.sessionId, parsed.cost.stopReason);
+
+          // E1.escalate: flag session for effort upgrade on next standard turn
+          if (parsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {
+            void sessions.setEffortEscalated(session.sessionId);
+            // K1.invalidate: drop cached classification so next identical prompt re-routes
+            classifierCache.invalidate(promptHash);
+          }
+        }
+
         if (cli.userConfig.posthogApiKey) {
           const ph = createPostHogClient(cli.userConfig.posthogApiKey);
-          // Anonymous distinct_id: base64 of cwd — no PII
-          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          // One-way SHA-256 of cwd — stable pseudonym, not reversible (no PII)
+          const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
           void ph.capture("maestro_decision", {
             distinct_id: distinctId,
-            class: decision.class,
-            model: decision.spec.model,
-            effort: decision.spec.effort,
-            confidence: decision.confidence,
-            classifier: decision.classifier,
-            latency_ms: decision.latencyMs,
+            class: effectiveDecision.class,
+            model: effectiveDecision.spec.model,
+            effort: effectiveDecision.spec.effort,
+            confidence: effectiveDecision.confidence,
+            classifier: effectiveDecision.classifier,
+            latency_ms: effectiveDecision.latencyMs,
             prompt_length: prompt.length,
             cost_usd: parsed.cost?.totalCostUsd ?? null,
           });
 
+          if (parsed.cost) {
+            void ph.capture("maestro_outcome", {
+              distinct_id: distinctId,
+              class: effectiveDecision.class,
+              stop_reason: parsed.cost.stopReason,
+              output_tokens: parsed.cost.outputTokens,
+              cache_creation_tokens: parsed.cost.cacheCreationInputTokens,
+              total_cost_usd: parsed.cost.totalCostUsd,
+              duration_api_ms: parsed.cost.durationApiMs,
+            });
+          }
+
           // Emit override event when user used @fast / @deep / @think
-          const overrideDiag = decision.diagnostics.find(
+          const overrideDiag = effectiveDecision.diagnostics.find(
             (d) => d.code === "override.matched" || d.code === "override.nl_think",
           );
           if (overrideDiag) {
             const hint = overrideDiag.message?.replace(/^@/, "") ?? "";
             const overrideProps: Record<string, unknown> = {
               distinct_id: distinctId,
-              to_class: decision.class,
+              to_class: effectiveDecision.class,
               hint,
               prompt_length: prompt.length,
             };
@@ -164,9 +381,40 @@ export function registerRunCommand(program: Command): void {
         }
 
         if (globalOpts.json) {
-          process.stdout.write(format({ decision, cost: parsed.cost }, { json: true }) + "\n");
+          process.stdout.write(format({ decision: effectiveDecision, cost: parsed.cost }, { json: true }) + "\n");
         }
       }
+
+      // Background auto-tune: fetch community heuristics + apply local patterns.
+      // Runs at most once per autoTuneIntervalDays (default 7). Fire-and-forget.
+      void (async () => {
+        try {
+          const intervalDays = cli.userConfig.autoTuneIntervalDays ?? 7;
+          const state = await readState();
+          const lastRun = state.autoTuneLastRunAt ? Date.parse(state.autoTuneLastRunAt) : 0;
+          if (Date.now() - lastRun > intervalDays * 24 * 60 * 60 * 1000) {
+            // Always run --auto (community heuristics + local patterns).
+            // Also run --posthog when credentials are present (cross-user override mining).
+            const hasPh = !!(cli.userConfig.posthogQueryKey && cli.userConfig.posthogProjectId);
+            const autoChild = spawn(process.execPath, [process.argv[1]!, "tune", "--auto"], {
+              detached: true,
+              stdio: "ignore",
+              env: process.env,
+            });
+            autoChild.unref();
+            if (hasPh) {
+              const phChild = spawn(process.execPath, [process.argv[1]!, "tune", "--posthog"], {
+                detached: true,
+                stdio: "ignore",
+                env: process.env,
+              });
+              phChild.unref();
+            }
+          }
+        } catch {
+          // never block the exit on auto-tune errors
+        }
+      })();
 
       process.exit(result.exitCode ?? 0);
     });

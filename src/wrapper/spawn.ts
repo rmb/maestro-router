@@ -56,12 +56,9 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 
-  // Brevity hint — reduces output tokens, slows context compaction
-  const appendPrompt =
-    userConfig.appendSystemPrompt !== undefined
-      ? userConfig.appendSystemPrompt
-      : "Be concise. Avoid preambles and trailing summaries — the user can read the diff.";
-  if (appendPrompt.length > 0) {
+  const appendPrompt = resolveAppendSystemPrompt(decision, userConfig);
+  // Only emit the flag when there is a non-empty string (empty = intentional suppression)
+  if (appendPrompt !== "") {
     args.push("--append-system-prompt", appendPrompt);
   }
 
@@ -75,6 +72,47 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
   }
 
   return args;
+}
+
+/**
+ * X.soft brevity hints by class. Source of truth — exported so the fingerprint
+ * compute in run-cmd.ts and oracle/tool-correctness.ts can replicate exactly
+ * what spawn.ts sends in --append-system-prompt. Empty string means "suppress
+ * the flag entirely" (hard/reasoning/max never want a brevity hint).
+ */
+export const CLASS_BREVITY: Partial<Record<string, string>> = {
+  trivial: "Output only the answer. No explanation. No formatting.",
+  simple: "Be concise. Skip preamble.",
+  // standard: explicit cap — claude CLI has no --max-tokens flag, so this is
+  // the only soft pressure on output length. Earlier production p90 was 12k+
+  // tokens against an aspirational 8k cap, so we make the limit explicit and
+  // override the userConfig default for standard turns.
+  standard: "Aim for under 4000 tokens. Prefer bullet points and code over prose. Skip preambles, recaps, and trailing summaries — the user reads the diff.",
+  hard: "",
+  reasoning: "",
+  max: "",
+};
+
+/** Default appendSystemPrompt when no per-class or user override exists. */
+export const DEFAULT_APPEND_SYSTEM_PROMPT =
+  "Be concise. Avoid preambles and trailing summaries — the user can read the diff.";
+
+/**
+ * Resolve the effective appendSystemPrompt for a decision. Used by spawn.ts
+ * (for the --append-system-prompt flag) and run-cmd.ts (for fingerprint
+ * computation). Must produce identical output in both call sites or the
+ * fingerprint will diverge from the actual flag and Track Z will miss.
+ */
+export function resolveAppendSystemPrompt(
+  decision: Decision,
+  userConfig: UserConfig,
+): string {
+  const spec = decision.spec;
+  if (spec.appendSystemPrompt !== undefined) return spec.appendSystemPrompt;
+  const classHint = CLASS_BREVITY[decision.class];
+  if (classHint !== undefined) return classHint;
+  if (userConfig.appendSystemPrompt !== undefined) return userConfig.appendSystemPrompt;
+  return DEFAULT_APPEND_SYSTEM_PROMPT;
 }
 
 export type SpawnResult = {

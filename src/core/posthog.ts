@@ -51,6 +51,14 @@ export type PostHogOverrideEvent = {
   prompt: string;
 };
 
+export type PostHogCorrectionEvent = {
+  ts: string;
+  prevClass: Class;
+  correctedToClass: Class;
+  hint: string;
+  prevPrompt: string;
+};
+
 export type PostHogQueryOptions = {
   queryKey: string;
   projectId: string;
@@ -60,6 +68,8 @@ export type PostHogQueryOptions = {
 
 export type PostHogQueryClient = {
   fetchOverrides(opts: { since: Date; limit?: number }): Promise<PostHogOverrideEvent[]>;
+  /** Fetch maestro_correction events — implicit mis-classification signals from next-turn overrides. */
+  fetchCorrections(opts: { since: Date; limit?: number }): Promise<PostHogCorrectionEvent[]>;
 };
 
 const DEFAULT_HOST = "https://app.posthog.com";
@@ -70,28 +80,77 @@ export function createPostHogQueryClient(opts: PostHogQueryOptions): PostHogQuer
 
   return {
     async fetchOverrides({ since, limit = 1000 }: { since: Date; limit?: number }): Promise<PostHogOverrideEvent[]> {
-      const url = new URL(`${host}/api/projects/${opts.projectId}/events/`);
-      url.searchParams.set("event", "maestro_override");
-      url.searchParams.set("after", since.toISOString());
-      url.searchParams.set("limit", String(limit));
+      // Uses HogQL query endpoint — compatible with "Query → Read" personal API key scope.
+      const url = `${host}/api/projects/${opts.projectId}/query/`;
+      const query =
+        `SELECT timestamp, properties.to_class, properties.hint, properties.prompt ` +
+        `FROM events ` +
+        `WHERE event = 'maestro_override' AND timestamp > '${since.toISOString()}' ` +
+        `ORDER BY timestamp DESC ` +
+        `LIMIT ${limit}`;
 
-      const res = await fetchFn(url.toString(), {
-        headers: { Authorization: `Bearer ${opts.queryKey}` },
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${opts.queryKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
       });
 
+      if (!res.ok) {
+        throw new Error(`PostHog query failed: ${res.status} ${res.statusText}`);
+      }
+
       const data = (await res.json()) as {
-        results: { properties: Record<string, unknown>; timestamp: string }[];
-        next: string | null;
+        results: [string, string, string, string][];
       };
 
-      return data.results
-        .map((r) => ({
-          ts: r.timestamp,
-          toClass: (r.properties["to_class"] as Class) ?? "standard",
-          hint: (r.properties["hint"] as string) ?? "",
-          prompt: (r.properties["prompt"] as string) ?? "",
+      return (data.results ?? [])
+        .map(([ts, toClass, hint, prompt]) => ({
+          ts,
+          toClass: (toClass as Class) ?? "standard",
+          hint: hint ?? "",
+          prompt: prompt ?? "",
         }))
         .filter((e) => e.prompt.length > 0);
+    },
+
+    async fetchCorrections({ since, limit = 1000 }: { since: Date; limit?: number }): Promise<PostHogCorrectionEvent[]> {
+      const url = `${host}/api/projects/${opts.projectId}/query/`;
+      const query =
+        `SELECT timestamp, properties.prev_class, properties.corrected_to_class, properties.hint, properties.prev_prompt ` +
+        `FROM events ` +
+        `WHERE event = 'maestro_correction' AND timestamp > '${since.toISOString()}' ` +
+        `ORDER BY timestamp DESC ` +
+        `LIMIT ${limit}`;
+
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${opts.queryKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`PostHog query failed: ${res.status} ${res.statusText}`);
+      }
+
+      const data = (await res.json()) as {
+        results: [string, string, string, string, string][];
+      };
+
+      return (data.results ?? [])
+        .map(([ts, prevClass, correctedToClass, hint, prevPrompt]) => ({
+          ts,
+          prevClass: (prevClass as Class) ?? "standard",
+          correctedToClass: (correctedToClass as Class) ?? "standard",
+          hint: hint ?? "",
+          prevPrompt: prevPrompt ?? "",
+        }))
+        .filter((e) => e.prevPrompt.length > 0);
     },
   };
 }

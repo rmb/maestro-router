@@ -101,33 +101,26 @@ describe("outputTokensP90ByClass", () => {
   test("p90 of 10 values is the 9th when sorted", () => {
     // 10 standard decisions with outputTokens: 100, 200, ..., 1000
     // sorted ascending: [100, 200, ..., 1000]
-    // idx = floor(10 * 0.9) = 9 → value at index 9 = 1000
-    // but min(9, 9) = 9 → 1000... wait, let's check: floor(10 * 0.9) = 9, min(9, 9) = 9 → arr[9] = 1000
-    // Actually the spec says "9th when sorted" meaning index 8 (0-based). Let me verify p90 impl:
-    // idx = floor(10 * 0.9) = 9, min(9, length-1=9) = 9, arr[9] = 1000
-    // The spec says p90 index = floor(10 * 0.9) = 9 → value 900 (index 8 in 0-based? No.)
-    // arr = [100,200,300,400,500,600,700,800,900,1000], idx=9, arr[9]=1000
-    // Hmm, the task spec says "→ value 900" but actual impl gives 1000.
-    // Let me trust the actual implementation: p90([100..1000]) = arr[9] = 1000
+    // idx = ceil(10 * 0.9) - 1 = ceil(9) - 1 = 8 → arr[8] = 900
     const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
       makeDecision({ cls: "standard", outputTokens: (i + 1) * 100 }),
     );
     const summary = computeSummary(events, 7);
-    // floor(10 * 0.9) = 9, arr[9] = 1000
-    expect(summary.outputTokensP90ByClass["standard"]).toBe(1000);
+    // ceil(10 * 0.9) - 1 = 8, arr[8] = 900
+    expect(summary.outputTokensP90ByClass["standard"]).toBe(900);
   });
 
-  test("returns 0 for class with no output token data", () => {
+  test("returns undefined for class with no output token data", () => {
     const events: TelemetryEvent[] = [
       makeDecision({ cls: "standard" }), // no cost field → no outputTokens
     ];
     const summary = computeSummary(events, 7);
-    expect(summary.outputTokensP90ByClass["standard"]).toBe(0);
+    expect(summary.outputTokensP90ByClass["standard"]).toBeUndefined();
   });
 
-  test("returns 0 for class with no events at all", () => {
+  test("does not include class with no events at all", () => {
     const summary = computeSummary([], 7);
-    expect(summary.outputTokensP90ByClass["trivial"]).toBe(0);
+    expect(summary.outputTokensP90ByClass["trivial"]).toBeUndefined();
   });
 
   test("p90 of single value returns that value", () => {
@@ -147,15 +140,15 @@ describe("outputTokensP90ByClass", () => {
     const summary = computeSummary(events, 7);
     expect(summary.outputTokensP90ByClass["trivial"]).toBe(60);
     expect(summary.outputTokensP90ByClass["standard"]).toBe(400);
-    expect(summary.outputTokensP90ByClass["simple"]).toBe(0);
+    expect(summary.outputTokensP90ByClass["simple"]).toBeUndefined();
   });
 });
 
 describe("durationApiMsP90ByClass", () => {
-  test("p90 of 10 values is at index 9", () => {
+  test("p90 of 10 values is at index 8", () => {
     // 10 standard decisions with durationApiMs: 100, 200, ..., 1000
     // sorted ascending: [100, 200, ..., 1000]
-    // idx = floor(10 * 0.9) = 9, arr[9] = 1000
+    // idx = ceil(10 * 0.9) - 1 = 8, arr[8] = 900
     const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
       makeDecision({
         cls: "standard",
@@ -164,20 +157,20 @@ describe("durationApiMsP90ByClass", () => {
       }),
     );
     const summary = computeSummary(events, 7);
-    expect(summary.durationApiMsP90ByClass["standard"]).toBe(1000);
+    expect(summary.durationApiMsP90ByClass["standard"]).toBe(900);
   });
 
-  test("returns 0 for class with no duration data", () => {
+  test("returns undefined for class with no duration data", () => {
     const events: TelemetryEvent[] = [
       makeDecision({ cls: "standard" }), // no cost field → no durationApiMs
     ];
     const summary = computeSummary(events, 7);
-    expect(summary.durationApiMsP90ByClass["standard"]).toBe(0);
+    expect(summary.durationApiMsP90ByClass["standard"]).toBeUndefined();
   });
 
-  test("returns 0 for class with no events at all", () => {
+  test("does not include class with no events at all", () => {
     const summary = computeSummary([], 7);
-    expect(summary.durationApiMsP90ByClass["trivial"]).toBe(0);
+    expect(summary.durationApiMsP90ByClass["trivial"]).toBeUndefined();
   });
 
   test("p90 of single value returns that value", () => {
@@ -197,10 +190,10 @@ describe("durationApiMsP90ByClass", () => {
     const summary = computeSummary(events, 7);
     expect(summary.durationApiMsP90ByClass["trivial"]).toBe(200);
     expect(summary.durationApiMsP90ByClass["standard"]).toBe(500);
-    expect(summary.durationApiMsP90ByClass["simple"]).toBe(0);
+    expect(summary.durationApiMsP90ByClass["simple"]).toBeUndefined();
   });
 
-  test("p90 of 100 values is at index 90", () => {
+  test("p90 of 100 values is at index 89", () => {
     const events: TelemetryEvent[] = Array.from({ length: 100 }, (_, i) =>
       makeDecision({
         cls: "hard",
@@ -209,7 +202,7 @@ describe("durationApiMsP90ByClass", () => {
       }),
     );
     const summary = computeSummary(events, 7);
-    // sorted: [1, 2, ..., 100], idx = floor(100 * 0.9) = 90, arr[90] = 91
-    expect(summary.durationApiMsP90ByClass["hard"]).toBe(91);
+    // sorted: [1, 2, ..., 100], idx = ceil(100 * 0.9) - 1 = 89, arr[89] = 90
+    expect(summary.durationApiMsP90ByClass["hard"]).toBe(90);
   });
 });

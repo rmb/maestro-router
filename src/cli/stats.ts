@@ -177,10 +177,12 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
     outputTokensP90ByClass: Object.fromEntries(
-      ALL_CLASSES.map((c) => [c, p90(outputTokensByClass[c])])
+      ALL_CLASSES.filter((c) => outputTokensByClass[c].length > 0)
+        .map((c) => [c, p90(outputTokensByClass[c])])
     ) as Record<Class, number>,
     durationApiMsP90ByClass: Object.fromEntries(
-      ALL_CLASSES.map((c) => [c, p90(durationApiMsByClass[c])])
+      ALL_CLASSES.filter((c) => durationApiMsByClass[c].length > 0)
+        .map((c) => [c, p90(durationApiMsByClass[c])])
     ) as Record<Class, number>,
   };
 }
@@ -203,8 +205,8 @@ function percentile(sorted: number[], p: number): number {
 function p90(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.floor(sorted.length * 0.9);
-  return sorted[Math.min(idx, sorted.length - 1)] ?? 0;
+  const idx = Math.max(0, Math.ceil(sorted.length * 0.9) - 1);
+  return sorted[idx] ?? 0;
 }
 
 function round(n: number, digits: number): number {

@@ -154,8 +154,6 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
     // (tool_result block + text sidechain) satisfy both predicates; checking
     // user-text first would skip tool routing entirely via the continue below.
     if (frame !== null && isToolResultMessage(frame)) {
-      const t0 = Date.now();
-
       const ids = extractToolUseIds(frame);
       const resolvedToolName =
         ids.length > 0 ? toolUseMap.get(ids[0]!) : undefined;
@@ -172,12 +170,7 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       child.stdin?.write(JSON.stringify(setModel) + "\n");
       child.stdin?.write(line + "\n");
 
-      // Defer telemetry: flush when result frame arrives on stdout.
-      pendingQueue.push({
-        decision: { ...decision, latencyMs: Date.now() - t0 },
-        ts: new Date().toISOString(),
-        prompt: "",
-      });
+      // Tool result routing happens, just not logged to telemetry
 
       continue;
     }

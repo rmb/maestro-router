@@ -514,7 +514,7 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
   });
 
-  test("tool_result logging records a decision event", async () => {
+  test("tool_result routing happens but is not logged to telemetry", async () => {
     const tel = mockTelemetry();
     const out = collectorStream();
     const stderr = collectorStream();
@@ -547,8 +547,9 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     }, 10);
     await proxyP;
 
-    expect(tel.events).toHaveLength(1);
-    expect(tel.events[0]!.type).toBe("decision");
+    // Tool_result messages route through the pipeline but do NOT get logged.
+    // No decision events should be recorded.
+    expect(tel.events).toHaveLength(0);
   });
 
   test("non-tool-result user message is not affected by toolUseMap logic", async () => {
@@ -587,5 +588,65 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(routeCalls).toHaveLength(1);
     expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
     expect(routeCalls[0]!.prompt).toBe("explain this");
+  });
+
+  test("pending queue stays bounded after tool_result messages (≤1 entry)", async () => {
+    // This test verifies that tool_result messages do NOT add to pendingQueue.
+    // Only user_text messages should be queued.
+    // Sequence: tool_result → tool_result → user_text (all 3 processed, but only 1 queued).
+    // Expected: only 1 decision event logged (user_text only), not 3.
+
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const pipeline: Pipeline = {
+      route: async () => decisionFor("standard"),
+    };
+
+    const assistantLine =
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{}}]}}';
+    const toolResult1 =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"file 1"}]}}';
+    const toolResult2 =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"file 2"}]}}';
+    const userText =
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}';
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([toolResult1 + "\n", toolResult2 + "\n", userText + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    // Populate toolUseMap, then emit result frames to flush pending telemetry.
+    // Three result frames to flush the pending queue after each input.
+    fc.emit(assistantLine);
+    setTimeout(() => {
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.emit('{"type":"result","subtype":"success","total_cost_usd":0}');
+      fc.close(0);
+    }, 10);
+    await proxyP;
+
+    // Only user_text should be in pendingQueue; tool_results do not queue.
+    // Tool_result frames route but do not add to queue, so we expect:
+    // - 0 events from first result frame (no pending entry for tool_result 1)
+    // - 0 events from second result frame (no pending entry for tool_result 2)
+    // - 1 event from third result frame (pending entry for user_text)
+    // Total: 1 decision event, not 3.
+    const decisionEvents = tel.events.filter((e) => e.type === "decision");
+    expect(decisionEvents).toHaveLength(1);
+    // The decision event should be for the user_text message (has "hello" prompt).
+    expect((decisionEvents[0] as { prompt?: string }).prompt).toBe("hello");
   });
 });

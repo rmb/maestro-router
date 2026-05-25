@@ -101,4 +101,77 @@ export function registerTelemetryCommand(program: Command): void {
         }
       },
     );
+
+  telemetry
+    .command("off")
+    .description("Disable remote telemetry (PostHog)")
+    .action(async () => {
+      const parent = program.opts<ParentOptions>();
+      const cli = await loadCliConfig(parent.config);
+      const wasEnabled = !!cli.userConfig.posthogApiKey;
+
+      if (!wasEnabled) {
+        if (parent.json) {
+          const out = { disabled: false, wasEnabled, configPath: cli.configPath };
+          const formatted = format(out, fmtOpts(parent));
+          if (formatted) process.stdout.write(formatted + "\n");
+        } else if (!parent.quiet) {
+          process.stdout.write("Remote telemetry is already off.\n");
+        }
+        return;
+      }
+
+      delete cli.userConfig.posthogApiKey;
+      const { writeUserConfig } = await import("./utils.js");
+      await writeUserConfig(cli.userConfig, cli.configPath);
+
+      if (parent.json) {
+        const out = {
+          disabled: true,
+          wasEnabled,
+          configPath: cli.configPath,
+        };
+        const formatted = format(out, fmtOpts(parent));
+        if (formatted) process.stdout.write(formatted + "\n");
+      } else if (!parent.quiet) {
+        const msg = `Remote telemetry disabled. Removed posthogApiKey from ${cli.configPath}.`;
+        process.stdout.write(msg + "\n");
+      }
+    });
+
+  telemetry
+    .command("forget")
+    .description("Delete all local telemetry events (requires --confirm)")
+    .option("--confirm", "confirm deletion of all local telemetry events")
+    .action(async (cmdOpts: { confirm?: boolean }) => {
+      const parent = program.opts<ParentOptions>();
+
+      if (!cmdOpts.confirm) {
+        process.stderr.write("maestro telemetry forget --confirm\n");
+        process.exit(2);
+      }
+
+      const cli = await loadCliConfig(parent.config);
+      const path = cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
+      const t = createTelemetry({ path });
+      const events = await t.readAll();
+      const cleared = events.length;
+
+      const { unlink } = await import("node:fs/promises");
+      try {
+        await unlink(path);
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "ENOENT") throw err;
+      }
+
+      if (parent.json) {
+        const out = { cleared, path };
+        const formatted = format(out, fmtOpts(parent));
+        if (formatted) process.stdout.write(formatted + "\n");
+      } else if (!parent.quiet) {
+        const msg = cleared === 0 ? "No local telemetry to clear." : `Cleared ${cleared} events from ${path}.`;
+        process.stdout.write(msg + "\n");
+      }
+    });
 }

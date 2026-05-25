@@ -1,0 +1,175 @@
+{
+  "runAt": "2026-05-25T15:56:56.563Z",
+  "model": "claude-haiku-4-5-20251001",
+  "fastModeFlag": "(not available)",
+  "fastModeAvailable": false,
+  "pairs": [
+    {
+      "promptLabel": "short-format",
+      "baseline": {
+        "prompt": "Format this JSON on one line: { \"a\": 1, \"b\": 2 }",
+        "mode": "baseline",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 3660,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "fastMode": {
+        "prompt": "Format this JSON on one line: { \"a\": 1, \"b\": 2 }",
+        "mode": "fast-mode",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 5154,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "costDeltaUsd": null,
+      "durationDeltaMs": 1494,
+      "fastModeIsCheaper": null
+    },
+    {
+      "promptLabel": "rename-symbol",
+      "baseline": {
+        "prompt": "Rename the variable `foo` to `bar` in this snippet: const foo = 42; console.log(foo);",
+        "mode": "baseline",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 3861,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "fastMode": {
+        "prompt": "Rename the variable `foo` to `bar` in this snippet: const foo = 42; console.log(foo);",
+        "mode": "fast-mode",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 4319,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "costDeltaUsd": null,
+      "durationDeltaMs": 458,
+      "fastModeIsCheaper": null
+    },
+    {
+      "promptLabel": "explain-error",
+      "baseline": {
+        "prompt": "Explain this TypeScript error in one sentence: TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+        "mode": "baseline",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 4806,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "fastMode": {
+        "prompt": "Explain this TypeScript error in one sentence: TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+        "mode": "fast-mode",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 4148,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "costDeltaUsd": null,
+      "durationDeltaMs": -658,
+      "fastModeIsCheaper": null
+    },
+    {
+      "promptLabel": "list-items",
+      "baseline": {
+        "prompt": "List the first 5 prime numbers.",
+        "mode": "baseline",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 6819,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "fastMode": {
+        "prompt": "List the first 5 prime numbers.",
+        "mode": "fast-mode",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 4750,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "costDeltaUsd": null,
+      "durationDeltaMs": -2069,
+      "fastModeIsCheaper": null
+    },
+    {
+      "promptLabel": "continuation",
+      "baseline": {
+        "prompt": "Complete this sentence in 10 words or fewer: The quickest way to reduce token costs is",
+        "mode": "baseline",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 5559,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "fastMode": {
+        "prompt": "Complete this sentence in 10 words or fewer: The quickest way to reduce token costs is",
+        "mode": "fast-mode",
+        "model": "claude-haiku-4-5-20251001",
+        "totalCostUsd": null,
+        "durationMs": 8915,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheCreationTokens": null,
+        "cacheReadTokens": null,
+        "response": "",
+        "error": "could not parse JSON output"
+      },
+      "costDeltaUsd": null,
+      "durationDeltaMs": 3356,
+      "fastModeIsCheaper": null
+    }
+  ],
+  "summary": {
+    "totalPairs": 5,
+    "fastModeCheaperCount": 0,
+    "avgCostDeltaUsd": null,
+    "avgDurationDeltaMs": null,
+    "recommendation": "INCONCLUSIVE: --fast-mode not available on this Claude CLI version. Upgrade and re-run."
+  }
+}

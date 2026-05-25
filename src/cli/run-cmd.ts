@@ -120,6 +120,11 @@ export function registerRunCommand(program: Command): void {
         forwardSigint: true,
       });
 
+      // Markov prior depends on a complete history — record the decided class
+      // regardless of whether Claude returned parseable output (it may error,
+      // hit a budget cap, or be interrupted — the routing decision still happened).
+      await sessions.appendClass(session.sessionId, decision.class);
+
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
       if (parsed) {
         const telemetry = createTelemetry(
@@ -132,8 +137,6 @@ export function registerRunCommand(program: Command): void {
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
-
-        await sessions.appendClass(session.sessionId, decision.class);
 
         if (cli.userConfig.posthogApiKey) {
           const ph = createPostHogClient(cli.userConfig.posthogApiKey);

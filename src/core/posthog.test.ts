@@ -65,20 +65,13 @@ describe("createPostHogClient", () => {
 });
 
 describe("createPostHogQueryClient", () => {
-  test("fetchOverrides queries correct URL with auth header", async () => {
-    const calls: { url: string; headers: Record<string, string> }[] = [];
+  test("fetchOverrides posts HogQL query with correct URL and auth header", async () => {
+    const calls: { url: string; headers: Record<string, string>; body: unknown }[] = [];
     const mockFetch = async (url: string, init?: RequestInit) => {
-      calls.push({ url, headers: init?.headers as Record<string, string> });
+      calls.push({ url, headers: init?.headers as Record<string, string>, body: JSON.parse(init?.body as string) });
       return new Response(
         JSON.stringify({
-          results: [
-            {
-              event: "maestro_override",
-              properties: { from_class: "hard", to_class: "max", hint: "deep", prompt: "prod is down" },
-              timestamp: "2026-05-22T10:00:00Z",
-            },
-          ],
-          next: null,
+          results: [["2026-05-22T10:00:00Z", "max", "deep", "prod is down"]],
         }),
         { status: 200 },
       );
@@ -87,10 +80,11 @@ describe("createPostHogQueryClient", () => {
     const client = createPostHogQueryClient({ queryKey: "phx_secret", projectId: "42", fetch: mockFetch });
     const events = await client.fetchOverrides({ since: new Date("2026-05-01") });
 
-    expect(calls[0]!.url).toContain("/api/projects/42/events/");
-    expect(calls[0]!.url).toContain("event=maestro_override");
-    expect(calls[0]!.url).toContain("limit=1000");
+    expect(calls[0]!.url).toContain("/api/projects/42/query/");
     expect(calls[0]!.headers["Authorization"]).toBe("Bearer phx_secret");
+    const body = calls[0]!.body as { query: { kind: string; query: string } };
+    expect(body.query.kind).toBe("HogQLQuery");
+    expect(body.query.query).toContain("maestro_override");
     expect(events).toHaveLength(1);
     expect(events[0]!.prompt).toBe("prod is down");
     expect(events[0]!.toClass).toBe("max");
@@ -99,7 +93,7 @@ describe("createPostHogQueryClient", () => {
 
   test("fetchOverrides returns [] when results is empty", async () => {
     const mockFetch = async () =>
-      new Response(JSON.stringify({ results: [], next: null }), { status: 200 });
+      new Response(JSON.stringify({ results: [] }), { status: 200 });
     const client = createPostHogQueryClient({ queryKey: "phx_x", projectId: "1", fetch: mockFetch });
     const events = await client.fetchOverrides({ since: new Date() });
     expect(events).toEqual([]);
@@ -110,10 +104,9 @@ describe("createPostHogQueryClient", () => {
       new Response(
         JSON.stringify({
           results: [
-            { event: "maestro_override", properties: { to_class: "max", prompt: "" }, timestamp: "2026-01-01T00:00:00Z" },
-            { event: "maestro_override", properties: { to_class: "hard", prompt: "real prompt here" }, timestamp: "2026-01-01T00:00:00Z" },
+            ["2026-01-01T00:00:00Z", "max", "", ""],
+            ["2026-01-01T00:00:00Z", "hard", "", "real prompt here"],
           ],
-          next: null,
         }),
         { status: 200 },
       );
@@ -121,5 +114,11 @@ describe("createPostHogQueryClient", () => {
     const events = await client.fetchOverrides({ since: new Date() });
     expect(events).toHaveLength(1);
     expect(events[0]!.prompt).toBe("real prompt here");
+  });
+
+  test("fetchOverrides throws on non-ok HTTP status", async () => {
+    const mockFetch = async () => new Response("Unauthorized", { status: 401 });
+    const client = createPostHogQueryClient({ queryKey: "phx_bad", projectId: "1", fetch: mockFetch });
+    await expect(client.fetchOverrides({ since: new Date() })).rejects.toThrow("401");
   });
 });

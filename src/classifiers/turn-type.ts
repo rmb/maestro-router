@@ -88,7 +88,8 @@ function priorToolName(msgs: ReadonlyArray<Message>): string | null {
 
 const classify: ClassifyFn = (req: Request) => {
   // Empty or whitespace-only prompt (tool_result routing)
-  if (req.prompt.trim() === "") {
+  // Yield if resolvedToolName is present — toolOverrideClassifier is authoritative there.
+  if (req.prompt.trim() === "" && !req.metadata?.resolvedToolName) {
     return {
       class: "standard",
       confidence: 1.0,

@@ -263,7 +263,7 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
     expect(args[idx + 1]).toBe("Be concise. Skip preamble.");
   });
 
-  test("standard class gets global default hint", () => {
+  test("standard class gets explicit 4000-token brevity hint", () => {
     const args = buildClaudeArgs({
       decision: baseDecision("standard"),
       userConfig: emptyConfig,
@@ -272,7 +272,7 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
     });
     const idx = args.indexOf("--append-system-prompt");
     expect(idx).toBeGreaterThan(-1);
-    expect(args[idx + 1]).toContain("Be concise");
+    expect(args[idx + 1]).toContain("under 4000 tokens");
   });
 
   test("hard class emits no --append-system-prompt (empty string = suppressed)", () => {
@@ -321,7 +321,10 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
     expect(args[idx + 1]).toBe("custom hint");
   });
 
-  test("userConfig.appendSystemPrompt is used for standard when no class hint", () => {
+  test("standard class hint wins over userConfig.appendSystemPrompt", () => {
+    // standard now has an explicit CLASS_BREVITY entry, so the class hint
+    // takes precedence over userConfig.appendSystemPrompt — same resolution
+    // order as every other class.
     const args = buildClaudeArgs({
       decision: baseDecision("standard"),
       userConfig: { appendSystemPrompt: "user default" },
@@ -330,7 +333,7 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
     });
     const idx = args.indexOf("--append-system-prompt");
     expect(idx).toBeGreaterThan(-1);
-    expect(args[idx + 1]).toBe("user default");
+    expect(args[idx + 1]).toContain("under 4000 tokens");
   });
 
   test("spec.appendSystemPrompt empty string suppresses flag even for trivial", () => {

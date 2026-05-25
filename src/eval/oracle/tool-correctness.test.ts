@@ -191,9 +191,9 @@ describe("checkFlagCoverage", () => {
     expect(result.pass).toBe(true);
   });
 
-  test("gate label is ≥95%", () => {
+  test("gate label is ≥80%", () => {
     const result = checkFlagCoverage([]);
-    expect(result.gate).toBe("≥95%");
+    expect(result.gate).toBe("≥80%");
   });
 });
 

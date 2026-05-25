@@ -21,7 +21,7 @@ import { loadProfile } from "../core/profile.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
-import { buildClaudeArgs } from "../wrapper/spawn.js";
+import { buildClaudeArgs, resolveAppendSystemPrompt } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
 import { computeFingerprint, prewarmFingerprints } from "../wrapper/prewarm.js";
 import { detectContinuation } from "../wrapper/continuation.js";
@@ -196,17 +196,18 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      // Compute system-prompt fingerprint for Track Z session keying
+      // Resolve the effective appendSystemPrompt once and store it on the
+      // decision spec so telemetry-logged specs are self-contained — the oracle
+      // can recompute the same fingerprint from the spec without needing
+      // userConfig. Same value flows to spawn.ts via decision.spec.
+      const resolvedAppendPrompt = resolveAppendSystemPrompt(decision, cli.userConfig);
       const fp = computeFingerprint({
         model: decision.spec.model,
         ...(decision.spec.tools !== undefined ? { tools: decision.spec.tools } : {}),
         ...(decision.spec.mcpConfig !== undefined ? { mcpConfig: decision.spec.mcpConfig } : {}),
         ...(decision.spec.bare !== undefined ? { bare: decision.spec.bare } : {}),
         excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
-        appendSystemPrompt:
-          decision.spec.appendSystemPrompt ??
-          cli.userConfig.appendSystemPrompt ??
-          "Be concise. Avoid preambles and trailing summaries — the user can read the diff.",
+        appendSystemPrompt: resolvedAppendPrompt,
       });
 
       // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set
@@ -220,13 +221,16 @@ export function registerRunCommand(program: Command): void {
 
       // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens
       const isEscalated = session.isNew ? false : await sessions.getEffortEscalated(session.sessionId);
-      let effectiveDecision = decision;
-      if (isEscalated && decision.class === "standard" && decision.spec.effort === "low") {
+      let effectiveDecision: Decision = {
+        ...decision,
+        spec: { ...decision.spec, appendSystemPrompt: resolvedAppendPrompt },
+      };
+      if (isEscalated && effectiveDecision.class === "standard" && effectiveDecision.spec.effort === "low") {
         effectiveDecision = {
-          ...decision,
-          spec: { ...decision.spec, effort: "medium" as const },
+          ...effectiveDecision,
+          spec: { ...effectiveDecision.spec, effort: "medium" as const },
           diagnostics: [
-            ...decision.diagnostics,
+            ...effectiveDecision.diagnostics,
             {
               severity: "info" as const,
               code: "e1.escalated",
@@ -286,10 +290,17 @@ export function registerRunCommand(program: Command): void {
         const telemetry = createTelemetry(
           cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
         );
+        // Set cacheHit when Anthropic returned cached prefix tokens — this is the
+        // ground truth for telemetry's cacheHitRate. Without this, decision.cacheHit
+        // is always undefined and oracle's cache-hit-rate-accuracy check fails.
+        const decisionWithCacheHit: Decision = {
+          ...effectiveDecision,
+          cacheHit: (parsed.cost?.cacheReadInputTokens ?? 0) > 0,
+        };
         await telemetry.log({
           type: "decision",
           ts: new Date().toISOString(),
-          decision: effectiveDecision,
+          decision: decisionWithCacheHit,
           cost: parsed.cost,
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });

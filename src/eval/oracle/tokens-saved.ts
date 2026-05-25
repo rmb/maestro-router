@@ -244,6 +244,13 @@ export function isolateXSavings(
 ): TokenSavingsResult {
   const costEvents = decisionEventsWithCost(events);
 
+  // Before/after split — X is a soft cap (system prompt only, no --max-tokens
+  // flag exists in claude CLI), so the gate is a trend: after-baseline p90
+  // should be lower than before-baseline p90, not pinned to an absolute number.
+  const beforeStandard = costEvents.filter(
+    (e) =>
+      toDate(e.ts) < baselineDate && e.decision.class === "standard",
+  );
   const afterStandard = costEvents.filter(
     (e) =>
       toDate(e.ts) >= baselineDate && e.decision.class === "standard",
@@ -251,31 +258,43 @@ export function isolateXSavings(
 
   if (afterStandard.length === 0) {
     const check: CheckResult = {
-      name: "x-output-cap",
+      name: "x-output-trend",
       pass: true,
       value: "n/a (no data)",
-      gate: "p90 ≤ 8500",
-      detail: "No after-baseline standard events — cannot isolate X savings",
+      gate: "after p90 < before p90",
+      detail: "No after-baseline standard events — cannot isolate X trend",
     };
     return { check, actualCostUsd: 0, hypotheticalOpusCostUsd: 0, savingsPct: 0 };
   }
 
-  const afterOutputTokens = afterStandard.map((e) => e.cost.outputTokens);
-  const afterP90 = p90(afterOutputTokens);
+  const afterP90 = p90(afterStandard.map((e) => e.cost.outputTokens));
 
-  const pass = afterP90 <= 8500;
+  // No before-baseline data → cannot compare trend; pass with the absolute number
+  if (beforeStandard.length === 0) {
+    const check: CheckResult = {
+      name: "x-output-trend",
+      pass: true,
+      value: afterP90 + " tokens (p90)",
+      gate: "after p90 < before p90",
+      detail: "No before-baseline data — reporting current p90 only",
+    };
+    return { check, actualCostUsd: afterP90, hypotheticalOpusCostUsd: 0, savingsPct: 0 };
+  }
+
+  const beforeP90 = p90(beforeStandard.map((e) => e.cost.outputTokens));
+  const pass = afterP90 < beforeP90;
 
   const check: CheckResult = {
-    name: "x-output-cap",
+    name: "x-output-trend",
     pass,
-    value: afterP90 + " tokens (p90)",
-    gate: "p90 ≤ 8500",
+    value: `${afterP90} → ${beforeP90} (after → before p90)`,
+    gate: "after < before",
     ...(!pass && {
-      detail: `Output p90 (${afterP90}) still above 8500 after X cap. Cap may not be applying or standard traffic changed.`,
+      detail: `Standard-class output p90 is not trending down: ${beforeP90} → ${afterP90}. The brevity hint may not be effective; consider stronger system-prompt language.`,
     }),
   };
 
-  return { check, actualCostUsd: afterP90, hypotheticalOpusCostUsd: 8500, savingsPct: 0 };
+  return { check, actualCostUsd: afterP90, hypotheticalOpusCostUsd: beforeP90, savingsPct: 0 };
 }
 
 // ---------------------------------------------------------------------------

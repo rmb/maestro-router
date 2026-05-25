@@ -288,38 +288,47 @@ describe("isolateTrackZSavings", () => {
 describe("isolateXSavings", () => {
   const baseline = new Date("2026-03-01T00:00:00Z");
 
-  it("passes when after p90 ≤ 8500", () => {
-    // 10 events after baseline with standard class, output tokens all ≤ 8000
-    const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
-      makeDecision(`2026-03-0${(i % 9) + 1}T10:00:00Z`.replace("0900", "09"), {
+  it("passes when after p90 is lower than before p90", () => {
+    const before: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision(`2026-02-${String(i + 10).padStart(2, "0")}T10:00:00Z`, {
         cls: "standard",
-        outputTokens: 3000 + i * 200, // max = 3000 + 9*200 = 4800 — well under 8500
+        outputTokens: 10000 + i * 200,
+      }),
+    );
+    const after: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision(`2026-03-${String(i + 2).padStart(2, "0")}T10:00:00Z`, {
+        cls: "standard",
+        outputTokens: 4000 + i * 200,
       }),
     );
 
-    const result = isolateXSavings(events, baseline);
+    const result = isolateXSavings([...before, ...after], baseline);
 
     expect(result.check.pass).toBe(true);
-    expect(result.check.gate).toBe("p90 ≤ 8500");
+    expect(result.check.name).toBe("x-output-trend");
   });
 
-  it("fails when after p90 > 8500", () => {
-    // 10 events with output tokens above the cap
-    const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
-      makeDecision(`2026-03-0${(i % 9) + 1}T10:00:00Z`, {
+  it("fails when after p90 is NOT lower than before p90", () => {
+    const before: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision(`2026-02-${String(i + 10).padStart(2, "0")}T10:00:00Z`, {
         cls: "standard",
-        outputTokens: 9000 + i * 100, // all above 8500
+        outputTokens: 4000 + i * 100,
+      }),
+    );
+    const after: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision(`2026-03-${String(i + 2).padStart(2, "0")}T10:00:00Z`, {
+        cls: "standard",
+        outputTokens: 10000 + i * 100,
       }),
     );
 
-    const result = isolateXSavings(events, baseline);
+    const result = isolateXSavings([...before, ...after], baseline);
 
     expect(result.check.pass).toBe(false);
-    expect(result.check.detail).toContain("still above 8500");
+    expect(result.check.detail).toContain("not trending down");
   });
 
   it("returns pass with n/a when there is no after data", () => {
-    // Only before-baseline standard events
     const events: TelemetryEvent[] = [
       makeDecision("2026-02-01T10:00:00Z", { cls: "standard", outputTokens: 500 }),
     ];
@@ -328,6 +337,20 @@ describe("isolateXSavings", () => {
 
     expect(result.check.pass).toBe(true);
     expect(result.check.value).toBe("n/a (no data)");
+  });
+
+  it("passes when after data exists but no before data (reports current only)", () => {
+    const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision(`2026-03-${String(i + 2).padStart(2, "0")}T10:00:00Z`, {
+        cls: "standard",
+        outputTokens: 5000 + i * 100,
+      }),
+    );
+
+    const result = isolateXSavings(events, baseline);
+
+    expect(result.check.pass).toBe(true);
+    expect(result.check.detail).toContain("No before-baseline data");
   });
 });
 

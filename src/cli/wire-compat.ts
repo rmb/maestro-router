@@ -378,7 +378,10 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
       await telemetry.log({
         type: "decision",
         ts: new Date().toISOString(),
-        decision,
+        decision: {
+          ...decision,
+          cacheHit: (parsed.cost?.cacheReadInputTokens ?? 0) > 0,
+        },
         cost: parsed.cost,
       });
     }

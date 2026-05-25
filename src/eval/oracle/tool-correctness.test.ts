@@ -133,14 +133,22 @@ describe("checkFingerprintStability", () => {
     expect(result.detail).toContain("getByFingerprint");
   });
 
-  test("passes trivially with empty events", () => {
+  test("passes trivially with empty events and no sessions (bootstrapping)", () => {
     const result = checkFingerprintStability([], []);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("n/a (bootstrapping)");
+  });
+
+  test("passes trivially with empty events but computed sessions present", () => {
+    const session = { sessionId: "s1", cwd: "/x", systemPromptFingerprint: "abc123", createdAt: "2026-01-01T00:00:00Z", lastUsedAt: "2026-01-01T00:00:00Z" };
+    const result = checkFingerprintStability([], [session]);
     expect(result.pass).toBe(true);
     expect(result.value).toBe("100.0%");
   });
 
   test("gate label is ≥95%", () => {
-    const result = checkFingerprintStability([], []);
+    const session = { sessionId: "s1", cwd: "/x", systemPromptFingerprint: "abc123", createdAt: "2026-01-01T00:00:00Z", lastUsedAt: "2026-01-01T00:00:00Z" };
+    const result = checkFingerprintStability([], [session]);
     expect(result.gate).toBe("≥95%");
   });
 });

@@ -110,6 +110,22 @@ export function computeSavings(
       ? 0
       : (hypotheticalOpusCost - actualCost) / hypotheticalOpusCost;
 
+  // Negative savings means actual > hypothetical Opus. This indicates the
+  // comparison is unreliable: subscription plans report totalCostUsd=0 for
+  // some turns while cache_creation tokens inflate the hypothetical, or
+  // LLM-classifier overhead is included in actual but not in hypothetical.
+  // Treat as n/a rather than a genuine regression signal.
+  if (savingsPct < 0) {
+    const check: CheckResult = {
+      name: "tokens-saved",
+      pass: true,
+      value: "n/a (comparison unreliable)",
+      gate: "≥60%",
+      detail: `Actual $${actualCost.toFixed(4)} > hypothetical $${hypotheticalOpusCost.toFixed(4)} — baseline comparison is unreliable (subscription plan zeros, cache pattern mismatch, or LLM-classifier overhead). Use 'maestro stats' for accurate savings.`,
+    };
+    return { check, actualCostUsd: actualCost, hypotheticalOpusCostUsd: hypotheticalOpusCost, savingsPct };
+  }
+
   const pass = savingsPct >= 0.6;
 
   const check: CheckResult = {

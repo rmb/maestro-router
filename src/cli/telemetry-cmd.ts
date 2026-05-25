@@ -8,6 +8,7 @@ import {
   DEFAULT_USER_CONFIG,
   format,
   loadCliConfig,
+  writeUserConfig,
 } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -112,7 +113,7 @@ export function registerTelemetryCommand(program: Command): void {
 
       if (!wasEnabled) {
         if (parent.json) {
-          const out = { disabled: false, wasEnabled, configPath: cli.configPath };
+          const out = { disabled: true, wasEnabled, configPath: cli.configPath };
           const formatted = format(out, fmtOpts(parent));
           if (formatted) process.stdout.write(formatted + "\n");
         } else if (!parent.quiet) {
@@ -122,7 +123,6 @@ export function registerTelemetryCommand(program: Command): void {
       }
 
       delete cli.userConfig.posthogApiKey;
-      const { writeUserConfig } = await import("./utils.js");
       await writeUserConfig(cli.userConfig, cli.configPath);
 
       if (parent.json) {
@@ -164,6 +164,14 @@ export function registerTelemetryCommand(program: Command): void {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== "ENOENT") throw err;
       }
+
+      // Reset telemetry counters in config
+      if (!cli.userConfig.telemetry) {
+        cli.userConfig.telemetry = {};
+      }
+      cli.userConfig.telemetry.eventsLogged = 0;
+      cli.userConfig.telemetry.lastWriteAt = null;
+      await writeUserConfig(cli.userConfig, cli.configPath);
 
       if (parent.json) {
         const out = { cleared, path };

@@ -174,6 +174,13 @@ export type UserConfig = {
    * Required for `maestro tune --posthog` to mine patterns from cross-user data.
    */
   sendPromptText?: boolean;
+  /**
+   * Local telemetry counters. Automatically reset when `maestro telemetry forget` is run.
+   */
+  telemetry?: {
+    eventsLogged?: number;
+    lastWriteAt?: string | null;
+  };
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

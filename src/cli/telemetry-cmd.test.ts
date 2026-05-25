@@ -217,6 +217,29 @@ describe("telemetry off", () => {
     expect(parsed.wasEnabled).toBe(true);
     expect(parsed.configPath).toBeDefined();
   });
+
+  test("emits disabled: true with --json when already-off", async () => {
+    await writeFile(configPath, JSON.stringify({ profile: "aggressive" }), "utf8");
+    const program = makeProgram();
+    const stdoutChunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = (chunk: string) => {
+      stdoutChunks.push(chunk);
+      return true;
+    };
+
+    await program.parseAsync(
+      ["--json", "--config", configPath, "telemetry", "off"],
+      { from: "user" },
+    );
+
+    process.stdout.write = origWrite;
+    const output = stdoutChunks.join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.disabled).toBe(true);
+    expect(parsed.wasEnabled).toBe(false);
+    expect(parsed.configPath).toBeDefined();
+  });
 });
 
 describe("telemetry forget", () => {
@@ -377,5 +400,50 @@ describe("telemetry forget", () => {
     const parsed = JSON.parse(output);
     expect(parsed.cleared).toBe(2);
     expect(parsed.path).toBe(telemetryPath);
+  });
+
+  test("resets telemetry counters in config after forget", async () => {
+    await writeFile(
+      telemetryPath,
+      JSON.stringify({ type: "feedback", ts: "2026-01-01T00:00:00Z" }) + "\n",
+      "utf8",
+    );
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        telemetryPath,
+        telemetry: { eventsLogged: 42, lastWriteAt: "2026-01-01T00:00:00Z" },
+      }),
+      "utf8",
+    );
+    const program = makeProgram();
+    const stdoutChunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = (chunk: string) => {
+      stdoutChunks.push(chunk);
+      return true;
+    };
+
+    await program.parseAsync(
+      ["--quiet", "--config", configPath, "telemetry", "forget", "--confirm"],
+      { from: "user" },
+    );
+
+    process.stdout.write = origWrite;
+
+    // Verify file was deleted
+    try {
+      await readFile(telemetryPath, "utf8");
+      expect.fail("Expected telemetry file to be deleted");
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      expect(e.code).toBe("ENOENT");
+    }
+
+    // Verify config counters were reset
+    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    const telemetry = config.telemetry as Record<string, unknown>;
+    expect(telemetry.eventsLogged).toBe(0);
+    expect(telemetry.lastWriteAt).toBeNull();
   });
 });

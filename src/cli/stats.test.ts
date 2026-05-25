@@ -75,6 +75,27 @@ describe("fallbackRate", () => {
   });
 });
 
+describe("C1: decision events without cost are counted in totalRequests", () => {
+  test("totalRequests includes events without cost field", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision(), // no cost field — e.g., error/interrupt/budget-cap
+      makeDecision({ outputTokens: 200 }), // with cost
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.totalRequests).toBe(2);
+    expect(summary.totalCostUsd).toBe(0.001); // only the second event has cost
+  });
+
+  test("totalRequests === 1, totalCostUsd === 0 for single decision without cost", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision(), // no cost field
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.totalRequests).toBe(1);
+    expect(summary.totalCostUsd).toBe(0);
+  });
+});
+
 describe("outputTokensP90ByClass", () => {
   test("p90 of 10 values is the 9th when sorted", () => {
     // 10 standard decisions with outputTokens: 100, 200, ..., 1000

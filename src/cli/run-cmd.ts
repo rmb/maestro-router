@@ -283,25 +283,26 @@ export function registerRunCommand(program: Command): void {
       void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), effectiveDecision.class);
 
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
-      if (parsed) {
-        const telemetry = createTelemetry(
-          cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
-        );
-        // Set cacheHit when Anthropic returned cached prefix tokens — this is the
-        // ground truth for telemetry's cacheHitRate. Without this, decision.cacheHit
-        // is always undefined and oracle's cache-hit-rate-accuracy check fails.
-        const decisionWithCacheHit: Decision = {
-          ...effectiveDecision,
-          cacheHit: (parsed.cost?.cacheReadInputTokens ?? 0) > 0,
-        };
-        await telemetry.log({
-          type: "decision",
-          ts: new Date().toISOString(),
-          decision: decisionWithCacheHit,
-          cost: parsed.cost,
-          prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
-        });
+      const telemetry = createTelemetry(
+        cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+      );
+      // C1: Always log the routing decision — cost is optional (absent on error/interrupt/budget-cap).
+      // Set cacheHit when Anthropic returned cached prefix tokens — this is the
+      // ground truth for telemetry's cacheHitRate. Without this, decision.cacheHit
+      // is always undefined and oracle's cache-hit-rate-accuracy check fails.
+      const decisionWithCacheHit: Decision = {
+        ...effectiveDecision,
+        cacheHit: (parsed?.cost?.cacheReadInputTokens ?? 0) > 0,
+      };
+      await telemetry.log({
+        type: "decision",
+        ts: new Date().toISOString(),
+        decision: decisionWithCacheHit,
+        ...(parsed?.cost ? { cost: parsed.cost } : {}),
+        prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
+      });
 
+      if (parsed) {
         // Outcome event: stop_reason + output token ratio reveals over/under-routing.
         if (parsed.cost) {
           void telemetry.log({

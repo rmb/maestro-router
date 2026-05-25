@@ -84,10 +84,9 @@ export type UserConfig = {
    */
   useLlmClassifier?: boolean;
   /**
-   * When true, run the LLM classifier inside the VSCode-panel hot path.
-   * Default false — too costly (cold cache_creation ~\$0.04/call) and
-   * too slow (13-20s) to belong on the wrapper hot path. Opt in only if
-   * accuracy matters more than latency for your workflow.
+   * When true (default), run the LLM classifier inside the VSCode-panel hot path.
+   * ~$0.001/uncertain prompt on Haiku. Set false to disable for latency-sensitive
+   * workflows (saves 13-20s on cold-cache turns but reduces accuracy on ambiguous prompts).
    */
   useLlmClassifierInWrapper?: boolean;
   /**
@@ -244,4 +243,29 @@ export type TelemetryEvent =
       note?: string;
       /** "auto" = via Stop-hook sampling; "manual" = user invoked CLI directly. */
       source?: "auto" | "manual";
+    }
+  | {
+      /** Emitted after spawn finishes. Captures stop_reason, output tokens, budget ratio.
+       *  Joins to a "decision" event by sessionId + ts proximity. */
+      type: "outcome";
+      ts: string;
+      sessionId: string;
+      decidedClass: Class;
+      stopReason: string;
+      outputTokens: number;
+      cacheCreationTokens: number;
+      totalCostUsd: number;
+      durationApiMs: number;
+    }
+  | {
+      /** Emitted at turn N+1 when the user uses @deep/@fast/@think immediately after an
+       *  auto-routed turn — the strongest implicit "mis-classified" signal.
+       *  prevPrompt is the prompt from turn N (already truncated to PROMPT_TRUNCATE_CHARS). */
+      type: "correction";
+      ts: string;
+      sessionId: string;
+      prevClass: Class;
+      correctedToClass: Class;
+      hint: string;
+      prevPrompt: string;
     };

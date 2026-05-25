@@ -85,6 +85,31 @@ describe("detectTurnType", () => {
 });
 
 describe("turnTypeClassifier", () => {
+  test("empty prompt → standard @ 1.0 confidence", async () => {
+    const result = await call({ prompt: "" });
+    expect(result).not.toBeNull();
+    expect(result?.class).toBe("standard");
+    expect(result?.confidence).toBe(1.0);
+    expect(result?.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "turn-type.empty_prompt",
+        severity: "info",
+      })
+    );
+  });
+
+  test("whitespace-only prompt → standard @ 1.0 confidence", async () => {
+    const result = await call({ prompt: "   \n\t  " });
+    expect(result).not.toBeNull();
+    expect(result?.class).toBe("standard");
+    expect(result?.confidence).toBe(1.0);
+  });
+
+  test("non-empty prompt → null (pass through to other classifiers)", async () => {
+    const result = await call({ prompt: "hello world" });
+    expect(result).toBeNull();
+  });
+
   test("user_prompt → null (let others classify)", async () => {
     expect(await call({ prompt: "rename foo" })).toBeNull();
   });

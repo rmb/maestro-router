@@ -6,7 +6,7 @@
 //
 // Budget: <1ms (regex only)
 
-/** Regex matching POSIX line-number prefix: "^<number>\t" at line start. */
+/** Regex matching ^\d+\t at line start (digit + tab). Does NOT match space-padded format (e.g., "     1\t"). */
 const LINE_NUMBER_REGEX = /^\d+\t/gm;
 
 /**

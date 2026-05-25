@@ -150,6 +150,9 @@ export function extractToolUseBlocks(frame: Frame): Array<{ id: string; name: st
  * Apply a transformation function to all tool_result blocks in a user frame.
  * Returns a new frame with tool_result content blocks modified.
  * Used for I1: line-number stripping and other tool-result post-processing.
+ *
+ * Note: shallow-copies frames. Assumes transforms only mutate the content string,
+ * not nested block structure.
  */
 export function transformToolResults(
   frame: Frame,

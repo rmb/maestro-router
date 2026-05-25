@@ -3,6 +3,39 @@
 Backlog of ideas considered during planning that are NOT being built in v0.2.
 Each entry includes rationale so future contributors can re-evaluate.
 
+## Recently Shipped (v0.2.3+)
+
+### ~~C1: Always-log decision telemetry~~ — Shipped v0.2.3
+Moved telemetry creation before the `if (parsed)` conditional so decision
+events are logged even when parsing fails or interrupts occur. Cost field is
+optional (null when event has no cost data). Enables accurate decision-event
+counting in stats independent of output parse success. See `src/cli/run-cmd.ts`.
+
+### ~~G2: MaxOutputTokens hint emission~~ — Shipped v0.2.3
+Emit `"Keep response under N tokens."` hint for hard/reasoning classes when
+`spec.maxOutputTokens` is set, even when CLASS_BREVITY is empty (classes that
+suppress default hints). Helps Claude output-gate tokens beyond requested cap.
+See `src/wrapper/spawn.ts::resolveAppendSystemPrompt()`.
+
+### ~~Task 3: P90 duration per class in stats~~ — Shipped v0.2.3
+Added `durationApiMsP90ByClass: Partial<Record<Class, number>>` to stats
+summary, computed as 90th percentile of API call durations grouped by routing
+class. Identifies tail latency per class (only includes classes with data).
+See `src/cli/stats.ts`.
+
+### ~~K2: Markov short-circuit in pipeline~~ — Shipped v0.2.3
+Uses recent routing class history (last ≤5 classes from session state) to
+predict current class via hardcoded markov transition matrix trained on real
+Maestro data. Short-circuits all classifiers when confidence ≥ 0.75, avoiding
+expensive embedding/LLM classifiers on predictable sequences. See
+`src/classifiers/markov.ts`.
+
+### ~~I1: Line-number stripping in SDK proxy~~ — Shipped v0.2.3
+Strips POSIX line-number prefixes (`^\d+\t`) from tool result blocks before
+forwarding to Claude. Reduces token inflation from location metadata in Read
+tool output. Idempotent regex-based stripping with <1ms budget. See
+`src/wrapper/line-stripper.ts`.
+
 ## Deferred to v0.3 (specified, will revisit)
 
 ### Remote PostHog telemetry (S1)

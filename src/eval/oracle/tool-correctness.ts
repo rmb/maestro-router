@@ -3,7 +3,7 @@
 import type { TelemetryEvent } from "../../core/types.js";
 import type { SessionRecord } from "../../wrapper/session.js";
 import { computeFingerprint } from "../../wrapper/prewarm.js";
-import { CONTINUATION_HINT } from "../../wrapper/continuation.js";
+import { CONTINUATION_HINT, CONTINUATION_PATTERNS } from "../../wrapper/continuation.js";
 import type { CheckResult, DimensionResult } from "./telemetry-correctness.js";
 
 export type { CheckResult, DimensionResult };
@@ -47,8 +47,7 @@ export function checkFingerprintStability(
     const fingerprint = computeFingerprint(spec);
     const found = sessions.some(
       (s) =>
-        s.systemPromptFingerprint === fingerprint ||
-        s.modelTier === spec.model,
+        s.systemPromptFingerprint === fingerprint,
     );
     if (found) matched++;
   }
@@ -259,8 +258,6 @@ export function checkK1Invalidation(events: TelemetryEvent[]): CheckResult {
  * Gate: 0 violations (hint injected with only one signal).
  */
 export function checkM1TwoSignal(events: TelemetryEvent[]): CheckResult {
-  const CONTINUATION_PATTERN = /^(continue|keep going|go on|and[?]?|yes|more|next|proceed|\.{2,})/i;
-
   const decisionEvents = events
     .filter((e): e is DecisionEvent => e.type === "decision")
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
@@ -277,7 +274,7 @@ export function checkM1TwoSignal(events: TelemetryEvent[]): CheckResult {
 
     const prompt = current.prompt ?? "";
     const isLinguistic =
-      prompt.length < 50 && CONTINUATION_PATTERN.test(prompt.trim());
+      prompt.length < 50 && CONTINUATION_PATTERNS.test(prompt.trim());
 
     // Violation: hint injected but not both signals present
     if (!priorMaxTokens || !isLinguistic) {

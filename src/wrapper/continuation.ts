@@ -38,7 +38,7 @@ export function detectContinuation(
   };
 }
 
-const CONTINUATION_PATTERNS =
+export const CONTINUATION_PATTERNS =
   /^(continue|keep going|go on|and[?]?|yes[,.]?$|more[,.]?$|next[,.]?$|proceed[,.]?$|\.{2,}$)/i;
 
 /**

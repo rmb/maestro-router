@@ -17,6 +17,12 @@ export type SessionRecord = {
   recentClasses?: string[];
   createdAt: string;
   lastUsedAt: string;
+  /** Truncated prompt from the last turn — used to emit correction events when the next turn uses @deep/@fast. */
+  lastPrompt?: string;
+  /** Class decided for the last turn — paired with lastPrompt for correction correlation. */
+  lastDecisionClass?: string;
+  /** ISO timestamp of the last turn — used to bound the correlation window. */
+  lastDecisionAt?: string;
 };
 
 export type SessionStoreOptions = {
@@ -40,6 +46,10 @@ export type SessionStore = {
   getOrCreate(cwd: string, modelTier: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
   touch(sessionId: string): Promise<void>;
   appendClass(sessionId: string, cls: string): Promise<void>;
+  /** Buffer the last prompt + decided class so the next turn can emit a correction event. */
+  updateLastDecision(sessionId: string, prompt: string, cls: string): Promise<void>;
+  /** Read the last decision for the given session without side effects. */
+  getLastDecision(sessionId: string): Promise<{ prompt: string; cls: string; ts: string } | null>;
   list(): Promise<SessionRecord[]>;
 };
 
@@ -126,6 +136,23 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
         return { ...r, recentClasses: next };
       });
       await write(updated);
+    },
+
+    async updateLastDecision(sessionId, prompt, cls) {
+      const records = await read();
+      const updated = records.map((r) =>
+        r.sessionId === sessionId
+          ? { ...r, lastPrompt: prompt.slice(0, 500), lastDecisionClass: cls, lastDecisionAt: new Date().toISOString() }
+          : r,
+      );
+      await write(updated);
+    },
+
+    async getLastDecision(sessionId) {
+      const records = await read();
+      const r = records.find((s) => s.sessionId === sessionId);
+      if (!r?.lastPrompt || !r.lastDecisionClass || !r.lastDecisionAt) return null;
+      return { prompt: r.lastPrompt, cls: r.lastDecisionClass, ts: r.lastDecisionAt };
     },
 
     async list() {

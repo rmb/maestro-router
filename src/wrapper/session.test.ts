@@ -206,4 +206,30 @@ describe("model-tier affinity", () => {
     expect(result.sessionId).not.toBe("old-uuid");
     expect(result.isNew).toBe(true);
   });
+
+  test("updateLastDecision persists prompt/class and getLastDecision retrieves them", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+    await store.updateLastDecision(sessionId, "fix the bug in auth.ts", "hard");
+    const last = await store.getLastDecision(sessionId);
+    expect(last).not.toBeNull();
+    expect(last!.prompt).toBe("fix the bug in auth.ts");
+    expect(last!.cls).toBe("hard");
+  });
+
+  test("getLastDecision returns null when no prior decision exists", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+    const last = await store.getLastDecision(sessionId);
+    expect(last).toBeNull();
+  });
+
+  test("updateLastDecision truncates prompts longer than 500 chars", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+    const long = "x".repeat(600);
+    await store.updateLastDecision(sessionId, long, "standard");
+    const last = await store.getLastDecision(sessionId);
+    expect(last!.prompt.length).toBe(500);
+  });
 });

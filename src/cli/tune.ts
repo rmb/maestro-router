@@ -97,8 +97,11 @@ export function registerTuneCommand(program: Command): void {
           process.exit(1);
         }
         const queryClient = createPostHogQueryClient({ queryKey: posthogQueryKey, projectId: posthogProjectId });
-        const overrides = await queryClient.fetchOverrides({ since: new Date(cutoff) });
-        events = overrides.map(
+        const [overrides, corrections] = await Promise.all([
+          queryClient.fetchOverrides({ since: new Date(cutoff) }),
+          queryClient.fetchCorrections({ since: new Date(cutoff) }),
+        ]);
+        const overrideEvents: TelemetryEvent[] = overrides.map(
           (o): TelemetryEvent => ({
             type: "override",
             ts: o.ts,
@@ -107,8 +110,22 @@ export function registerTuneCommand(program: Command): void {
             prompt: o.prompt,
           }),
         );
+        const correctionEvents: TelemetryEvent[] = corrections.map(
+          (c): TelemetryEvent => ({
+            type: "correction",
+            ts: c.ts,
+            sessionId: "",
+            prevClass: c.prevClass,
+            correctedToClass: c.correctedToClass,
+            hint: c.hint,
+            prevPrompt: c.prevPrompt,
+          }),
+        );
+        events = [...overrideEvents, ...correctionEvents];
         if (!parent.quiet) {
-          process.stderr.write(`[maestro] fetched ${events.length} override event(s) from PostHog\n`);
+          process.stderr.write(
+            `[maestro] fetched ${overrides.length} override(s) + ${corrections.length} correction(s) from PostHog\n`,
+          );
         }
       } else {
         const path = cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
@@ -203,43 +220,162 @@ async function runAutoTune(): Promise<void> {
   }
 }
 
+// ── Structural feature extraction ────────────────────────────────────────────
+
+type StructuralFeatures = {
+  hasCodeBlock: boolean;
+  hasTraceback: boolean;
+  hasUrl: boolean;
+  hasQuestion: boolean;
+  firstWord: string;
+  lengthBucket: "xs" | "sm" | "md" | "lg" | "xl";
+};
+
+function extractStructural(prompt: string): StructuralFeatures {
+  const lower = prompt.toLowerCase();
+  return {
+    hasCodeBlock: /```|`[^`]+`/.test(prompt),
+    hasTraceback: /traceback|error:|exception:|at line \d/i.test(prompt),
+    hasUrl: /https?:\/\//i.test(prompt),
+    hasQuestion: prompt.trimEnd().endsWith("?"),
+    firstWord: lower.split(/\s+/)[0] ?? "",
+    lengthBucket:
+      prompt.length < 80 ? "xs"
+      : prompt.length < 250 ? "sm"
+      : prompt.length < 600 ? "md"
+      : prompt.length < 1500 ? "lg"
+      : "xl",
+  };
+}
+
+function structuralFeatureKeys(sf: StructuralFeatures): string[] {
+  const keys: string[] = [];
+  if (sf.hasCodeBlock) keys.push("__has_code_block__");
+  if (sf.hasTraceback) keys.push("__has_traceback__");
+  if (sf.hasUrl) keys.push("__has_url__");
+  if (sf.hasQuestion) keys.push("__ends_question__");
+  if (sf.firstWord.length >= 3) keys.push(`__first_${sf.firstWord}__`);
+  keys.push(`__len_${sf.lengthBucket}__`);
+  return keys;
+}
+
+// ── Tokenizer: 1-grams + 2-grams ─────────────────────────────────────────────
+
+const STOP_WORDS = new Set([
+  "the", "and", "for", "this", "that", "with", "from", "have", "been", "will",
+  "your", "they", "are", "was", "can", "but", "not", "you", "all", "any",
+  "some", "one", "into", "how", "what", "when", "where", "which", "who",
+  "its", "then", "than", "just", "also", "here", "there", "our",
+]);
+
+function tokenize(prompt: string): string[] {
+  const words = prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
+
+  // 1-grams
+  const tokens: string[] = [...words];
+  // 2-grams (adjacent pairs)
+  for (let i = 0; i < words.length - 1; i++) {
+    tokens.push(`${words[i]} ${words[i + 1]}`);
+  }
+  return tokens;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ── Training sample: prompt → intended class ─────────────────────────────────
+
+type TrainingSample = { prompt: string; cls: Class; weight: number };
+
+function gatherSamples(events: ReadonlyArray<TelemetryEvent>): TrainingSample[] {
+  const samples: TrainingSample[] = [];
+  for (const e of events) {
+    if (e.type === "override" && e.prompt?.length > 0) {
+      // Explicit user override: weight 1.0
+      samples.push({ prompt: e.prompt, cls: e.to, weight: 1.0 });
+    } else if (e.type === "correction" && e.prevPrompt?.length > 0) {
+      // Implicit correction: prev prompt was mis-classified, weight 1.5 (stronger signal)
+      samples.push({ prompt: e.prevPrompt, cls: e.correctedToClass, weight: 1.5 });
+    }
+  }
+  return samples;
+}
+
+// ── Learner: precision-calibrated pattern mining ──────────────────────────────
+
 export function computeSuggestions(
   events: ReadonlyArray<TelemetryEvent>,
   opts: { learnOnly: boolean },
 ): Suggestion {
-  // Index recent decisions by sessionId so we can correlate override events.
-  const overrides = events.filter((e): e is Extract<TelemetryEvent, { type: "override" }> => e.type === "override");
+  const samples = gatherSamples(events);
 
-  // Mine simple token-frequency patterns from override events.
-  const tokenStats = new Map<string, Map<Class, number>>();
-  for (const o of overrides) {
-    for (const token of tokenize(o.prompt)) {
-      if (token.length < 4) continue; // ignore short/common tokens
-      const inner = tokenStats.get(token) ?? new Map<Class, number>();
-      inner.set(o.to, (inner.get(o.to) ?? 0) + 1);
-      tokenStats.set(token, inner);
+  // Feature → { class → weighted_count }
+  const featureStats = new Map<string, Map<Class, number>>();
+
+  const accumulate = (feature: string, cls: Class, weight: number): void => {
+    const inner = featureStats.get(feature) ?? new Map<Class, number>();
+    inner.set(cls, (inner.get(cls) ?? 0) + weight);
+    featureStats.set(feature, inner);
+  };
+
+  for (const { prompt, cls, weight } of samples) {
+    for (const token of tokenize(prompt)) {
+      accumulate(token, cls, weight);
+    }
+    for (const key of structuralFeatureKeys(extractStructural(prompt))) {
+      accumulate(key, cls, weight);
     }
   }
 
+  const ALPHA = 0.5; // Bayesian smoothing pseudo-count per class
+
   const learned: LearnedRule[] = [];
-  for (const [token, byClass] of tokenStats) {
+  for (const [feature, byClass] of featureStats) {
+    // Total weighted count across all classes for this feature
+    const totalRaw = [...byClass.values()].reduce((s, v) => s + v, 0);
+    if (totalRaw < MIN_PATTERN_OCCURRENCES) continue;
+
+    // Find dominant class
+    let bestCls: Class = "standard";
+    let bestCount = 0;
     for (const [cls, count] of byClass) {
-      if (count >= MIN_PATTERN_OCCURRENCES) {
-        learned.push({
-          pattern: `\\b${escapeRegex(token)}\\b`,
-          class: cls,
-          confidence: 0.85,
-          source: "auto",
-          matchedCount: count,
-        });
+      if (count > bestCount) {
+        bestCls = cls;
+        bestCount = count;
       }
     }
+
+    // Precision with Laplace smoothing: (best_count + α) / (total + α * n_classes)
+    const precision = (bestCount + ALPHA) / (totalRaw + ALPHA * ALL_CLASSES.length);
+
+    // Only emit patterns with clear class dominance (precision ≥ 0.6)
+    if (precision < 0.6) continue;
+
+    const isStructural = feature.startsWith("__");
+    const pattern = isStructural
+      ? feature // structural keys are not regex patterns; stored as-is for now
+      : `\\b${escapeRegex(feature)}\\b`;
+
+    // Skip structural features that aren't directly usable as regex heuristics.
+    // They inform override-adjustment reporting only.
+    if (isStructural) continue;
+
+    learned.push({
+      pattern,
+      class: bestCls,
+      confidence: Math.min(0.95, Math.max(0.5, precision)),
+      source: "auto",
+      matchedCount: Math.round(totalRaw),
+    });
   }
 
   const overrideAdjustments: Suggestion["overrideAdjustments"] = [];
   if (!opts.learnOnly) {
-    // Per-class override-rate observation: if a class has high override rate,
-    // surface a textual suggestion to revisit it.
     const perClassCount = new Map<Class, number>();
     const perClassOverride = new Map<Class, number>();
     for (const e of events) {
@@ -247,6 +383,8 @@ export function computeSuggestions(
         perClassCount.set(e.decision.class, (perClassCount.get(e.decision.class) ?? 0) + 1);
       } else if (e.type === "override") {
         perClassOverride.set(e.from, (perClassOverride.get(e.from) ?? 0) + 1);
+      } else if (e.type === "correction") {
+        perClassOverride.set(e.prevClass, (perClassOverride.get(e.prevClass) ?? 0) + 1);
       }
     }
     for (const cls of ALL_CLASSES) {
@@ -264,23 +402,13 @@ export function computeSuggestions(
   return {
     overrideAdjustments,
     learnedHeuristics: learned.sort((a, b) => b.matchedCount - a.matchedCount),
-    patternStats: [...tokenStats.entries()].map(([token, m]) => ({
-      token,
-      correctedFromCount: m,
-    })),
+    patternStats: [...featureStats.entries()]
+      .filter(([f]) => !f.startsWith("__"))
+      .map(([token, m]) => ({
+        token,
+        correctedFromCount: m,
+      })),
   };
-}
-
-function tokenize(prompt: string): string[] {
-  return prompt
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length > 0);
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function renderHuman(s: Suggestion, applying: boolean): string {

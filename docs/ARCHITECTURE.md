@@ -1,360 +1,173 @@
 # Maestro Architecture
 
-Maestro is a CLI wrapper around the Claude Code CLI. Every user prompt is
-classified into one of six complexity classes, mapped to a model + thinking
-budget + cost cap via a configurable profile, and forwarded to
-`claude --print` as a subprocess. Output is streamed back live; the JSON
-result envelope provides exact token + cost telemetry.
+## What this is and why it exists
 
-## Why a wrapper (not a proxy)
+Claude Code uses the same model for every prompt regardless of complexity. A simple rename and a system design question both hit Opus, even though Haiku handles the first just as well at 50× lower cost. Over a month of daily use, this wastes a significant fraction of your subscription budget.
 
-Three constraints pushed the design here:
+Maestro solves this by classifying each prompt and forwarding it to the cheapest model that will produce the right answer. It wraps the Claude CLI — every prompt gets routed, priced, and logged before Claude sees it. The user interface is unchanged.
 
-1. **Subscription auth.** Pro/Team users authenticate Claude Code via
-   OAuth at `claude.ai`, not via `ANTHROPIC_API_KEY`. A localhost HTTP
-   proxy (like Claude Code Router) can't intercept those requests — the
-   OAuth token is scoped to Anthropic's first-party endpoints. Wrapping
-   the CLI side-steps auth entirely: Claude handles its own login.
+## Why a wrapper, not a proxy
 
-2. **Spike-verified mechanics.** The Claude CLI exposes every primitive
-   Maestro needs as a flag: `--model`, `--effort`, `--max-budget-usd`,
-   `--session-id`, `--resume`, `--output-format json`,
-   `--exclude-dynamic-system-prompt-sections`, `--tools`,
-   `--strict-mcp-config`, `--mcp-config`, `--bare`. Session continuity
-   survives model swap (verified Haiku→Sonnet kept context). Cost telemetry
-   is exact, not estimated.
+Three constraints ruled out an HTTP proxy approach:
 
-3. **VSCode panel coverage.** The official `anthropic.claude-code`
-   extension exposes a `claudeCode.claudeProcessWrapper` setting. Pointing
-   it at `maestro` routes every panel-UI invocation through us without
-   touching the extension code. The `--input-format stream-json` channel is
-   owned by Maestro as a per-turn proxy: each user message is classified
-   independently and forwarded as `claude --print --resume`, so model routing
-   can change mid-session as complexity escalates. Session continuity is
-   preserved via `--session-id` + `--resume`.
+**Subscription auth.** Pro/Team users authenticate via OAuth at `claude.ai`, not via `ANTHROPIC_API_KEY`. An HTTP proxy can't intercept those requests — the OAuth token is scoped to Anthropic's first-party endpoints. Wrapping the CLI sidesteps auth entirely.
 
-Details and trade-offs in [adr/0003-wrapper-architecture-over-proxy.md](adr/0003-wrapper-architecture-over-proxy.md).
+**Native flag support.** The Claude CLI exposes every primitive Maestro needs: `--model`, `--effort`, `--max-budget-usd`, `--session-id`, `--resume`, `--output-format json`, `--exclude-dynamic-system-prompt-sections`, `--tools`, `--bare`. Session continuity survives model swaps (verified: Haiku → Sonnet preserved context). Cost telemetry is exact, not estimated.
+
+**VSCode panel coverage.** The official `anthropic.claude-code` extension exposes `claudeCode.claudeProcessWrapper`. Pointing it at `maestro` routes every panel invocation through Maestro without touching the extension. The `--input-format stream-json` channel is owned by Maestro as a per-turn proxy — each user message is classified and forwarded as `claude --print --resume`, so routing can change mid-session as complexity changes.
 
 ## Per-prompt data flow
 
 ```
        ┌──────────────────────────────────────────────────────────────┐
        │                       User prompt                            │
-       │  (VSCode terminal, panel UI via claudeProcessWrapper, or     │
-       │   piped to `maestro run` directly)                           │
+       │  (VSCode panel via claudeProcessWrapper, or maestro run)     │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
        │ classifiers/passthrough.ts                                   │
-       │   isSlashPrefix("/clear" etc.) → bypass, forward unmodified  │
+       │   /clear, /model, /help, /cost → bypass classification       │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ core/pipeline.ts — cheap-first, short-circuit at confidence  │
-       │  >= 0.6                                                      │
+       │ core/pipeline.ts — cheap-first, short-circuit at conf ≥ 0.55 │
        │                                                              │
-       │ ┌────────────────────────┐  ┌────────────────────────────┐   │
-       │ │ override.ts            │  │ turn-type.ts               │   │
-       │ │  @fast / @deep / etc.  │  │ user_prompt / tool_result  │   │
-       │ │  conf 1.0 if hint      │  │ / error_recovery / cont.   │   │
-       │ └────────────────────────┘  └────────────────────────────┘   │
-       │             │                          │                     │
-       │             └──────────┬───────────────┘                     │
-       │                        ▼                                     │
-       │                ┌────────────────────────────────┐            │
-       │                │ tool-override.ts (v0.3)        │            │
-       │                │  tool_result turns only        │            │
-       │                │  Read/Glob/Grep/LS → trivial   │            │
-       │                │  Edit/Write/Bash → simple      │            │
-       │                │  Task/WebFetch → standard      │            │
-       │                │  conf 1.0; null if unknown     │            │
-       │                └────────────────────────────────┘            │
-       │                              │                               │
-       │                              ▼                               │
-       │                ┌────────────────────────────────┐            │
-       │                │ heuristic.ts                   │            │
-       │                │  built-in regex + user rules   │            │
-       │                │  + size policy + bare_safe     │            │
-       │                └────────────────────────────────┘            │
-       │                              │                               │
-       │                              ▼                               │
-       │                ┌────────────────────────────────┐            │
-       │                │ embedding.ts (S2, opt-out)     │            │
-       │                │  Xenova/all-MiniLM-L6-v2 ONNX  │            │
-       │                │  cosine sim to ~60 frozen      │            │
-       │                │  exemplars; sha256 drift gate; │            │
-       │                │  null + diagnostic if peer not │            │
-       │                │  installed                     │            │
-       │                └────────────────────────────────┘            │
-       │                              │                               │
-       │                              ▼                               │
-       │                ┌────────────────────────────────┐            │
-       │                │ llm.ts (S12, opt-out)          │            │
-       │                │  claude --print --json-schema  │            │
-       │                │  haiku, $0.01 cap, 2s timeout  │            │
-       │                │  <PROMPT_TO_CLASSIFY> anti-    │            │
-       │                │  injection wrap                │            │
-       │                └────────────────────────────────┘            │
+       │  1. override.ts      @fast / @deep / @think — conf 1.0       │
+       │  2. turn-type.ts     tool_result / error_recovery / cont.    │
+       │  3. heuristic.ts     built-in regex + user rules             │
+       │  4. embedding.ts     ONNX cosine sim (optional peer)         │
+       │  5. llm.ts           Haiku --json-schema (opt-in)            │
        │                                                              │
-       │  Sub-threshold results vote (weighted). No match → standard. │
+       │  Sub-threshold results → weighted vote. No match → standard. │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
        │ core/cache.ts — sha256(prompt+scenario), LRU 1000, 24h TTL   │
-       │  cache hit → return cached Decision + cache.hit diagnostic   │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ core/profile.ts — Decision.spec from class lookup            │
-       │  layered: built-in → user overrides → S7 global defaults     │
+       │ core/profile.ts — class → { model, effort, maxBudgetUsd, … } │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ wrapper/session.ts — getOrCreate(cwd) → {sessionId, isNew}   │
-       │  aggressive reuse (F9) within 24h window for same cwd        │
+       │ wrapper/session.ts — reuse session by cwd, 24h window        │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ wrapper/spawn.ts → buildClaudeArgs(decision, config, sid, …) │
-       │   --print --output-format json --session-id|--resume <uuid>  │
+       │ wrapper/spawn.ts → claude --print --output-format json       │
+       │   --session-id|--resume <uuid>                               │
        │   --model X --effort Y --max-budget-usd Z                    │
-       │   [--bare]  (S6: heuristic.bare_safe ∧ profile.bare ∧ ¬@fast+context)
-       │   [--exclude-dynamic-system-prompt-sections] (S7)            │
-       │   [--tools <list>]   (S8 trivial/simple → "Read,Edit")       │
-       │   [--strict-mcp-config --mcp-config '{"mcpServers":{}}'] (S9)│
+       │   --append-system-prompt "Be concise…"                       │
+       │   [--bare]  (trivial + heuristic.bare_safe + API key auth)   │
+       │   [--exclude-dynamic-system-prompt-sections]                 │
+       │   [--tools <list>]                                           │
+       │   [--strict-mcp-config --mcp-config '…']                     │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ wrapper/stream.ts — spawn `claude`, pipe stdout/stderr live, │
-       │   capture stdout for trailing JSON envelope                  │
+       │ wrapper/stream.ts — pipe stdout/stderr live, capture JSON    │
        │   SIGINT forwarded; AbortSignal → SIGTERM                    │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ wrapper/output.ts — parseOutput(capturedStdout)              │
-       │  → CostBreakdown (totalCostUsd, all token counts, duration)  │
-       │  → Diagnostics: claude.budget_exceeded (R8),                 │
-       │     info.compact_recommended (S10)                           │
+       │ wrapper/output.ts — parse CostBreakdown from JSON envelope   │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ core/telemetry.ts — append decision event to                 │
-       │  ~/.maestro/decisions.jsonl                                  │
-       │  update counters in ~/.maestro/config.json                   │
+       │ core/telemetry.ts — append to ~/.maestro/decisions.jsonl     │
+       │ core/posthog.ts   — fire-and-forget event to PostHog (opt-in)│
        └──────────────────────────────────────────────────────────────┘
 ```
 
-## Tournament
+## Classifier pipeline in detail
 
-`maestro bench --tournament` empirically validates which classification
-downgrades are safe. For each sampled prompt the tournament:
+**Override** reads the first word of the prompt. `@fast`/`@haiku` → trivial, `@think` → reasoning, `@deep`/`@opus` → max. Confidence 1.0. The hint is stripped before the prompt reaches Claude.
 
-1. **A spawn** — runs the prompt at the class the pipeline currently
-   assigns, capturing the response and `total_cost_usd` from
-   `--output-format json`.
-2. **B spawn** — runs the same prompt one tier cheaper (using the
-   `DOWNGRADE` map: simple → trivial, standard → simple, hard → standard,
-   …). Trivial has no cheaper tier and is skipped.
-3. **Judge spawn** — Sonnet (default) with `--json-schema` returns
-   `{ winner: "A" | "B" | "tie", reason: … }` after seeing both responses
-   wrapped in `<RESPONSE_A>` / `<RESPONSE_B>` tags.
+**Turn-type** detects structural prompt patterns rather than content. Tool results route to simple or trivial depending on the tool name and output. Error recovery routes to hard. Continuation turns ("ok continue", "go on") stay at simple. This stage fires before the heuristic so tool scaffolding overhead doesn't leak into routing decisions.
 
-Calls are sequential (controllable budget, clean ctrl-C). When total cost
-exceeds `--tournament-budget` the engine aborts and marks the remaining
-rows `budget_cap_reached`. Pattern mining over winning rows surfaces
-heuristic candidates (≥3 occurrences of a ≥4-char token in the same
-`from → to` group → `\\btoken\\b` rule at confidence 0.85).
+**Heuristic** applies 45+ compiled regexes in priority order. The highest-confidence match wins. Built-in rules cover git operations, version bumps, docstring edits, rename/format tasks, debug and production-incident language, architecture and design vocabulary, and more. User-defined rules from `~/.maestro/heuristics.json` are appended after built-in rules and can override via higher confidence.
 
-The default behavior requires `--confirm-cost` to actually spend money;
-without it the command only prints a cost estimate. Output can be written
-as JSON (`--tournament-output`) and validated against the eval baseline
-with `bench --propose` before applying.
+**Embedding** (optional peer `@xenova/transformers`) computes cosine similarity between the prompt embedding and ~60 frozen labeled exemplars. Returns null if the peer isn't installed, which is fine — the LLM stage is the final fallback.
 
-See `src/eval/tournament.ts` for the engine; `src/cli/bench.ts` for the
-CLI wiring.
+**LLM** calls Haiku via `--json-schema` with a structured prompt. Returns a class + confidence. Off by default in the wrapper hot path (adds 2-20s latency); opt in via `useLlmClassifierInWrapper: true`. Used by default in offline eval and tuning workflows.
 
-## Module organization
+## Session reuse and cost amortization
+
+The single largest cost driver is `cache_creation_input_tokens` — Claude Code's system prompt is ~37k tokens and gets cached on the first turn of every new session. Maestro reuses the same `--session-id` for all prompts in the same `cwd` within a 24-hour window, regardless of which model handles each turn. This amortizes the cache creation cost across the session rather than paying it per turn.
+
+Model swaps within a session are safe — verified by spike: Haiku → Sonnet preserves conversation context via `--session-id` + `--resume`.
+
+## Community tuning loop
+
+1. Users with `posthogApiKey` set emit `maestro_override` events when they use `@deep`/`@fast` to correct a routing decision.
+2. A weekly GitHub Actions workflow queries PostHog via HogQL, mines override patterns, and commits updated heuristics to `community/heuristics.json`.
+3. On every spawn, Maestro checks if 7 days have passed since the last auto-tune. If so, a detached background process fetches `community/heuristics.json`, merges new rules into `~/.maestro/heuristics.json`, and records the timestamp in `~/.maestro/state.json`. Zero user interaction required.
+
+Local tuning (without PostHog) works the same way but draws only from the user's own `~/.maestro/decisions.jsonl`.
+
+## Tournament evaluator
+
+`maestro bench --tournament` validates which downgrades are safe without guessing. For each sampled prompt:
+
+1. **A spawn** — runs at the current assigned class, captures the response
+2. **B spawn** — runs one tier cheaper (e.g. standard → simple)
+3. **Judge spawn** — Sonnet with `--json-schema` compares both responses and returns `{ winner: "A" | "B" | "tie" }`
+
+Pattern mining over tied/B-win rows surfaces heuristic candidates. Requires `--confirm-cost` to actually spend money — without it, prints a cost estimate only.
+
+## Module layout
 
 ```
 src/
-  core/             Zero internal deps. Pure logic.
+  core/             Pure logic, zero internal deps.
     types.ts        Domain types: Class, Profile, Decision, …
     cache.ts        LRU + TTL + sha256 keying
-    telemetry.ts    JSONL writer with rotation + counters
-    classifier.ts   createClassifier factory
-    profile.ts      createProfile + layered loader + built-in profiles
-    pipeline.ts     0.6 short-circuit + weighted vote + cache integration
+    telemetry.ts    JSONL writer
+    posthog.ts      Fire-and-forget capture + HogQL query client
+    pipeline.ts     Short-circuit + weighted vote + cache integration
+    profile.ts      Built-in profiles + layered loader
     extract.ts      JSON extraction (fenced + brace-balanced fallback)
 
-  classifiers/      Pipeline stages. Depend only on core.
-    override.ts     @fast / @deep / @think / @fast+context (S6 escape)
+  classifiers/      Pipeline stages. Depend only on core/.
+    override.ts     @fast / @deep / @think
     turn-type.ts    user_prompt / tool_result / error_recovery / continuation
-    heuristic.ts    Built-in regex + user-defined rules + size policy
-    embedding.ts    ONNX feature-extraction + cosine to frozen exemplars (S2)
-    exemplars-seeds.ts  Frozen seed list (~60 entries) — checksum-pinned
-    exemplars.json  Pre-computed vectors written by `pnpm embed`
-    llm.ts          claude --print --json-schema (S12) — opt-out
-    internal-index.ts  Namespace target for `export * as classifiers`
+    heuristic.ts    Built-in regex + user rules
+    embedding.ts    ONNX cosine similarity (optional peer)
+    llm.ts          Haiku --json-schema fallback
 
-  wrapper/          Subprocess concerns. Depend on core + node:child_process.
-    preflight.ts        Verify Claude CLI version + required flags (R6)
-    session.ts          UUID store with aggressive cwd reuse (F9)
-    spawn.ts            buildClaudeArgs (pure) + spawnClaude (batch)
-    stream.ts           streamClaude (live pipe + capture + signal forwarding)
-    stream-json-proxy.ts  Per-turn proxy for VSCode panel sessions: reads NDJSON
-                          user turns, classifies each, spawns claude --print
-                          --resume, filters duplicate init events, logs per-turn
-                          cost telemetry
-    passthrough.ts      Slash-command detection (skip classification)
-    output.ts           Parse --output-format json/stream-json → CostBreakdown + diagnostics
+  wrapper/          Subprocess concerns.
+    preflight.ts        Verify Claude CLI version + required flags
+    session.ts          UUID store with aggressive cwd reuse
+    spawn.ts            buildClaudeArgs (pure) + spawnClaude
+    stream.ts           Live pipe + capture + signal forwarding
+    stream-json-proxy.ts  Per-turn VSCode panel proxy
+    passthrough.ts      Slash-command bypass
+    output.ts           Parse --output-format json → CostBreakdown
 
-  cli/              Commander shell. Depends on core + classifiers + wrapper.
-    index.ts        Entrypoint + version + global options
-    utils.ts        loadCliConfig (F2 layered) + format() + wrap()
-    run-cmd.ts      `maestro run <prompt>` — the user-facing route command
-    telemetry-cmd.ts  status / show / feedback
-    stats.ts        Cost vs Opus-everywhere baseline (C7)
-    tune.ts         Telemetry analysis + auto-learning (F3, F5)
-    replay.ts       JSONL log replay against current pipeline
-    bench.ts        Eval suite + --propose validation + tournament
-
-  profiles/         Re-export shim (G5).
-    internal-index.ts
-
-  index.ts          Public API surface (named exports + namespaces)
+  cli/              Commander shell.
+    run-cmd.ts      maestro run — classify and forward a prompt
+    tune.ts         Telemetry analysis, community fetch, auto-tune
+    stats.ts        Cost vs Opus-everywhere baseline
+    bench.ts        Eval + tournament
+    replay.ts       JSONL replay against current pipeline
 ```
 
 ## Configuration layers
 
-Loaded by `cli/utils.ts → loadCliConfig` and `core/profile.ts → loadProfile`:
+Loaded in priority order (later layers override earlier):
 
-1. **Per-project** (`<cwd>/.maestro/config.json`) — hook present, discovery
-   gated until v0.3.
-2. **User config** (`~/.maestro/config.json`) — global preferences:
-   profile name, aggressiveness, daily cost cap, autoLearn,
-   excludeDynamicSections, etc.
-3. **Profile overrides** (`~/.maestro/profile-overrides.json`) — per-class
-   `{model, effort, maxBudgetUsd, …}` tweaks merged on top of the chosen
-   built-in profile.
-4. **User heuristics** (`~/.maestro/heuristics.json`) — regex patterns →
-   class with confidence, appended to built-in rules. **User-defined
-   rules never get `bare_safe` implicitly** — `--bare` requires explicit
-   `bareSafe: true` in the user's own rule (S6 safety).
-5. **Built-in profile** (`balanced` / `cheap` / `quality`).
+1. **Built-in profile** (`balanced` / `cheap` / `quality`)
+2. **User config** (`~/.maestro/config.json`) — profile, aggressiveness, cost caps, classifier flags
+3. **Profile overrides** (`~/.maestro/profile-overrides.json`) — per-class model/effort/budget tweaks
+4. **User heuristics** (`~/.maestro/heuristics.json`) — regex patterns → class
+5. **Per-project config** (`<repo>/.maestro/`) — allowed fields only (`profile`, `excludeDynamicSections`, `useEmbeddingClassifier`)
 
-S7 default: `excludeDynamicSections: true` everywhere unless explicitly
-disabled.
+Fields that affect telemetry paths, billing caps, and hot-path latency are global-only. A committed `.maestro/config.json` in a shared repo cannot silently affect teammates on those dimensions.
 
-## Fine-tuning loop
+## Known behavioral notes
 
-The intended user feedback loop:
+**`--max-budget-usd` is a soft cap.** Verified during a spike: a `$0.01` cap on a long-essay prompt resulted in `$0.063` actual cost (6.3× overrun). The output parser detects `subtype: error_max_budget_usd` and emits a `claude.budget_exceeded` diagnostic. Profile defaults are sized with this margin in mind.
 
-1. Use Maestro daily. Decisions → `~/.maestro/decisions.jsonl`. Manual
-   `@deep` etc. overrides → override events in the same log.
-2. `maestro stats` shows realized cost, cache hit rate, per-class override
-   rate, and the top override patterns.
-3. `maestro tune` (dry-run) analyses recent telemetry and proposes new
-   heuristic rules from override patterns (≥5 occurrences of the same
-   word/phrase in a 30-day window).
-4. `maestro tune --apply` writes the suggested rules to
-   `~/.maestro/heuristics.json`. (F5: `bench --propose <file>` validates
-   before apply; gate at >2% eval regression.)
-5. Next session uses the tuned rules; cycle continues.
+**`--bare` requires four conditions.** The profile must enable it, the heuristic must tag the prompt `bare_safe`, no `@fast+context` override must be present, and the auth method must be API key (not OAuth). All four are checked in `wrapper/spawn.ts`.
 
-Manual `maestro telemetry feedback <session-id> --rating 1-5` records
-explicit quality ratings that future `tune` versions will weight.
-
-F7 adds an automated path: `hooks/stop-feedback.sh` runs on Claude Code's
-Stop event and, depending on `userConfig.feedbackPrompts`
-(`never` / `occasional` / `always`) and `feedbackSampleRate` (default 0.2),
-prompts via `/dev/tty` for a 1-5 rating, then calls
-`maestro telemetry feedback <sid> --rating <n> --auto`. Auto-sampled
-events carry `source: "auto"` so the analyzer can weight them differently
-from explicit manual ratings. Install with `maestro install-hook`, which
-writes Maestro's entry into `~/.claude/settings.json` `hooks.Stop` —
-idempotent and uninstallable without touching other hooks.
-
-## Decision register
-
-Maestro's plan tracks cross-cutting decisions by tag. Three families:
-
-- **G1–G9** — Gap resolutions (e.g., G2: extractJSON with fenced +
-  brace-balanced fallback; G5: internal-index files; G9: router-observations
-  format).
-- **C1–C12** — Cost optimizations (e.g., C2: cheap-first ordering invariant;
-  C3: definite-trivial fast-path; C10: turn-type classifier; C11: per-class
-  `maxBudgetUsd`).
-- **F1–F9** — Fine-tuning loop (F1: three user-editable files; F3: tune
-  `--learn`; F5: `bench --propose`; F9: aggressive session reuse).
-- **S1–S11** — Simplifications and Claude-specific savings (S1: defer
-  remote telemetry; S2: defer embedding; S6: `--bare` for definite-trivial;
-  S7: `--exclude-dynamic-system-prompt-sections` default; S8/S9: tool +
-  MCP isolation per class; S10: compaction hint; S11: cache-cost
-  separation in reports).
-
-The full register lives in [`tasks/todo.md`](../tasks/todo.md).
-
-## Risk register
-
-- **R6** Claude CLI flag stability. Mitigated by
-  `wrapper/preflight.ts` which fails fast with upgrade instructions when
-  flags are missing.
-- **R7** Session resumption across multi-swap. Spike verified single swap;
-  module 12 includes a 5-turn 4-model regression test.
-- **R8** `--max-budget-usd` is a **soft cap** — verified during spike:
-  with `$0.01` cap on a long-essay prompt, realized cost was `$0.063`
-  (6.3× overrun). Output parser detects `subtype: error_max_budget_usd`
-  and emits `claude.budget_exceeded` diagnostic. Profile defaults sized
-  with margin.
-
-Details in [`router-observations.md`](router-observations.md).
-
-## Extension points (consumers as a library)
-
-Maestro is primarily a CLI binary. The library surface at `maestro-router`
-exists for programmatic use cases (custom CLIs, integration tests, plugins):
-
-```ts
-import {
-  createPipeline,
-  createClassifier,
-  loadProfile,
-  classifiers,
-  profiles,
-} from "maestro-router";
-
-const pipeline = createPipeline({
-  classifiers: [
-    classifiers.override,
-    classifiers.turnType,
-    classifiers.heuristic,
-  ],
-  profile: loadProfile().profile,
-});
-
-const decision = await pipeline.route({ prompt: "rename foo to bar" });
-// → { class: "trivial", classifier: "heuristic", spec: { model: "haiku", ... } }
-```
-
-The wrapper modules (spawn, stream, output, session) are internal and not
-exported as a public subpath — Maestro is intended to be invoked as a CLI.
-
-## What's intentionally out
-
-For the wrapper-architecture v0.2 release:
-
-- No HTTP proxy / CCR adapter
-- No SDK middleware
-- No Bedrock / OpenAI / Codex compatibility
-- No remote telemetry (PostHog) — local JSONL only
-
-LLM-based classifier via `claude --print --json-schema` (S12) shipped in
-v0.2.1; opt out via `userConfig.useLlmClassifier = false`.
-
-Embedding classifier via `@xenova/transformers` (S2) shipped in v0.2.2;
-optional peer dependency, opt out via `userConfig.useEmbeddingClassifier
-= false`. Returns null + diagnostic if the peer isn't installed.
-
-These are deferred and documented in
-[`tasks/todo.md → Backlog`](../tasks/todo.md) and
-[`future-ideas.md`](future-ideas.md).
+Details and spike results in [router-observations.md](router-observations.md).

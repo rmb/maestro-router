@@ -35,7 +35,6 @@ export type StatsSummary = {
 // ---------------------------------------------------------------------------
 
 type DecisionEvent = Extract<TelemetryEvent, { type: "decision" }>;
-type OutcomeEvent = Extract<TelemetryEvent, { type: "outcome" }>;
 
 // ---------------------------------------------------------------------------
 // checkCostReconciliation
@@ -219,9 +218,7 @@ export function checkOutcomeLinkage(
     outcome: Extract<TelemetryEvent, { type: "outcome" }>;
   }>,
 ): CheckResult {
-  const totalOutcomes = events.filter(
-    (e): e is OutcomeEvent => e.type === "outcome",
-  ).length;
+  const totalOutcomes = events.filter((e) => e.type === "outcome").length;
 
   // Trivially pass if there are no outcomes
   if (totalOutcomes === 0) {

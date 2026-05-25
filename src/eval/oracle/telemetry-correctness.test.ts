@@ -8,8 +8,8 @@ import {
   checkFallbackRateAccuracy,
   checkOutcomeLinkage,
   runTelemetryCorrectness,
+  type StatsSummary,
 } from "./telemetry-correctness.js";
-import type { StatsSummary } from "./telemetry-correctness.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

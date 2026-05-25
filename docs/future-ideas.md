@@ -38,10 +38,12 @@ tool output. Idempotent regex-based stripping with <1ms budget. See
 
 ## Deferred to v0.3 (specified, will revisit)
 
-### Remote PostHog telemetry (S1)
-Opt-in anonymous usage data to improve routing across users. Includes
-`core/telemetry-remote.ts`, consent flow, CLI `off`/`forget` subcommands,
-ADR-0005, PostHog EU project + dashboards. v0.2 ships local-only telemetry.
+### ~~Remote PostHog telemetry (S1)~~ — Core shipped; consent UX deferred
+`posthogApiKey` in `~/.maestro/config.json` opts in; `run-cmd.ts` emits
+`maestro_decision` + `maestro_override` events on every spawn. `tune --posthog`
+mines cross-user correction patterns via `core/posthog.ts`. Opt-out: remove
+the key. Formal `telemetry off`/`forget` CLI subcommands and a PostHog-specific
+ADR remain deferred to v0.3.
 
 ### ~~Embedding classifier (S2)~~ — Shipped in v0.2.2
 `@xenova/transformers` peer, ONNX local embedding via
@@ -70,10 +72,11 @@ aggregates per-class win rates, and mines token patterns from winning
 prompts. Sequential, budget-capped, and `--tournament-output` writes a
 proposal validatable via `bench --propose`. See `src/eval/tournament.ts`.
 
-### Tournament matrix (S4, C6 expansion)
-Expand `bench --tournament` from single-axis model-tier downgrade to a model
-× effort matrix per class. Surfaces wins from budget reduction independent
-of model tier.
+### ~~Tournament matrix (S4, C6 expansion)~~ — Shipped
+`bench --tournament-matrix` tests same-model effort-step-down per prompt in
+addition to the model-tier downgrade. Aggregates per-class `MatrixResult[]`
+alongside the standard win-rate table. See `src/eval/tournament.ts` and
+`src/cli/bench.ts`.
 
 ### ~~Per-tool profile overrides (C12)~~ — Already shipped
 Implemented in `src/classifiers/tool-override.ts`. Uses sdk-proxy metadata
@@ -96,9 +99,11 @@ in `~/.maestro/config.json` (default 0.2 = 1-in-5). Recorded via
 manual ratings by `source: "auto"`. Install with `maestro install-hook`
 (idempotent; `--uninstall` removes only Maestro's entry).
 
-### `maestro init` and `maestro doctor` commands
-Convention setup + environment diagnostics. Manual setup works in v0.2 via
-README instructions.
+### ~~`maestro init` and `maestro doctor` commands~~ — Shipped
+`maestro init` runs all four install steps (defaults, vscode, commands, hook)
+idempotently with per-step status. `maestro doctor` runs non-destructive
+environment checks (Node version, claude binary, VSCode wiring, config files,
+telemetry dir). See `src/cli/init.ts` and `src/cli/doctor.ts`.
 
 ### `--fast-mode` cost profile (S13) — blocked on Anthropic
 Spiked 2026-05-25: `--fast-mode` CLI flag not yet available. JSON output

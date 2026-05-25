@@ -13,7 +13,7 @@
 // as metadata.resolvedToolName into the Request so the tool-override
 // classifier can return conf=1.0 decisions for known tools.
 
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, execFileSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
@@ -23,6 +23,19 @@ import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
 import { parseOutput } from "./output.js";
 import { stripLineNumbers } from "./line-stripper.js";
+
+// I1: skip line-number stripping when RTK (rtk-ai/rtk) is already on PATH — it
+// performs the same compression at a lower level, so duplicating the work wastes
+// CPU and can corrupt multi-digit prefixes if the regex fires twice.
+function rtkOnPath(): boolean {
+  try {
+    execFileSync("rtk", ["--version"], { stdio: "ignore", timeout: 500 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const RTK_PRESENT = rtkOnPath();
 import {
   buildSetModelRequest,
   extractPromptText,
@@ -52,6 +65,8 @@ export type SdkProxyOptions = {
   stderr: Writable;
   /** Injectable spawn for tests. Defaults to node:child_process.spawn. */
   spawn?: SdkProxySpawn;
+  /** Override RTK detection for tests. Defaults to module-level RTK_PRESENT. */
+  rtkPresent?: boolean;
 };
 
 const defaultSpawn: SdkProxySpawn = (binary, args) =>
@@ -66,6 +81,7 @@ const TOOL_USE_MAP_MAX = 50;
 
 export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
   const spawn = opts.spawn ?? defaultSpawn;
+  const skipI1 = opts.rtkPresent ?? RTK_PRESENT;
   const child = spawn(opts.realClaude, opts.claudeArgs);
 
   let injectedSeq = 0;
@@ -171,8 +187,9 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
 
-      // I1: remove line-number prefixes to reduce token inflation from location metadata
-      const strippedFrame = transformToolResults(frame, stripLineNumbers);
+      // I1: remove line-number prefixes to reduce token inflation from location metadata.
+      // Skip when RTK is on PATH — it already does this compression.
+      const strippedFrame = skipI1 ? frame : transformToolResults(frame, stripLineNumbers);
       const strippedLine = JSON.stringify(strippedFrame);
       child.stdin?.write(strippedLine + "\n");
 

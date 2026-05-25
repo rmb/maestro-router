@@ -185,6 +185,24 @@ To opt into contributing your own override patterns, set `posthogApiKey` in `~/.
 
 ---
 
+## Pairing with RTK
+
+[RTK](https://github.com/rtk-ai/rtk) is a complementary CLI proxy that compresses Claude's tool outputs before they reach the context window — stripping line-number prefixes, collapsing repetitive diffs, and trimming redundant whitespace (60–90% token reduction on typical Read/Grep output).
+
+Maestro and RTK target different surfaces:
+
+| | Maestro | RTK |
+|--|--|--|
+| What it reduces | **output tokens** — routes each prompt to the cheapest model | **input tokens** — filters noise out of tool results |
+| Where it runs | wraps `claude --print` at the routing layer | wraps the Claude CLI at the I/O layer |
+| Config | `~/.maestro/config.json` | RTK config file |
+
+When RTK is detected on `PATH`, Maestro automatically skips its own line-number stripping (I1) to avoid double-processing. No configuration required — the two tools compose transparently.
+
+To use both, install RTK first (see its README), then point `claudeProcessWrapper` at Maestro. RTK runs as Claude's I/O layer; Maestro runs above it as the routing layer.
+
+---
+
 ## Troubleshooting
 
 **VSCode panel not routing.**

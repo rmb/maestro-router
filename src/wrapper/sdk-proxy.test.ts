@@ -679,6 +679,7 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
       stdout: out.stream,
       stderr: stderr.stream,
       spawn: fc.spawn,
+      rtkPresent: false,
     });
 
     fc.close(0);

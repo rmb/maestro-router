@@ -154,10 +154,11 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
             const p = pendingQueue.shift();
             if (p !== undefined) {
               const parsed = parseOutput(JSON.stringify(frame), opts.userConfig);
+              const cacheHit = (parsed?.cost?.cacheReadInputTokens ?? 0) > 0;
               opts.telemetry.log({
                 type: "decision",
                 ts: p.ts,
-                decision: p.decision,
+                decision: { ...p.decision, cacheHit },
                 ...(parsed ? { cost: parsed.cost } : {}),
                 ...(p.prompt ? { prompt: p.prompt } : {}),
               }).catch(() => { /* telemetry must never block routing */ });

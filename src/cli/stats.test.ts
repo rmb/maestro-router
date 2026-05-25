@@ -9,6 +9,7 @@ function makeDecision(
     classifier?: string;
     cls?: TelemetryEvent extends { type: "decision"; decision: { class: infer C } } ? C : never;
     outputTokens?: number;
+    durationApiMs?: number;
   } = {},
 ): TelemetryEvent {
   return {
@@ -31,7 +32,7 @@ function makeDecision(
             cacheCreationInputTokens: 0,
             cacheReadInputTokens: 0,
             durationMs: 500,
-            durationApiMs: 400,
+            durationApiMs: opts.durationApiMs ?? 400,
             stopReason: "end_turn",
             modelUsed: "claude-sonnet-4-6",
             serviceTier: "default",
@@ -147,5 +148,68 @@ describe("outputTokensP90ByClass", () => {
     expect(summary.outputTokensP90ByClass["trivial"]).toBe(60);
     expect(summary.outputTokensP90ByClass["standard"]).toBe(400);
     expect(summary.outputTokensP90ByClass["simple"]).toBe(0);
+  });
+});
+
+describe("durationApiMsP90ByClass", () => {
+  test("p90 of 10 values is at index 9", () => {
+    // 10 standard decisions with durationApiMs: 100, 200, ..., 1000
+    // sorted ascending: [100, 200, ..., 1000]
+    // idx = floor(10 * 0.9) = 9, arr[9] = 1000
+    const events: TelemetryEvent[] = Array.from({ length: 10 }, (_, i) =>
+      makeDecision({
+        cls: "standard",
+        outputTokens: 100,
+        durationApiMs: (i + 1) * 100,
+      }),
+    );
+    const summary = computeSummary(events, 7);
+    expect(summary.durationApiMsP90ByClass["standard"]).toBe(1000);
+  });
+
+  test("returns 0 for class with no duration data", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision({ cls: "standard" }), // no cost field → no durationApiMs
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.durationApiMsP90ByClass["standard"]).toBe(0);
+  });
+
+  test("returns 0 for class with no events at all", () => {
+    const summary = computeSummary([], 7);
+    expect(summary.durationApiMsP90ByClass["trivial"]).toBe(0);
+  });
+
+  test("p90 of single value returns that value", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision({ cls: "hard", outputTokens: 100, durationApiMs: 250 }),
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.durationApiMsP90ByClass["hard"]).toBe(250);
+  });
+
+  test("tracks duration per class independently", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision({ cls: "trivial", outputTokens: 50, durationApiMs: 150 }),
+      makeDecision({ cls: "trivial", outputTokens: 50, durationApiMs: 200 }),
+      makeDecision({ cls: "standard", outputTokens: 100, durationApiMs: 500 }),
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.durationApiMsP90ByClass["trivial"]).toBe(200);
+    expect(summary.durationApiMsP90ByClass["standard"]).toBe(500);
+    expect(summary.durationApiMsP90ByClass["simple"]).toBe(0);
+  });
+
+  test("p90 of 100 values is at index 90", () => {
+    const events: TelemetryEvent[] = Array.from({ length: 100 }, (_, i) =>
+      makeDecision({
+        cls: "hard",
+        outputTokens: 100,
+        durationApiMs: i + 1,
+      }),
+    );
+    const summary = computeSummary(events, 7);
+    // sorted: [1, 2, ..., 100], idx = floor(100 * 0.9) = 90, arr[90] = 91
+    expect(summary.durationApiMsP90ByClass["hard"]).toBe(91);
   });
 });

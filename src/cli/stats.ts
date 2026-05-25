@@ -53,6 +53,8 @@ type Summary = {
   fallbackRate: number;
   /** p90 output token count per class — quality proxy. 0 = no data. */
   outputTokensP90ByClass: Record<Class, number>;
+  /** p90 API duration in ms per class — tail latency proxy. 0 = no data. */
+  durationApiMsP90ByClass: Record<Class, number>;
 };
 
 export function registerStatsCommand(program: Command): void {
@@ -94,6 +96,9 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   const outputTokensByClass = Object.fromEntries(
     ALL_CLASSES.map((c) => [c, [] as number[]])
   ) as Record<Class, number[]>;
+  const durationApiMsByClass = Object.fromEntries(
+    ALL_CLASSES.map((c) => [c, [] as number[]])
+  ) as Record<Class, number[]>;
   let totalCost = 0;
   let totalRequests = 0;
   let cacheReadTokens = 0;
@@ -128,6 +133,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         totalOutputTokens += e.cost.outputTokens;
         totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
         totalCacheReadTokens += e.cost.cacheReadInputTokens;
+        durationApiMsByClass[cls].push(e.cost.durationApiMs);
       }
     } else if (e.type === "override") {
       const key = `${e.from}>${e.to}`;
@@ -172,6 +178,9 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
     outputTokensP90ByClass: Object.fromEntries(
       ALL_CLASSES.map((c) => [c, p90(outputTokensByClass[c])])
+    ) as Record<Class, number>,
+    durationApiMsP90ByClass: Object.fromEntries(
+      ALL_CLASSES.map((c) => [c, p90(durationApiMsByClass[c])])
     ) as Record<Class, number>,
   };
 }

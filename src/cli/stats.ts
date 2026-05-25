@@ -51,10 +51,10 @@ type Summary = {
   topOverrides: { from: Class; to: Class; count: number }[];
   /** Fraction of decisions where no classifier matched (classifier === "default"). */
   fallbackRate: number;
-  /** p90 output token count per class — quality proxy. 0 = no data. */
-  outputTokensP90ByClass: Record<Class, number>;
-  /** p90 API duration in ms per class — tail latency proxy. 0 = no data. */
-  durationApiMsP90ByClass: Record<Class, number>;
+  /** p90 output token count per class — quality proxy. undefined = no data. */
+  outputTokensP90ByClass: Partial<Record<Class, number>>;
+  /** p90 API duration in ms per class — tail latency proxy. undefined = no data. */
+  durationApiMsP90ByClass: Partial<Record<Class, number>>;
 };
 
 export function registerStatsCommand(program: Command): void {
@@ -307,13 +307,13 @@ function renderHuman(s: Summary): string {
   );
 
   // Output token p90
-  const hasOutputData = ALL_CLASSES.some((c) => s.outputTokensP90ByClass[c] > 0);
+  const hasOutputData = ALL_CLASSES.some((c) => (s.outputTokensP90ByClass[c] ?? 0) > 0);
   if (hasOutputData) {
     lines.push("");
     lines.push(header("output tokens p90"));
     for (const cls of ALL_CLASSES) {
       const val = s.outputTokensP90ByClass[cls];
-      if (val === 0) continue;
+      if (val === 0 || val === undefined) continue;
       lines.push(`  ${cls.padEnd(12)}  ${String(val).padStart(6)} tok`);
     }
   }

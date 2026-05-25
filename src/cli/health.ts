@@ -21,7 +21,7 @@ type HealthSnapshot = {
   fallbackRate: number;
   cacheCreationRatio: number; // cacheCreationCostUsd / totalCostUsd
   avgCostByClass: Record<Class, number>;
-  outputTokensP90ByClass: Record<Class, number>;
+  outputTokensP90ByClass: Partial<Record<Class, number>>;
 };
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -200,8 +200,8 @@ function computeRegressions(current: HealthSnapshot, baseline: HealthSnapshot): 
   }
 
   // Output tokens p90 for standard: higher is worse
-  const stdB = baseline.outputTokensP90ByClass["standard"];
-  const stdC = current.outputTokensP90ByClass["standard"];
+  const stdB = baseline.outputTokensP90ByClass["standard"] ?? 0;
+  const stdC = current.outputTokensP90ByClass["standard"] ?? 0;
   if (stdB > 100 && stdC > stdB * (1 + THRESHOLD)) {
     const changePct = (((stdC - stdB) / stdB) * 100).toFixed(1);
     regressions.push({

@@ -783,6 +783,95 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.8,
     source: "builtin",
   },
+  // Hard — sweeping scope amplifier. Any mechanical-sounding verb (rename,
+  // format, lint, refactor, add, update, move, migrate, document, write tests)
+  // becomes hard when paired with a "touch everywhere" qualifier. Confidence
+  // is set above the 0.7 broad "rename|format|lint" trivial rule so it wins
+  // the highest-confidence pick — prevents "rename all methods in the entire
+  // codebase" from being routed trivial.
+  {
+    pattern:
+      "\\b(rename|format|lint|refactor|update|add|move|migrate|document|write\\s+tests?|cover)\\b.{0,80}\\b(entire\\s+(codebase|repo|repository|monorepo|project|api|service|app|application|component\\s+library|public\\s+api)|across\\s+(the\\s+)?(entire|whole|all|monorepo|codebase)|everywhere|monorepo|across\\s+\\d+\\s+(services?|files?|repos?|projects?)|across\\s+all\\b)",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — multi-action chained imperatives ("add X and also update Y and then
+  // refactor Z and write tests"). The "and (also|then) … and …" pattern signals
+  // multiple discrete deliverables in one prompt — needs planning/coordination.
+  {
+    pattern:
+      "\\b(add|update|fix|implement|refactor|write|change|move|rename)\\b.{0,80}\\band\\s+(also|then)\\b.{0,80}\\band\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — short ambiguous imperative without explicit object ("just fix it",
+  // "make it work", "clean up everything", "update it to match"). Pronoun
+  // referents without prior context force the model to investigate.
+  {
+    pattern:
+      "^\\s*(just\\s+fix\\s+it|make\\s+it\\s+work|clean\\s+up\\s+everything|update\\s+it\\s+to\\s+(match|fit|work)|fix\\s+(everything|all\\s+of\\s+it)|sort\\s+it\\s+(out|all\\s+out))\\b\\.?\\s*$",
+    flags: "i",
+    class: "hard",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Hard — diagnostic question with vague referent ("what's wrong with this?",
+  // "what does this do?" without a snippet, "the X is not firing"). The model
+  // must investigate to even know what "this" or "it" refers to.
+  {
+    pattern:
+      "^\\s*(what[''’]s\\s+wrong(\\s+with\\s+(this|it|that))?\\??|why\\s+(isn[''’]t|is)\\s+(this|it|that)\\s+working\\??)\\s*$",
+    flags: "i",
+    class: "hard",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Hard — production symptom without a reproduction (intermittent, sometimes,
+  // sporadic, randomly). Forces investigation across logs, timing, infra.
+  {
+    pattern:
+      "\\b(sometimes|occasionally|randomly|every\\s+so\\s+often)\\s+(throws?|breaks?|fails?|crashes?|errors?|times?\\s+out|hangs?)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — "explain the (entire|whole) X" / "document the (entire|whole) X" —
+  // sweeping understand-and-summarise tasks across a codebase.
+  {
+    pattern:
+      "\\b(explain|document|summarize|describe|walk\\s+me\\s+through)\\s+(the\\s+)?(entire|whole|full|complete)\\s+(architecture|codebase|system|api|service|app|stack|design|public\\s+api)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — vague-object failure report ("the webhook is not firing",
+  // "the X is broken/not working/not loading"). Short statement, no repro.
+  {
+    pattern:
+      "^\\s*the\\s+\\S+(\\s+\\S+){0,2}\\s+(is|are|isn[''’]t|aren[''’]t)\\s+(not\\s+)?(firing|working|loading|responding|happening|sending|saving|persisting|updating|rendering|displaying|showing|going\\s+through)\\.?\\s*$",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Simple — "design a simple/small/basic X component/form/button/card" — these
+  // are bounded single-file UI primitives, not architecture work. Confidence
+  // above 0.75 so it beats the generic "design (a|the|our)" reasoning rule
+  // that would otherwise pull these into reasoning.
+  {
+    pattern:
+      "\\bdesign\\s+(a\\s+|the\\s+)?(simple|small|basic|minimal|tiny|trivial)\\s+\\S+\\s+(component|button|form|card|modal|popover|tooltip|input|toggle|switch|badge|chip|tag|avatar|icon)\\b",
+    flags: "i",
+    class: "simple",
+    confidence: 0.85,
+    source: "builtin",
+  },
 
   // Hard — failing tests or CI (requires investigation, not just a re-run)
   {

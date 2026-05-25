@@ -649,4 +649,58 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     // The decision event should be for the user_text message (has "hello" prompt).
     expect((decisionEvents[0] as { prompt?: string }).prompt).toBe("hello");
   });
+
+  test("I1: strips line-number prefixes from tool result content", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    // Simulate a Read tool result with line numbers (e.g., "1\tline 1\n2\tline 2").
+    const toolResultWithLineNumbers =
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-123","content":"1\\timport foo from \\\"bar\\\";\\n2\\texport const x = 1;\\n3\\tconst y = { a: 1 };"}]}}';
+
+    const routeCalls: Array<import("../core/types.js").Request> = [];
+    const pipeline: Pipeline = {
+      route: async (req) => {
+        routeCalls.push(req);
+        return decisionFor("trivial");
+      },
+    };
+
+    const proxyP = runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline,
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin: Readable.from([toolResultWithLineNumbers + "\n"]),
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    fc.close(0);
+    await proxyP;
+
+    // The proxy should have injected set_model and forwarded the tool_result.
+    // stdinWrites[0] = set_model, stdinWrites[1] = stripped tool_result
+    expect(fc.stdinWrites).toHaveLength(2);
+
+    // Parse the forwarded tool_result frame and verify line numbers are stripped.
+    const strippedFrame = JSON.parse(fc.stdinWrites[1]!.trim()) as {
+      type: string;
+      message: { content: Array<{ type: string; content: string }> };
+    };
+    expect(strippedFrame.type).toBe("user");
+
+    const toolResultBlock = strippedFrame.message.content.find(
+      (b: { type: string }) => b.type === "tool_result",
+    ) as { type: string; content: string } | undefined;
+    expect(toolResultBlock).toBeDefined();
+    expect(toolResultBlock!.content).toBe(
+      "import foo from \"bar\";\nexport const x = 1;\nconst y = { a: 1 };",
+    );
+  });
 });

@@ -22,6 +22,7 @@ import type { TelemetryWriter } from "../core/telemetry.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
 import { parseOutput } from "./output.js";
+import { stripLineNumbers } from "./line-stripper.js";
 import {
   buildSetModelRequest,
   extractPromptText,
@@ -31,6 +32,7 @@ import {
   isUserTextMessage,
   matchesInjectedRequestId,
   parseFrame,
+  transformToolResults,
 } from "./stream-json-frames.js";
 
 export type SdkProxySpawn = (
@@ -168,7 +170,11 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       injectedSeq += 1;
       const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
-      child.stdin?.write(line + "\n");
+
+      // I1: remove line-number prefixes to reduce token inflation from location metadata
+      const strippedFrame = transformToolResults(frame, stripLineNumbers);
+      const strippedLine = JSON.stringify(strippedFrame);
+      child.stdin?.write(strippedLine + "\n");
 
       // Tool result routing: classifier runs, set_model injected, but decision
       // events only logged for user-text turns (cost tracking per-tool, not per-use).

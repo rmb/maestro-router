@@ -362,7 +362,6 @@ describe("telemetry forget", () => {
 
     process.stdout.write = origWrite;
 
-    // Verify the file was still deleted even in quiet mode
     try {
       await readFile(telemetryPath, "utf8");
       expect.fail("Expected telemetry file to be deleted");
@@ -431,7 +430,6 @@ describe("telemetry forget", () => {
 
     process.stdout.write = origWrite;
 
-    // Verify file was deleted
     try {
       await readFile(telemetryPath, "utf8");
       expect.fail("Expected telemetry file to be deleted");
@@ -440,7 +438,6 @@ describe("telemetry forget", () => {
       expect(e.code).toBe("ENOENT");
     }
 
-    // Verify config counters were reset
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
     const telemetry = config.telemetry as Record<string, unknown>;
     expect(telemetry.eventsLogged).toBe(0);

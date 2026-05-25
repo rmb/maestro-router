@@ -58,6 +58,7 @@ export function registerTelemetryCommand(program: Command): void {
       const all = await t.readAll();
       const n = Math.max(0, parseInt(cmdOpts.limit, 10));
       const recent = n === 0 ? all : all.slice(-n);
+      if (parent.quiet) return;
       if (parent.json) {
         process.stdout.write(JSON.stringify(recent, null, 2) + "\n");
       } else {
@@ -105,7 +106,7 @@ export function registerTelemetryCommand(program: Command): void {
 
   telemetry
     .command("off")
-    .description("Disable remote telemetry (PostHog)")
+    .description("Disable remote event reporting")
     .action(async () => {
       const parent = program.opts<ParentOptions>();
       const cli = await loadCliConfig(parent.config);

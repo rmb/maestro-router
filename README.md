@@ -87,6 +87,13 @@ maestro stats --since 30                  # last 30 days
 maestro health                            # compare current metrics against saved baseline
 maestro health --set-baseline             # save current state as the new health baseline
 
+# Oracle evaluation
+maestro oracle                            # full offline audit — tool, telemetry, tokens
+maestro oracle --dimension tool           # single-dimension run
+maestro oracle --dimension tokens --since 30
+maestro oracle --dimension quality --confirm-cost   # live quality probes (costs money)
+maestro oracle --json                     # machine-readable output for CI
+
 # Tuning
 maestro tune                              # show suggested heuristic improvements
 maestro tune --apply                      # write learned patterns to heuristics.json

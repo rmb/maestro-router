@@ -10,6 +10,7 @@ import { loadWindow, pairDecisionsWithOutcomes } from "../eval/oracle/reader.js"
 import { runToolCorrectness } from "../eval/oracle/tool-correctness.js";
 import { runTelemetryCorrectness, type StatsSummary, type DimensionResult } from "../eval/oracle/telemetry-correctness.js";
 import { runTokensSaved, DEFAULT_PRICING } from "../eval/oracle/tokens-saved.js";
+import { runOutputQuality } from "../eval/oracle/output-quality.js";
 import { buildReport, printReport } from "../eval/oracle/report.js";
 import type { SessionRecord } from "../wrapper/session.js";
 
@@ -112,14 +113,9 @@ export function registerOracleCommand(program: Command): void {
         } else if (dim === "tokens") {
           dimensionResults.push(runTokensSaved(events, baselineDate, DEFAULT_PRICING));
         } else if (dim === "quality") {
-          // Task 7 will implement this properly
-          process.stderr.write("maestro oracle: quality dimension not yet implemented — result is always pass\n");
-          const qualityResult: DimensionResult = {
-            dimension: "quality",
-            pass: true,
-            checks: [{ name: "not-implemented", pass: true, value: "skipped" }],
-          };
-          dimensionResults.push(qualityResult);
+          dimensionResults.push(await runOutputQuality(events, {
+            sampleSize: parseInt(cmdOpts.qualitySample, 10) || 20,
+          }));
         }
       }
 

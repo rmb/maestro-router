@@ -113,8 +113,8 @@ describe("oracle dimension validation", () => {
   });
 });
 
-describe("oracle quality stub warning", () => {
-  test("prints not-yet-implemented warning when quality runs (with --confirm-cost)", async () => {
+describe("oracle quality dimension", () => {
+  test("runs without error when quality requested with --confirm-cost", async () => {
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const program = makeProgram();
@@ -128,8 +128,9 @@ describe("oracle quality stub warning", () => {
       // Downstream errors (no sessions file, no telemetry) are fine
     }
 
+    // Should NOT print the old stub warning — quality is now implemented
     const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
-    expect(output).toMatch(/quality dimension not yet implemented/);
+    expect(output).not.toMatch(/not yet implemented/);
     stderrSpy.mockRestore();
     stdoutSpy.mockRestore();
   });

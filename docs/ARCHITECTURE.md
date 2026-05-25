@@ -156,8 +156,17 @@ src/
     tune.ts         Telemetry analysis, community fetch, auto-tune
     stats.ts        Cost vs Opus-everywhere baseline; session boot dominance warning
     health.ts       Baseline snapshot comparison; regression detection >10%
+    oracle.ts       maestro oracle — wires all four oracle dimensions; --confirm-cost for quality
     bench.ts        Eval + tournament
     replay.ts       JSONL replay against current pipeline
+
+  eval/oracle/      Oracle evaluation layer — pure computation, no subprocess spawning.
+    reader.ts               loadWindow, groupBySession, pairDecisionsWithOutcomes
+    telemetry-correctness.ts 4 checks: cost reconciliation, fallback rate, cache hit rate, outcome linkage
+    tool-correctness.ts     5 checks: fingerprint stability, flag coverage, E1 escalation, K1 invalidation, M1 two-signal
+    tokens-saved.ts         savings vs Opus-everywhere baseline; E1/Track Z/X isolation by date
+    output-quality.ts       truncation rate check; bench-accuracy + E1 tournament stubs (--confirm-cost)
+    report.ts               OracleReport type; buildReport; printReport (human + JSON)
 ```
 
 ## Configuration layers
@@ -185,6 +194,27 @@ Fields that affect telemetry paths, billing caps, and hot-path latency are globa
 **K1 — Classifier result cache.** An in-process LRU cache (`src/core/classifier-cache.ts`) stores `sha256(prompt) → Classification` with a 24-hour TTL and 1000-entry limit. Cache hits skip the full pipeline on repeated or near-identical prompts. When a turn completes with `stopReason: "max_tokens"` on a `standard` class, the cache entry for that prompt is invalidated so the next identical prompt re-classifies upward.
 
 **M1 — Two-signal continuation.** Prior implementation routed any short prompt matching `/^(continue|keep going|…)/` to simple class. This conflated genuine brevity (a user continuing work) with prompt padding. M1 requires two simultaneous signals: the linguistic pattern match AND `priorStopReason === "max_tokens"`. Single-signal matches now proceed to the normal pipeline. When both signals fire, `wrapper/continuation.ts` injects `CONTINUATION_HINT` ("Resume from where you stopped. No recap. Continue directly.") as the `appendSystemPrompt`, overriding the standard brevity hint.
+
+## Oracle evaluation
+
+`maestro oracle` is an offline correctness and savings auditor. It reads from `~/.maestro/decisions.jsonl` and `~/.maestro/sessions.json` — no live Claude spawns unless `--dimension quality --confirm-cost` is passed.
+
+Four dimensions, each returning a `DimensionResult` with pass/fail per check:
+
+**tool** — verifies routing decisions produced correct invocations: fingerprint stability (Track Z firing), flag coverage (spec.model matches cost.modelUsed), E1.escalate correctness, K1 cache invalidation after max_tokens, M1 two-signal guard.
+
+**telemetry** — verifies the logs are accurate: cost reconciliation vs stats.ts (±1%), fallback rate accuracy, cache hit rate accuracy (cross-checked against cacheReadInputTokens), outcome linkage (≥90% of outcome events must pair with a decision within ±60s).
+
+**tokens** — verifies savings targets are met: overall savings ≥60% vs Opus-everywhere hypothetical, E1 standard avg cost reduction ≥50%, Track Z session boot frequency reduction ≥30%, output p90 ≤8500 after X cap.
+
+**quality** (--confirm-cost required) — truncation rate check (standard turns near cap <5%); bench-accuracy and E1-tournament probes are stubs until the full quality-probe workflow is implemented.
+
+```bash
+maestro oracle                          # tool + telemetry + tokens (offline, free)
+maestro oracle --dimension tokens --since 30
+maestro oracle --json                   # machine-readable; exit 1 if any gate fails
+maestro oracle --dimension quality --confirm-cost   # live probes (~$2)
+```
 
 ## Health monitoring
 

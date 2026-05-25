@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { createTelemetry } from "../core/telemetry.js";
 import { computeSummary } from "./stats.js";
 import { DEFAULT_TELEMETRY_PATH, loadCliConfig } from "./utils.js";
 import { loadWindow, pairDecisionsWithOutcomes } from "../eval/oracle/reader.js";
@@ -82,16 +81,8 @@ export function registerOracleCommand(program: Command): void {
       }
 
       // Load events
-      const t = createTelemetry({ path: telemetryPath });
-      const allEvents = await t.readAll();
-      const events = allEvents.filter((e) => {
-        const ts = new Date(e.ts).getTime();
-        return ts >= sinceMs;
-      });
-
-      // Also use loadWindow for the reader-based loading (pairs need raw events)
-      const windowEvents = await loadWindow(telemetryPath, sinceMs);
-      const pairs = pairDecisionsWithOutcomes(windowEvents);
+      const events = await loadWindow(telemetryPath, sinceMs);
+      const pairs = pairDecisionsWithOutcomes(events);
 
       // Load sessions
       let sessions: SessionRecord[] = [];
@@ -122,6 +113,7 @@ export function registerOracleCommand(program: Command): void {
           dimensionResults.push(runTokensSaved(events, baselineDate, DEFAULT_PRICING));
         } else if (dim === "quality") {
           // Task 7 will implement this properly
+          process.stderr.write("maestro oracle: quality dimension not yet implemented — result is always pass\n");
           const qualityResult: DimensionResult = {
             dimension: "quality",
             pass: true,

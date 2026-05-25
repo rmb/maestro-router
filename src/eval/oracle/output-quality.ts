@@ -7,7 +7,7 @@ import { markovClassifier } from "../../classifiers/markov.js";
 import { heuristicClassifier } from "../../classifiers/heuristic.js";
 import { createPipeline } from "../../core/pipeline.js";
 import { loadProfile } from "../../core/profile.js";
-import type { TelemetryEvent } from "../../core/types.js";
+import type { TelemetryEvent, UserConfig } from "../../core/types.js";
 import {
   runEval,
   readBaseline,
@@ -100,7 +100,8 @@ export function checkTruncationRate(events: TelemetryEvent[]): CheckResult {
  */
 export async function checkBenchAccuracy(
   evalSetPath: string,
-  _spawnFn: SpawnFn,
+  _spawnFn: SpawnFn /* reserved for future use — bench runs in-process */,
+  userConfig?: UserConfig,
 ): Promise<CheckResult> {
   if (!evalSetPath) {
     return {
@@ -119,7 +120,7 @@ export async function checkBenchAccuracy(
       .filter((l) => l.trim().length > 0)
       .map((l) => JSON.parse(l) as LabeledEntry);
 
-    const { profile } = loadProfile({ userConfig: {} });
+    const { profile } = loadProfile({ userConfig: userConfig ?? {} });
     const pipeline = createPipeline({
       classifiers: [overrideClassifier, turnTypeClassifier, markovClassifier, heuristicClassifier],
       profile,
@@ -215,41 +216,33 @@ export async function checkE1QualityProbe(
   }
 
   let wins = 0;
-  let ran = 0;
 
   for (const event of eligible) {
     const prompt = event.prompt ?? "";
 
-    const bResult = await spawnFn({
-      args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.02", "--print", "--output-format", "json"],
-      prompt,
-    });
-    if (bResult.exitCode !== 0) continue;
+    try {
+      const bResult = await spawnFn({
+        args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.02", "--print", "--output-format", "json"],
+        prompt,
+      });
+      if (bResult.exitCode !== 0) continue;
 
-    ran++;
-    const judgePrompt =
-      `Original request: ${prompt}\n\nHaiku answer:\n${bResult.stdout}\n\n` +
-      `Is this answer adequate (correct and helpful)? Reply with exactly: PASS or FAIL`;
+      const judgePrompt =
+        `Original request: ${prompt}\n\nHaiku answer:\n${bResult.stdout}\n\n` +
+        `Is this answer adequate (correct and helpful)? Reply with exactly: PASS or FAIL`;
 
-    const judgeResult = await spawnFn({
-      args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.01", "--print"],
-      prompt: judgePrompt,
-    });
+      const judgeResult = await spawnFn({
+        args: ["--model", "haiku", "--effort", "low", "--max-budget-usd", "0.01", "--print"],
+        prompt: judgePrompt,
+      });
 
-    if (judgeResult.stdout.includes("PASS")) wins++;
+      if (judgeResult.stdout.toUpperCase().includes("PASS")) wins++;
+    } catch {
+      // spawn failure counts as loss — denominator stays eligible.length
+    }
   }
 
-  if (ran === 0) {
-    return {
-      name: "e1-quality-probe",
-      pass: false,
-      value: "0% B-win",
-      gate: "≥60% B-win",
-      detail: `All ${eligible.length} sampled turns failed to spawn. Check that the claude binary is reachable.`,
-    };
-  }
-
-  const winRate = wins / ran;
+  const winRate = wins / eligible.length;
   const pass = winRate >= 0.6;
   const base: CheckResult = {
     name: "e1-quality-probe",
@@ -260,7 +253,7 @@ export async function checkE1QualityProbe(
   if (!pass) {
     return {
       ...base,
-      detail: `Only ${wins}/${ran} sampled standard turns showed adequate haiku output.`,
+      detail: `Only ${wins}/${eligible.length} sampled standard turns showed adequate haiku output.`,
     };
   }
   return base;
@@ -280,6 +273,7 @@ export async function runOutputQuality(
     evalSetPath?: string;
     sampleSize?: number;
     spawnFn?: SpawnFn;
+    userConfig?: UserConfig;
   },
 ): Promise<DimensionResult> {
   const noopSpawn: SpawnFn = async () => ({ stdout: "", exitCode: null });
@@ -289,6 +283,7 @@ export async function runOutputQuality(
   const benchAccuracy = await checkBenchAccuracy(
     params.evalSetPath ?? "",
     spawnFn,
+    params.userConfig,
   );
   const e1Quality = await checkE1QualityProbe(
     events,

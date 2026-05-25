@@ -121,6 +121,7 @@ export function registerOracleCommand(program: Command): void {
             evalSetPath: resolveBundledEval(undefined),
             sampleSize: parseInt(cmdOpts.qualitySample, 10) || 20,
             spawnFn,
+            userConfig: cli.userConfig,
           }));
         }
       }

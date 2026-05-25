@@ -1,6 +1,6 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { TelemetryEvent } from "../../core/types.js";
 import {
   checkBenchAccuracy,
@@ -218,6 +218,88 @@ describe("checkBenchAccuracy", () => {
     expect(result.name).toBe("bench-accuracy");
     expect(result.detail).toMatch(/Bench run failed/);
   });
+
+});
+
+// ---------------------------------------------------------------------------
+// checkBenchAccuracy — baseline delta pass/fail
+// ---------------------------------------------------------------------------
+
+describe("checkBenchAccuracy baseline delta", () => {
+  test("passes when accuracy regression is within 2pp gate (1pp delta)", async () => {
+    // Write a minimal JSONL eval file, then spy on readBaseline + runEval
+    // so the test is hermetic (no real file I/O for the baseline).
+    const benchModule = await import("../../cli/bench.js");
+    const readBaselineSpy = vi
+      .spyOn(benchModule, "readBaseline")
+      .mockResolvedValueOnce({ accuracy: 0.9 });
+    const runEvalSpy = vi
+      .spyOn(benchModule, "runEval")
+      .mockResolvedValueOnce({
+        accuracy: 0.89, // 1pp regression → passes 2pp gate
+        total: 10,
+        correct: 9,
+        perClass: {},
+        confusion: {},
+        latencyMs: { p50: 0, p95: 0 },
+      });
+    // Use a non-empty path so the JSONL read path is reached; mock readFile
+    // via the error path — but readFile is not mocked here so use a real file.
+    // Instead lean on spy: even with a bad path the catch returns pass:false.
+    // To hit the baseline branch we need readFile to succeed.
+    // Use os.tmpdir() with a small valid JSONL entry.
+    const { writeFile, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const tmpPath = join(tmpdir(), `maestro-test-eval-${Date.now()}.jsonl`);
+    const entry = JSON.stringify({ prompt: "hello", label: "standard" });
+    await writeFile(tmpPath, entry + "\n", "utf8");
+
+    try {
+      const result = await checkBenchAccuracy(tmpPath, noopSpawn);
+      expect(result.pass).toBe(true);
+      expect(result.value).toMatch(/pp Δ/);
+      expect(result.name).toBe("bench-accuracy");
+    } finally {
+      await unlink(tmpPath).catch(() => undefined);
+      readBaselineSpy.mockRestore();
+      runEvalSpy.mockRestore();
+    }
+  });
+
+  test("fails when accuracy regression exceeds 2pp gate (3pp delta)", async () => {
+    const benchModule = await import("../../cli/bench.js");
+    const readBaselineSpy = vi
+      .spyOn(benchModule, "readBaseline")
+      .mockResolvedValueOnce({ accuracy: 0.9 });
+    const runEvalSpy = vi
+      .spyOn(benchModule, "runEval")
+      .mockResolvedValueOnce({
+        accuracy: 0.87, // 3pp regression → fails 2pp gate
+        total: 10,
+        correct: 8,
+        perClass: {},
+        confusion: {},
+        latencyMs: { p50: 0, p95: 0 },
+      });
+    const { writeFile, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const tmpPath = join(tmpdir(), `maestro-test-eval-${Date.now()}.jsonl`);
+    const entry = JSON.stringify({ prompt: "hello", label: "standard" });
+    await writeFile(tmpPath, entry + "\n", "utf8");
+
+    try {
+      const result = await checkBenchAccuracy(tmpPath, noopSpawn);
+      expect(result.pass).toBe(false);
+      expect(result.detail).toContain("Regression exceeds 2pp gate");
+      expect(result.name).toBe("bench-accuracy");
+    } finally {
+      await unlink(tmpPath).catch(() => undefined);
+      readBaselineSpy.mockRestore();
+      runEvalSpy.mockRestore();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -332,7 +414,7 @@ describe("checkE1QualityProbe", () => {
     expect(result.detail).toContain("0/3");
   });
 
-  test("skips events where spawnFn returns non-zero exit code", async () => {
+  test("non-zero exit code counts as loss — denominator is eligible.length", async () => {
     const spy: SpawnFn = async (opts) => {
       const isJudge = opts.prompt.includes("Is this answer adequate");
       if (!isJudge) return { stdout: "", exitCode: 1 }; // B-run fails
@@ -340,9 +422,37 @@ describe("checkE1QualityProbe", () => {
     };
     const events: TelemetryEvent[] = [makeStandardDecisionWithPrompt("do something")];
     const result = await checkE1QualityProbe(events, 5, spy);
-    // B-run failed → ran=0 → error result
+    // B-run failed → 0 wins out of 1 eligible → 0% B-win → fail
     expect(result.pass).toBe(false);
-    expect(result.detail).toContain("claude binary");
+    expect(result.value).toBe("0% B-win");
+    expect(result.detail).toContain("0/1");
+  });
+
+  test("spawn throws counts as loss — denominator is eligible.length", async () => {
+    const throwingSpawn: SpawnFn = async () => {
+      throw new Error("binary not found");
+    };
+    const events: TelemetryEvent[] = [
+      makeStandardDecisionWithPrompt("event A"),
+      makeStandardDecisionWithPrompt("event B"),
+    ];
+    const result = await checkE1QualityProbe(events, 5, throwingSpawn);
+    // All spawns throw → 0 wins out of 2 eligible → 0% B-win → fail
+    expect(result.pass).toBe(false);
+    expect(result.value).toBe("0% B-win");
+    expect(result.detail).toContain("0/2");
+  });
+
+  test("case-insensitive PASS detection — lowercase 'pass' counts as win", async () => {
+    const spy: SpawnFn = async (opts) => {
+      const isJudge = opts.prompt.includes("Is this answer adequate");
+      if (isJudge) return { stdout: "pass", exitCode: 0 }; // lowercase
+      return { stdout: "answer here", exitCode: 0 };
+    };
+    const events: TelemetryEvent[] = [makeStandardDecisionWithPrompt("explain this")];
+    const result = await checkE1QualityProbe(events, 5, spy);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("100% B-win");
   });
 });
 

@@ -41,6 +41,7 @@ import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
 import { streamClaude } from "../wrapper/stream.js";
 import { runSdkProxy } from "../wrapper/sdk-proxy.js";
+import { createSessionStore } from "../wrapper/session.js";
 import type { LoadedCliConfig } from "./utils.js";
 import { loadCliConfig } from "./utils.js";
 
@@ -292,6 +293,20 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
     const telemetry = createTelemetry(
       cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
     );
+
+    // Track Z / Markov: load prior session state for this cwd so the Markov
+    // classifier has recentClasses context on the first turn of each session.
+    // Use a fixed "sdk-proxy" fingerprint to persist class history across
+    // VSCode panel sessions without interfering with run-cmd sessions.
+    const sessions = createSessionStore();
+    const cwd = process.cwd();
+    const allSessions = await sessions.list();
+    const priorSession = allSessions
+      .filter((s) => s.cwd === cwd)
+      .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt))[0];
+    const recentClasses: string[] = priorSession?.recentClasses ?? [];
+    const sdkSession = await sessions.getByFingerprint(cwd, "sdk-proxy");
+
     return runSdkProxy({
       realClaude,
       claudeArgs,
@@ -302,6 +317,9 @@ export async function wireCompatMain(argv: ReadonlyArray<string>): Promise<numbe
       stdin: process.stdin,
       stdout: process.stdout,
       stderr: process.stderr,
+      sessions,
+      sessionId: sdkSession.sessionId,
+      recentClasses,
     });
   }
 

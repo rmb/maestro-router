@@ -23,6 +23,7 @@ import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
 import { parseOutput } from "./output.js";
 import { stripLineNumbers } from "./line-stripper.js";
+import type { SessionStore } from "./session.js";
 
 // I1: skip line-number stripping when RTK (rtk-ai/rtk) is already on PATH — it
 // performs the same compression at a lower level, so duplicating the work wastes
@@ -67,6 +68,12 @@ export type SdkProxyOptions = {
   spawn?: SdkProxySpawn;
   /** Override RTK detection for tests. Defaults to module-level RTK_PRESENT. */
   rtkPresent?: boolean;
+  /** Session store for Track Z / Markov persistence across VSCode panel turns. */
+  sessions?: SessionStore;
+  /** Session ID to append classes to after each routing decision. */
+  sessionId?: string;
+  /** Initial recentClasses from prior session, for Markov context on turn 1. */
+  recentClasses?: string[];
 };
 
 const defaultSpawn: SdkProxySpawn = (binary, args) =>
@@ -86,6 +93,19 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
 
   let injectedSeq = 0;
   let exitCode = 0;
+
+  // Markov context: evolves as turns complete within this proxy session.
+  // Seeded from prior session state so the first turn already benefits from history.
+  const recentClasses: string[] = [...(opts.recentClasses ?? [])];
+
+  /** Append class to in-memory window and persist to session store. */
+  function recordClass(cls: string): void {
+    recentClasses.push(cls);
+    if (recentClasses.length > 5) recentClasses.shift();
+    if (opts.sessions && opts.sessionId) {
+      opts.sessions.appendClass(opts.sessionId, cls).catch(() => {});
+    }
+  }
 
   /**
    * Maps tool_use_id → tool_name, populated from assistant stdout frames.
@@ -181,7 +201,10 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
           ? { prompt: "", metadata: { resolvedToolName } }
           : { prompt: "" };
 
-      const decision: Decision = await opts.pipeline.route(request);
+      const decision: Decision = await opts.pipeline.route(request, {
+        sessionContext: { recentClasses: [...recentClasses] },
+      });
+      recordClass(decision.class);
 
       injectedSeq += 1;
       const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
@@ -212,7 +235,10 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
         continue;
       }
 
-      const decision: Decision = await opts.pipeline.route({ prompt: promptText });
+      const decision: Decision = await opts.pipeline.route(
+        { prompt: promptText },
+        { sessionContext: { recentClasses: [...recentClasses] } },
+      );
 
       // Inject set_model BEFORE forwarding the user message so claude
       // honors the new model on this turn.
@@ -220,6 +246,9 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
       child.stdin?.write(line + "\n");
+
+      // Persist routing class for Markov context on subsequent turns.
+      recordClass(decision.class);
 
       // Defer telemetry: flush when result frame arrives on stdout.
       pendingQueue.push({

@@ -67,7 +67,8 @@ function hypotheticalCostForEvent(
 ): number {
   const c = e.cost;
   return (
-    (c.inputTokens + c.cacheCreationInputTokens) * pricing.opusInputPerTok +
+    c.inputTokens * pricing.opusInputPerTok +
+    c.cacheCreationInputTokens * pricing.opusCacheWritePerTok +
     c.outputTokens * pricing.opusOutputPerTok +
     c.cacheReadInputTokens * pricing.opusCacheReadPerTok
   );
@@ -114,7 +115,7 @@ export function computeSavings(
   const check: CheckResult = {
     name: "tokens-saved",
     pass,
-    value: savingsPct.toFixed(1) + "%",
+    value: (savingsPct * 100).toFixed(1) + "%",
     gate: "≥60%",
     ...(!pass && {
       detail: `Actual $${actualCost.toFixed(4)} vs hypothetical $${hypotheticalOpusCost.toFixed(4)} — savings dropped below 60%. Check which class migrations changed.`,
@@ -170,7 +171,7 @@ export function isolateE1Savings(
   const check: CheckResult = {
     name: "e1-savings",
     pass,
-    value: savingsPct.toFixed(1) + "%",
+    value: (savingsPct * 100).toFixed(1) + "%",
     gate: "≥50%",
     ...(!pass && {
       detail: `E1 savings below 50%: before avg $${beforeAvg.toFixed(6)}, after avg $${afterAvg.toFixed(6)}. E1 may not be firing or standard class traffic changed.`,
@@ -223,7 +224,7 @@ export function isolateTrackZSavings(
   const check: CheckResult = {
     name: "track-z-savings",
     pass,
-    value: savingsPct.toFixed(1) + "% boots/day reduction",
+    value: (savingsPct * 100).toFixed(1) + "% boots/day reduction",
     gate: "≥30%",
     ...(!pass && {
       detail: `Track Z did not reduce session boot frequency by 30%. Before: ${beforeRate.toFixed(2)}/day, After: ${afterRate.toFixed(2)}/day. Fingerprint sessions may not be active.`,

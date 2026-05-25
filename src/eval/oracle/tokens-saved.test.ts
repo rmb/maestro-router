@@ -15,52 +15,6 @@ import type { TelemetryEvent } from "../../core/types.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeDecisionEvent(
-  ts: string,
-  opts: {
-    cls?: string;
-    effort?: string;
-    cost?: {
-      totalCostUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      cacheCreationInputTokens: number;
-      cacheReadInputTokens: number;
-    };
-  } = {},
-): TelemetryEvent {
-  return {
-    type: "decision",
-    ts,
-    decision: {
-      class: (opts.cls ?? "standard") as TelemetryEvent extends { type: "decision" }
-        ? never
-        : never,
-      classifier: "heuristic",
-      confidence: 0.8,
-      spec: {
-        model: "haiku",
-        effort: (opts.effort ?? "medium") as "low" | "medium" | "high" | "xhigh" | "max",
-        maxBudgetUsd: 0.1,
-      },
-      latencyMs: 10,
-      diagnostics: [],
-    },
-    cost: opts.cost ?? {
-      totalCostUsd: 0.001,
-      inputTokens: 1000,
-      outputTokens: 500,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-      durationMs: 100,
-      durationApiMs: 90,
-      stopReason: "end_turn",
-      modelUsed: "claude-haiku",
-      serviceTier: "standard",
-    },
-  } as TelemetryEvent;
-}
-
 function makeDecision(
   ts: string,
   opts: {

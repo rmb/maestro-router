@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import type { TelemetryEvent } from "../../core/types.js";
 
-const PAIR_WINDOW_MS = 60_000;
+export const PAIR_WINDOW_MS = 60_000;
 
 /**
  * Load TelemetryEvent[] from a decisions.jsonl path, filtered to events
@@ -66,7 +66,7 @@ export function groupBySession(
     ) {
       push(event.sessionId, event);
     } else {
-      // decision and override have no top-level sessionId
+      // decision, override, and any future types without a top-level sessionId
       push("no-session", event);
     }
   }
@@ -79,12 +79,12 @@ type OutcomeEvent = Extract<TelemetryEvent, { type: "outcome" }>;
 
 /**
  * Pair decision events with their matching outcome event.
- * Match criteria: same sessionId (via outcome.sessionId) AND outcome.ts
- * within ±60s of decision.ts. Returns only pairs where both sides exist.
+ * Greedy outcome-anchored match — finds the closest unmatched decision within
+ * ±60 s of each outcome's ts. Decision events carry no sessionId, so sessionId
+ * is not a match criterion. Returns only pairs where both sides exist.
  *
- * Decision events carry no top-level sessionId; they are linked to outcomes
- * through ts proximity. When multiple decisions could match an outcome, the
- * closest-in-time decision wins. Each decision and outcome is used at most once.
+ * When multiple decisions could match an outcome, the closest-in-time decision
+ * wins. Each decision and outcome is used at most once.
  */
 export function pairDecisionsWithOutcomes(
   events: TelemetryEvent[],

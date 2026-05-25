@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -107,7 +107,6 @@ describe("loadWindow", () => {
   });
 
   afterEach(async () => {
-    const { unlink } = await import("node:fs/promises");
     await unlink(path).catch(() => undefined);
   });
 

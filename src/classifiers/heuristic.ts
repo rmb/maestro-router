@@ -784,25 +784,39 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     source: "builtin",
   },
   // Hard — sweeping scope amplifier. Any mechanical-sounding verb (rename,
-  // format, lint, refactor, add, update, move, migrate, document, write tests)
-  // becomes hard when paired with a "touch everywhere" qualifier. Confidence
-  // is set above the 0.7 broad "rename|format|lint" trivial rule so it wins
-  // the highest-confidence pick — prevents "rename all methods in the entire
-  // codebase" from being routed trivial.
+  // format, lint, refactor, add, update, move, migrate, document, write tests,
+  // make, redesign) becomes hard when paired with a "touch everywhere"
+  // qualifier. Confidence is set above the 0.7 broad "rename|format|lint"
+  // trivial rule so it wins the highest-confidence pick — prevents "rename
+  // all methods in the entire codebase" from being routed trivial.
   {
     pattern:
-      "\\b(rename|format|lint|refactor|update|add|move|migrate|document|write\\s+tests?|cover)\\b.{0,80}\\b(entire\\s+(codebase|repo|repository|monorepo|project|api|service|app|application|component\\s+library|public\\s+api)|across\\s+(the\\s+)?(entire|whole|all|monorepo|codebase)|everywhere|monorepo|across\\s+\\d+\\s+(services?|files?|repos?|projects?)|across\\s+all\\b)",
+      "\\b(rename|format|lint|refactor|redesign|update|add|move|migrate|document|write\\s+tests?|cover|make|change)\\b.{0,80}\\b(entire\\s+(codebase|repo|repository|monorepo|project|api|service|app|application|component\\s+library|public\\s+api|color\\s+system)|across\\s+(the\\s+)?(entire|whole|all|monorepo|codebase|component\\s+library|public\\s+api|app|application|service)|everywhere|monorepo|across\\s+\\d+\\s+(services?|files?|repos?|projects?)|across\\s+all\\b|all\\s+API\\s+responses?)",
     flags: "i",
     class: "hard",
     confidence: 0.8,
     source: "builtin",
   },
   // Hard — multi-action chained imperatives ("add X and also update Y and then
-  // refactor Z and write tests"). The "and (also|then) … and …" pattern signals
-  // multiple discrete deliverables in one prompt — needs planning/coordination.
+  // refactor Z", "add X and measure Y", "add X, do Y, and write tests"). Multiple
+  // discrete deliverables in one prompt — needs planning/coordination.
   {
     pattern:
-      "\\b(add|update|fix|implement|refactor|write|change|move|rename)\\b.{0,80}\\band\\s+(also|then)\\b.{0,80}\\band\\b",
+      "\\b(add|update|fix|implement|refactor|write|change|move|rename|build|create)\\b[^.]{0,120}\\b(and\\s+(also|then|measure|verify|validate|benchmark|profile)|,\\s*(then|and))\\b[^.]{0,80}\\b(and\\s+\\w+|tests?|measure|verify|validate|benchmark|profile)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Hard — single prompt requesting multiple cross-concern resilience
+  // features ("add robust error handling with retry, circuit breaker, and
+  // dead-letter queue"). Triggers only when the "with X, Y, and Z" follows
+  // an "error handling" / "resilience" / "robustness" keyword — narrower than
+  // generic 3-item bundles which are often legitimate standard-scope work
+  // ("file upload with S3 storage, size limits, and MIME type validation").
+  {
+    pattern:
+      "\\b(robust|resilient|production[-\\s]grade|production[-\\s]ready)\\s+(error|retry|fault|failure)\\b[^.]{0,80},\\s*[^.]{0,60},\\s*(and\\s+)?",
     flags: "i",
     class: "hard",
     confidence: 0.75,
@@ -811,9 +825,11 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
   // Hard — short ambiguous imperative without explicit object ("just fix it",
   // "make it work", "clean up everything", "update it to match"). Pronoun
   // referents without prior context force the model to investigate.
+  // Anchor at start only — these short forms can have a trailing object
+  // ("update it to match the new spec"), but the leading form is the signal.
   {
     pattern:
-      "^\\s*(just\\s+fix\\s+it|make\\s+it\\s+work|clean\\s+up\\s+everything|update\\s+it\\s+to\\s+(match|fit|work)|fix\\s+(everything|all\\s+of\\s+it)|sort\\s+it\\s+(out|all\\s+out))\\b\\.?\\s*$",
+      "^\\s*(just\\s+fix\\s+it|make\\s+it\\s+work|clean\\s+up\\s+everything|update\\s+it\\s+to\\s+(match|fit|work|conform|align)|fix\\s+(everything|all\\s+of\\s+it)|sort\\s+it\\s+(out|all\\s+out)|it\\s+crashed\\s+again)\\b",
     flags: "i",
     class: "hard",
     confidence: 0.85,
@@ -869,6 +885,60 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
       "\\bdesign\\s+(a\\s+|the\\s+)?(simple|small|basic|minimal|tiny|trivial)\\s+\\S+\\s+(component|button|form|card|modal|popover|tooltip|input|toggle|switch|badge|chip|tag|avatar|icon)\\b",
     flags: "i",
     class: "simple",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Hard — implementation at scale ("for 10 million records", "for 1B rows",
+  // "to handle 100k concurrent users"). Scale numbers signal capacity-design.
+  {
+    pattern:
+      "\\b(implement|build|design|add|create|support|handle)\\b[^.]{0,80}\\b(?:for|to\\s+handle|to\\s+support|across|on|with|over)\\s+\\d+(?:[\\.,]\\d+)?\\s*(?:k|m|b|million|billion|thousand|million\\+|billion\\+)?\\s+(records?|rows?|users?|requests?|events?|connections?|messages?|writes?|reads?|tps|rps|qps|ops|transactions?)\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Hard — sweeping completeness for test coverage ("write tests that cover
+  // all the edge cases", "make sure nothing regresses"). Unbounded surface,
+  // requires the model to enumerate cases.
+  {
+    pattern:
+      "\\b(write|add|cover|ensure)\\s+(?:that\\s+)?(?:tests?\\s+(?:that\\s+|to\\s+)?)?(?:cover\\s+|capture\\s+|exercise\\s+|exhaustively\\s+)?(?:all\\s+(?:the\\s+)?(?:edge\\s+cases?|corner\\s+cases?|paths?|branches?|scenarios?|permutations?)|every\\s+(?:edge\\s+case|corner\\s+case|path|branch|scenario|permutation))\\b|\\bmake\\s+sure\\s+nothing\\s+regresses?\\b",
+    flags: "i",
+    class: "hard",
+    confidence: 0.75,
+    source: "builtin",
+  },
+  // Reasoning — "is X worth (it|the Y) (for Z)?" — evaluation/trade-off
+  // framed as a single question. Captures TypeScript-worth-it style prompts.
+  {
+    pattern:
+      "\\bis\\s+\\S+(?:\\s+\\S+){0,3}\\s+worth\\s+(?:it|the\\s+\\S+(?:\\s+\\S+){0,3})\\b",
+    flags: "i",
+    class: "reasoning",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Simple — short context-free imperative ("add an index", "add error
+  // handling", "what does this function do") with no scale/scope/multi-action
+  // qualifier. Anchored full-prompt — must be the entire prompt to avoid
+  // catching longer sentences that include these phrases.
+  {
+    pattern:
+      "^\\s*(add\\s+(?:an?\\s+)?(index|error\\s+handling|validation|null\\s+check|loading\\s+state|spinner|tooltip|placeholder|aria\\s+label|alt\\s+text)|what\\s+does\\s+(?:this|that)\\s+(?:function|method|class|module|file|code)\\s+do\\??|how\\s+does\\s+(?:this|that)\\s+(?:function|method|class|module|file)\\s+work\\??)\\s*\\.?\\s*$",
+    flags: "i",
+    class: "simple",
+    confidence: 0.8,
+    source: "builtin",
+  },
+  // Max — production incident with concrete impact signal (production +
+  // (spike|surge|drop|outage|silent failure|customer impact) within a short
+  // window). High confidence — money/customers at stake.
+  {
+    pattern:
+      "\\b(production|prod|live|customer|customers)\\b[^.]{0,80}\\b(spiked?|surged?|grew\\s+\\d+x|crashed|outage|silent(?:ly)?\\s+fail(?:ing|ed)?|silently\\s+(?:dropping|losing|corrupting)|data\\s+(?:loss|corruption)|isn[''’]?t\\s+showing\\s+up|aren[''’]?t\\s+showing\\s+up|not\\s+showing\\s+up)\\b",
+    flags: "i",
+    class: "max",
     confidence: 0.85,
     source: "builtin",
   },

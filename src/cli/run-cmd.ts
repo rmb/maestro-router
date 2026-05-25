@@ -1,5 +1,6 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
+import { spawn } from "node:child_process";
 import type { Command } from "commander";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
@@ -20,7 +21,7 @@ import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
 import { buildClaudeArgs } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
-import { format, loadCliConfig } from "./utils.js";
+import { format, loadCliConfig, readState } from "./utils.js";
 
 const log = (msg: string, quiet?: boolean): void => {
   if (!quiet) process.stderr.write(`[maestro] ${msg}\n`);
@@ -183,6 +184,26 @@ export function registerRunCommand(program: Command): void {
           process.stdout.write(format({ decision, cost: parsed.cost }, { json: true }) + "\n");
         }
       }
+
+      // Background auto-tune: fetch community heuristics + apply local patterns.
+      // Runs at most once per autoTuneIntervalDays (default 7). Fire-and-forget.
+      void (async () => {
+        try {
+          const intervalDays = cli.userConfig.autoTuneIntervalDays ?? 7;
+          const state = await readState();
+          const lastRun = state.autoTuneLastRunAt ? Date.parse(state.autoTuneLastRunAt) : 0;
+          if (Date.now() - lastRun > intervalDays * 24 * 60 * 60 * 1000) {
+            const child = spawn(process.execPath, [process.argv[1]!, "tune", "--auto"], {
+              detached: true,
+              stdio: "ignore",
+              env: process.env,
+            });
+            child.unref();
+          }
+        } catch {
+          // never block the exit on auto-tune errors
+        }
+      })();
 
       process.exit(result.exitCode ?? 0);
     });

@@ -119,6 +119,17 @@ export type UserConfig = {
    */
   posthogQueryKey?: string;
   /**
+   * URL serving the community-mined HeuristicRule[] JSON, refreshed weekly
+   * by the maintainer's CI. Defaults to the project's GitHub raw URL.
+   * Set to `""` to disable community heuristic fetching.
+   */
+  communityHeuristicsUrl?: string;
+  /**
+   * How often (in days) the background auto-tune runs. Default: 7.
+   * Auto-tune fetches community heuristics and applies local patterns.
+   */
+  autoTuneIntervalDays?: number;
+  /**
    * PostHog numeric project ID. Required only for `maestro tune --posthog`.
    * Find it in PostHog → Project Settings → Project ID.
    */

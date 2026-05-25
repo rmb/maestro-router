@@ -28,6 +28,22 @@ export const DEFAULT_USER_CONFIG = join(DEFAULT_CONFIG_DIR, "config.json");
 export const DEFAULT_PROFILE_OVERRIDES = join(DEFAULT_CONFIG_DIR, "profile-overrides.json");
 export const DEFAULT_HEURISTICS = join(DEFAULT_CONFIG_DIR, "heuristics.json");
 export const DEFAULT_TELEMETRY_PATH = join(DEFAULT_CONFIG_DIR, "decisions.jsonl");
+export const DEFAULT_STATE = join(DEFAULT_CONFIG_DIR, "state.json");
+
+/** Runtime state that persists across sessions but is not user config. */
+export type MaestroState = {
+  autoTuneLastRunAt?: string;
+};
+
+export async function readState(): Promise<MaestroState> {
+  return (await readJsonOrNull<MaestroState>(DEFAULT_STATE)) ?? {};
+}
+
+export async function patchState(patch: Partial<MaestroState>): Promise<void> {
+  const current = await readState();
+  await mkdir(dirname(DEFAULT_STATE), { recursive: true });
+  await writeFile(DEFAULT_STATE, JSON.stringify({ ...current, ...patch }, null, 2), "utf8");
+}
 
 export type LoadedCliConfig = {
   userConfig: UserConfig;

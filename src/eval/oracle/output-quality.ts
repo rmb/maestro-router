@@ -79,7 +79,7 @@ export function checkTruncationRate(events: TelemetryEvent[]): CheckResult {
   if (!pass) {
     return {
       ...base,
-      detail: `${nearCapCount} of ${eligible.length} standard turns are near the output cap (≥98% of maxOutputTokens). Cap may be too tight — consider raising standard.maxOutputTokens above 8000.`,
+      detail: `${nearCapCount} of ${eligible.length} standard turns are near the output cap (≥98% of their recorded maxOutputTokens). These events were recorded with the cap value at that time — if you already raised the cap, this will clear as the ${eligible.length} old events age out of the 7-day window.`,
     };
   }
   return base;

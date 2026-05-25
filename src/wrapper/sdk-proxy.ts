@@ -170,7 +170,8 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       child.stdin?.write(JSON.stringify(setModel) + "\n");
       child.stdin?.write(line + "\n");
 
-      // Tool result routing happens, just not logged to telemetry
+      // Tool result routing: classifier runs, set_model injected, but decision
+      // events only logged for user-text turns (cost tracking per-tool, not per-use).
 
       continue;
     }

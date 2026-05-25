@@ -590,7 +590,7 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(routeCalls[0]!.prompt).toBe("explain this");
   });
 
-  test("pending queue stays bounded after tool_result messages (≤1 entry)", async () => {
+  test("pending queue only enqueues user-text messages, not tool_results", async () => {
     // This test verifies that tool_result messages do NOT add to pendingQueue.
     // Only user_text messages should be queued.
     // Sequence: tool_result → tool_result → user_text (all 3 processed, but only 1 queued).

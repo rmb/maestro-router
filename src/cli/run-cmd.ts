@@ -1,13 +1,14 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { Command } from "commander";
 import { embeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
-import type { Classifier } from "../core/types.js";
+import type { Classifier, Class } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
 import { createPostHogClient } from "../core/posthog.js";
@@ -73,7 +74,8 @@ export function registerRunCommand(program: Command): void {
           : heuristicClassifier;
 
       const useEmbedding = cli.userConfig.useEmbeddingClassifier !== false;
-      const useLlm = cli.userConfig.useLlmClassifier !== false;
+      // useLlmClassifierInWrapper defaults true — accuracy gain (~$0.001/uncertain prompt) justifies latency
+      const useLlm = cli.userConfig.useLlmClassifierInWrapper !== false;
       const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, heuristic];
       if (useEmbedding) classifiers.push(embeddingClassifier);
       if (useLlm) classifiers.push(llmClassifier);
@@ -86,10 +88,19 @@ export function registerRunCommand(program: Command): void {
       const sessions = createSessionStore();
       const allSessions = await sessions.list();
       const cwd = process.cwd();
+      const CORRECTION_WINDOW_MS = 60 * 60 * 1000; // only correlate turns within 1h
       const priorSession = allSessions
         .filter((s) => s.cwd === cwd)
         .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt))[0];
       const recentClasses: string[] = priorSession?.recentClasses ?? [];
+      // Buffer prev-turn decision for correction detection after routing
+      const prevDecision =
+        priorSession?.lastPrompt &&
+        priorSession?.lastDecisionClass &&
+        priorSession?.lastDecisionAt &&
+        Date.now() - Date.parse(priorSession.lastDecisionAt) < CORRECTION_WINDOW_MS
+          ? { prompt: priorSession.lastPrompt, cls: priorSession.lastDecisionClass as Class, ts: priorSession.lastDecisionAt }
+          : null;
 
       const decision = await pipeline.route(
         { prompt },
@@ -99,6 +110,45 @@ export function registerRunCommand(program: Command): void {
         `route: ${decision.classifier} → class=${decision.class} conf=${decision.confidence.toFixed(2)} model=${decision.spec.model} effort=${decision.spec.effort} budget=$${decision.spec.maxBudgetUsd}`,
         quiet,
       );
+
+      // Emit correction event when user uses @deep/@fast to correct a prior auto-routed turn.
+      // This is the strongest implicit mis-classification signal: prev prompt was under/over-routed.
+      const overrideDiagEarly = decision.diagnostics.find(
+        (d) => d.code === "override.matched" || d.code === "override.nl_think",
+      );
+      if (overrideDiagEarly && prevDecision && prevDecision.cls !== decision.class) {
+        const hint = overrideDiagEarly.message?.replace(/^@/, "") ?? "";
+        const ts = new Date().toISOString();
+        const correctionEvent = {
+          type: "correction" as const,
+          ts,
+          sessionId: priorSession?.sessionId ?? "",
+          prevClass: prevDecision.cls,
+          correctedToClass: decision.class,
+          hint,
+          prevPrompt: prevDecision.prompt,
+        };
+        const telEarly = createTelemetry(
+          cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+        );
+        void telEarly.log(correctionEvent);
+
+        if (cli.userConfig.posthogApiKey) {
+          const phEarly = createPostHogClient(cli.userConfig.posthogApiKey);
+          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          const corrProps: Record<string, unknown> = {
+            distinct_id: distinctId,
+            prev_class: prevDecision.cls,
+            corrected_to_class: decision.class,
+            hint,
+            prev_prompt_length: prevDecision.prompt.length,
+          };
+          if (cli.userConfig.sendPromptText) {
+            corrProps["prev_prompt"] = prevDecision.prompt;
+          }
+          void phEarly.capture("maestro_correction", corrProps);
+        }
+      }
 
       const session = await sessions.getOrCreate(process.cwd(), decision.spec.model, {
         ...(cmdOpts.newSession ? { newSession: true } : {}),
@@ -125,6 +175,8 @@ export function registerRunCommand(program: Command): void {
       // regardless of whether Claude returned parseable output (it may error,
       // hit a budget cap, or be interrupted — the routing decision still happened).
       await sessions.appendClass(session.sessionId, decision.class);
+      // Buffer this turn's prompt + class so the next turn can emit a correction event.
+      void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), decision.class);
 
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
       if (parsed) {
@@ -139,10 +191,25 @@ export function registerRunCommand(program: Command): void {
           prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         });
 
+        // Outcome event: stop_reason + output token ratio reveals over/under-routing.
+        if (parsed.cost) {
+          void telemetry.log({
+            type: "outcome",
+            ts: new Date().toISOString(),
+            sessionId: session.sessionId,
+            decidedClass: decision.class,
+            stopReason: parsed.cost.stopReason,
+            outputTokens: parsed.cost.outputTokens,
+            cacheCreationTokens: parsed.cost.cacheCreationInputTokens,
+            totalCostUsd: parsed.cost.totalCostUsd,
+            durationApiMs: parsed.cost.durationApiMs,
+          });
+        }
+
         if (cli.userConfig.posthogApiKey) {
           const ph = createPostHogClient(cli.userConfig.posthogApiKey);
-          // Anonymous distinct_id: base64 of cwd — no PII
-          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          // One-way SHA-256 of cwd — stable pseudonym, not reversible (no PII)
+          const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
           void ph.capture("maestro_decision", {
             distinct_id: distinctId,
             class: decision.class,
@@ -154,6 +221,18 @@ export function registerRunCommand(program: Command): void {
             prompt_length: prompt.length,
             cost_usd: parsed.cost?.totalCostUsd ?? null,
           });
+
+          if (parsed.cost) {
+            void ph.capture("maestro_outcome", {
+              distinct_id: distinctId,
+              class: decision.class,
+              stop_reason: parsed.cost.stopReason,
+              output_tokens: parsed.cost.outputTokens,
+              cache_creation_tokens: parsed.cost.cacheCreationInputTokens,
+              total_cost_usd: parsed.cost.totalCostUsd,
+              duration_api_ms: parsed.cost.durationApiMs,
+            });
+          }
 
           // Emit override event when user used @fast / @deep / @think
           const overrideDiag = decision.diagnostics.find(
@@ -193,12 +272,23 @@ export function registerRunCommand(program: Command): void {
           const state = await readState();
           const lastRun = state.autoTuneLastRunAt ? Date.parse(state.autoTuneLastRunAt) : 0;
           if (Date.now() - lastRun > intervalDays * 24 * 60 * 60 * 1000) {
-            const child = spawn(process.execPath, [process.argv[1]!, "tune", "--auto"], {
+            // Always run --auto (community heuristics + local patterns).
+            // Also run --posthog when credentials are present (cross-user override mining).
+            const hasPh = !!(cli.userConfig.posthogQueryKey && cli.userConfig.posthogProjectId);
+            const autoChild = spawn(process.execPath, [process.argv[1]!, "tune", "--auto"], {
               detached: true,
               stdio: "ignore",
               env: process.env,
             });
-            child.unref();
+            autoChild.unref();
+            if (hasPh) {
+              const phChild = spawn(process.execPath, [process.argv[1]!, "tune", "--posthog"], {
+                detached: true,
+                stdio: "ignore",
+                env: process.env,
+              });
+              phChild.unref();
+            }
           }
         } catch {
           // never block the exit on auto-tune errors

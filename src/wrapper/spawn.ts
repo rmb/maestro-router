@@ -110,7 +110,15 @@ export function resolveAppendSystemPrompt(
   const spec = decision.spec;
   if (spec.appendSystemPrompt !== undefined) return spec.appendSystemPrompt;
   const classHint = CLASS_BREVITY[decision.class];
-  if (classHint !== undefined) return classHint;
+  // G2: when CLASS_BREVITY is empty (hard/reasoning/max) but maxOutputTokens is set,
+  // emit a cap hint to guide token output gating
+  if (classHint !== undefined) {
+    if (classHint === "" && spec.maxOutputTokens !== undefined) {
+      const capHint = `Keep response under ${spec.maxOutputTokens} tokens.`;
+      return capHint;
+    }
+    return classHint;
+  }
   if (userConfig.appendSystemPrompt !== undefined) return userConfig.appendSystemPrompt;
   return DEFAULT_APPEND_SYSTEM_PROMPT;
 }

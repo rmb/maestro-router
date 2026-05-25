@@ -275,24 +275,28 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
     expect(args[idx + 1]).toContain("under 4000 tokens");
   });
 
-  test("hard class emits no --append-system-prompt (empty string = suppressed)", () => {
+  test("hard class emits cap hint via maxOutputTokens in balanced profile", () => {
     const args = buildClaudeArgs({
       decision: baseDecision("hard"),
       userConfig: emptyConfig,
       sessionId: "x",
       isResume: false,
     });
-    expect(args).not.toContain("--append-system-prompt");
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("4000 tokens");
   });
 
-  test("reasoning class emits no --append-system-prompt", () => {
+  test("reasoning class emits cap hint via maxOutputTokens in balanced profile", () => {
     const args = buildClaudeArgs({
       decision: baseDecision("reasoning"),
       userConfig: emptyConfig,
       sessionId: "x",
       isResume: false,
     });
-    expect(args).not.toContain("--append-system-prompt");
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("6000 tokens");
   });
 
   test("max class emits no --append-system-prompt", () => {
@@ -341,6 +345,49 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt", () => {
       ...baseDecision("trivial"),
       spec: { ...balancedProfile.classes.trivial, appendSystemPrompt: "" },
     };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  test("G2: when maxOutputTokens is set and CLASS_BREVITY is empty, append cap hint for hard class", () => {
+    // hard class has empty string in CLASS_BREVITY, but with maxOutputTokens set,
+    // we should emit a cap hint
+    const decision = baseDecision("hard");
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("4000 tokens");
+  });
+
+  test("G2: when maxOutputTokens is set and CLASS_BREVITY is empty, append cap hint for reasoning class", () => {
+    // reasoning class has empty string in CLASS_BREVITY, but with maxOutputTokens set,
+    // we should emit a cap hint
+    const decision = baseDecision("reasoning");
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    const idx = args.indexOf("--append-system-prompt");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain("6000 tokens");
+  });
+
+  test("G2: when maxOutputTokens is set and CLASS_BREVITY is empty, append cap hint for max class", () => {
+    // max class has empty string in CLASS_BREVITY and no maxOutputTokens,
+    // so it should remain suppressed (no flag)
+    const decision = baseDecision("max");
     const args = buildClaudeArgs({
       decision,
       userConfig: emptyConfig,

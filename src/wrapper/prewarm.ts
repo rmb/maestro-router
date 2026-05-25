@@ -18,28 +18,23 @@ export type FingerprintSpec = {
 };
 
 /**
- * Compute the system-prompt fingerprint from a decision spec.
- * Must match the fingerprint computed in run-cmd.ts and wire-compat.ts.
+ * Compute the system-prompt fingerprint from stable session config.
+ * Includes: model tier, bare mode, excludeDynamicSections.
+ * Excludes: per-class tools/mcpConfig (applied at spawn time, not session key time).
  * Pure function — no I/O.
  * budget: 0ms (no I/O, pure hash)
  */
 export function computeFingerprint(spec: {
   model: string;
-  tools?: string;
-  mcpConfig?: string;
   bare?: boolean;
   excludeDynamicSections?: boolean;
-  appendSystemPrompt?: string;
 }): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
         spec.model,
-        spec.tools ?? "default",
-        spec.mcpConfig ?? "user-default",
         spec.bare ? "bare" : "full",
         spec.excludeDynamicSections ? "exclude" : "include",
-        spec.appendSystemPrompt ?? "",
       ]),
     )
     .digest("hex")

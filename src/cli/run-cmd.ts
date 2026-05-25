@@ -203,11 +203,8 @@ export function registerRunCommand(program: Command): void {
       const resolvedAppendPrompt = resolveAppendSystemPrompt(decision, cli.userConfig);
       const fp = computeFingerprint({
         model: decision.spec.model,
-        ...(decision.spec.tools !== undefined ? { tools: decision.spec.tools } : {}),
-        ...(decision.spec.mcpConfig !== undefined ? { mcpConfig: decision.spec.mcpConfig } : {}),
-        ...(decision.spec.bare !== undefined ? { bare: decision.spec.bare } : {}),
+        bare: decision.spec.bare ?? false,
         excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
-        appendSystemPrompt: resolvedAppendPrompt,
       });
 
       // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set

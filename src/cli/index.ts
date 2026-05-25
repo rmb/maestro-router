@@ -9,6 +9,7 @@ import { registerBenchCommand } from "./bench.js";
 import { registerExportPromptsCommand } from "./export-prompts.js";
 import { registerDoctorCommand } from "./doctor.js";
 import { registerHealthCommand } from "./health.js";
+import { registerOracleCommand } from "./oracle.js";
 import { registerGuideCommand } from "./guide.js";
 import { registerInitCommand } from "./init.js";
 import { registerInstallCommandsCommand } from "./install-commands.js";
@@ -78,6 +79,7 @@ export async function buildProgram(): Promise<Command> {
   registerInitCommand(program);
   registerDoctorCommand(program);
   registerHealthCommand(program);
+  registerOracleCommand(program);
 
   return program;
 }

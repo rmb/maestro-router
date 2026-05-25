@@ -58,6 +58,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "replay",
   "bench",
   "install-vscode",
+  "oracle",
   "help",
 ]);
 

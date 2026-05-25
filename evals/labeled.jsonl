@@ -325,3 +325,54 @@
 {"prompt":"design the error handling and observability strategy for a new microservice","expectedClass":"reasoning","source":"generated"}
 {"prompt":"our main API has been returning 500s on all write operations since the last deploy, here are the distributed traces and the diff","expectedClass":"max","source":"generated"}
 {"prompt":"users are being silently logged out mid-session at random, sessions are deleted with no error log, here are the affected user IDs and timeline","expectedClass":"max","source":"generated"}
+{"prompt":"just fix it","expectedClass":"hard","source":"adversarial"}
+{"prompt":"make it work","expectedClass":"hard","source":"adversarial"}
+{"prompt":"do a thorough refactor of this 3-line function","expectedClass":"simple","source":"adversarial"}
+{"prompt":"quickly design the authentication architecture","expectedClass":"reasoning","source":"adversarial"}
+{"prompt":"finish implementing it","expectedClass":"standard","source":"adversarial"}
+{"prompt":"clean up everything","expectedClass":"hard","source":"adversarial"}
+{"prompt":"add the missing piece","expectedClass":"standard","source":"adversarial"}
+{"prompt":"update it to match the new spec","expectedClass":"hard","source":"adversarial"}
+{"prompt":"rename all methods in the entire codebase to follow our convention","expectedClass":"hard","source":"adversarial"}
+{"prompt":"just rename the variable","expectedClass":"trivial","source":"adversarial"}
+{"prompt":"the build is broken in CI but passes locally","expectedClass":"hard","source":"adversarial"}
+{"prompt":"users are being silently logged out mid-session at random, sessions are deleted with no error log","expectedClass":"max","source":"adversarial"}
+{"prompt":"this sometimes throws but not always","expectedClass":"hard","source":"adversarial"}
+{"prompt":"add a simple caching layer across the entire API","expectedClass":"hard","source":"adversarial"}
+{"prompt":"implement full-text search for 10 million records","expectedClass":"hard","source":"adversarial"}
+{"prompt":"design a simple button component","expectedClass":"simple","source":"adversarial"}
+{"prompt":"design the entire data model for the new billing system","expectedClass":"reasoning","source":"adversarial"}
+{"prompt":"should we use Postgres or MongoDB for this?","expectedClass":"reasoning","source":"adversarial"}
+{"prompt":"is TypeScript worth the overhead for this project?","expectedClass":"reasoning","source":"adversarial"}
+{"prompt":"add and also update and then refactor the handler and write tests for it","expectedClass":"hard","source":"adversarial"}
+{"prompt":"fix the typo in the README and also fix the race condition in the auth module","expectedClass":"hard","source":"adversarial"}
+{"prompt":"what does this function do","expectedClass":"simple","source":"adversarial"}
+{"prompt":"explain the entire architecture of this codebase","expectedClass":"hard","source":"adversarial"}
+{"prompt":"what's wrong with this?","expectedClass":"hard","source":"adversarial"}
+{"prompt":"is this correct?","expectedClass":"standard","source":"adversarial"}
+{"prompt":"add it","expectedClass":"standard","source":"adversarial"}
+{"prompt":"delete it","expectedClass":"standard","source":"adversarial"}
+{"prompt":"move the logic to the service layer everywhere","expectedClass":"hard","source":"adversarial"}
+{"prompt":"make all API responses consistent with our new error schema","expectedClass":"hard","source":"adversarial"}
+{"prompt":"extract the duplicated code into a shared util","expectedClass":"standard","source":"adversarial"}
+{"prompt":"production memory usage spiked 3x overnight with no deploy, here are the heap snapshots","expectedClass":"max","source":"adversarial"}
+{"prompt":"our largest customer's import is silently failing and their data isn't showing up","expectedClass":"max","source":"adversarial"}
+{"prompt":"intermittent 503s on the payment endpoint, 0.3% error rate, no pattern yet","expectedClass":"max","source":"adversarial"}
+{"prompt":"add an index","expectedClass":"simple","source":"adversarial"}
+{"prompt":"add a composite index on user_id and created_at for the orders table and measure query plan before and after","expectedClass":"hard","source":"adversarial"}
+{"prompt":"update the env variable","expectedClass":"trivial","source":"adversarial"}
+{"prompt":"migrate all environment variables from .env to Vault across 12 services","expectedClass":"hard","source":"adversarial"}
+{"prompt":"write a test","expectedClass":"standard","source":"adversarial"}
+{"prompt":"write tests that cover all the edge cases and make sure nothing regresses","expectedClass":"hard","source":"adversarial"}
+{"prompt":"add error handling","expectedClass":"simple","source":"adversarial"}
+{"prompt":"add robust error handling with retry, circuit breaker, and dead-letter queue","expectedClass":"hard","source":"adversarial"}
+{"prompt":"format the file","expectedClass":"trivial","source":"adversarial"}
+{"prompt":"format all files in the monorepo and fix any lint errors","expectedClass":"hard","source":"adversarial"}
+{"prompt":"change the color","expectedClass":"trivial","source":"adversarial"}
+{"prompt":"redesign the color system to support dark mode across the entire component library","expectedClass":"hard","source":"adversarial"}
+{"prompt":"the webhook is not firing","expectedClass":"hard","source":"adversarial"}
+{"prompt":"add a comment","expectedClass":"trivial","source":"adversarial"}
+{"prompt":"document the entire public API with examples","expectedClass":"hard","source":"adversarial"}
+{"prompt":"which approach should we take for state management?","expectedClass":"reasoning","source":"adversarial"}
+{"prompt":"move it here","expectedClass":"standard","source":"adversarial"}
+{"prompt":"it crashed again","expectedClass":"max","source":"adversarial"}

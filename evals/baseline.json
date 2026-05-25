@@ -1,49 +1,200 @@
 {
-  "total": 327,
-  "correct": 327,
-  "accuracy": 1,
+  "total": 378,
+  "correct": 345,
+  "accuracy": 0.9127,
   "perClass": {
     "trivial": {
-      "total": 68,
-      "correct": 68,
-      "accuracy": 1
+      "total": 73,
+      "correct": 71,
+      "accuracy": 0.9726
     },
     "simple": {
-      "total": 54,
+      "total": 59,
       "correct": 54,
-      "accuracy": 1
+      "accuracy": 0.9153
     },
     "standard": {
-      "total": 61,
-      "correct": 61,
+      "total": 69,
+      "correct": 69,
       "accuracy": 1
     },
     "hard": {
-      "total": 55,
-      "correct": 55,
-      "accuracy": 1
+      "total": 78,
+      "correct": 57,
+      "accuracy": 0.7308
     },
     "reasoning": {
-      "total": 51,
-      "correct": 51,
-      "accuracy": 1
+      "total": 56,
+      "correct": 55,
+      "accuracy": 0.9821
     },
     "max": {
-      "total": 38,
-      "correct": 38,
-      "accuracy": 1
+      "total": 43,
+      "correct": 39,
+      "accuracy": 0.907
     }
   },
   "confusion": {
-    "trivial>trivial": 68,
+    "trivial>trivial": 71,
     "simple>simple": 54,
-    "standard>standard": 61,
-    "hard>hard": 55,
-    "reasoning>reasoning": 51,
-    "max>max": 38
+    "standard>standard": 69,
+    "hard>hard": 57,
+    "reasoning>reasoning": 55,
+    "max>max": 39,
+    "hard>standard": 19,
+    "simple>standard": 4,
+    "hard>trivial": 2,
+    "simple>reasoning": 1,
+    "reasoning>standard": 1,
+    "max>standard": 3,
+    "max>hard": 1,
+    "trivial>standard": 1,
+    "trivial>simple": 1
   },
   "latencyMs": {
     "p50": 0,
     "p95": 0
-  }
+  },
+  "failures": [
+    {
+      "prompt": "just fix it",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "make it work",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "do a thorough refactor of this 3-line function",
+      "expected": "simple",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "clean up everything",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "update it to match the new spec",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "rename all methods in the entire codebase to follow our convention",
+      "expected": "hard",
+      "predicted": "trivial",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "this sometimes throws but not always",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "add a simple caching layer across the entire API",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "implement full-text search for 10 million records",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "design a simple button component",
+      "expected": "simple",
+      "predicted": "reasoning",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "is TypeScript worth the overhead for this project?",
+      "expected": "reasoning",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "add and also update and then refactor the handler and write tests for it",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "what does this function do",
+      "expected": "simple",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "explain the entire architecture of this codebase",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "what's wrong with this?",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "move the logic to the service layer everywhere",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "make all API responses consistent with our new error schema",
+      "expected": "hard",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "production memory usage spiked 3x overnight with no deploy, here are the heap sn",
+      "expected": "max",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "our largest customer's import is silently failing and their data isn't showing u",
+      "expected": "max",
+      "predicted": "standard",
+      "classifier": "default",
+      "source": "adversarial"
+    },
+    {
+      "prompt": "intermittent 503s on the payment endpoint, 0.3% error rate, no pattern yet",
+      "expected": "max",
+      "predicted": "hard",
+      "classifier": "heuristic",
+      "source": "adversarial"
+    }
+  ]
 }

@@ -79,12 +79,33 @@ maestro tune --posthog                    # mine cross-user patterns from PostHo
 # Evaluation
 maestro bench                             # accuracy on labeled eval set
 maestro bench --propose overrides.json    # validate a profile change before applying
-maestro bench --tournament --confirm-cost # empirically find safe model downgrades
+maestro bench --tournament --confirm-cost # empirically find safe model downgrades (see below)
 
 # Setup
 maestro install-vscode                    # wire claudeProcessWrapper in VSCode
 maestro install-hook                      # enable Stop-hook feedback collection
 ```
+
+---
+
+## Tournament — empirically validate downgrades
+
+Maestro's routing is conservative by default. The tournament lets you verify which downgrades are actually safe for your workload before applying them.
+
+For each sampled prompt it runs three spawns:
+1. **A** — current assigned class (e.g. standard → Sonnet)
+2. **B** — one tier cheaper (e.g. simple → Haiku)
+3. **Judge** — Sonnet compares both responses and returns `winner: A | B | tie`
+
+When B wins or ties, that prompt is a safe downgrade candidate. Maestro mines the winning prompts for common patterns and proposes new heuristic rules.
+
+```bash
+maestro bench --tournament --confirm-cost    # runs tournament, requires explicit cost approval
+maestro bench --propose results.json         # validate mined rules against eval baseline before applying
+maestro tune --apply                         # write approved rules to ~/.maestro/heuristics.json
+```
+
+The `--confirm-cost` flag is required — a full tournament run costs $1–5 depending on sample size. Without it, the command prints an estimate and exits.
 
 ---
 

@@ -363,13 +363,15 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.9,
     source: "builtin",
   },
-  // Simple — bare affirmations / one-word acknowledgments (approve or reject,
-  // no actual work; costs nothing to run at Haiku)
+  // Simple — bare affirmations / one-word acknowledgments.
+  // Confidence intentionally below short-circuit (0.6) so Markov prior can
+  // overrule when session context suggests heavier work (e.g. "yes" approving
+  // a complex implementation plan → Markov sees prior hard/standard → wins).
   {
     pattern: "^\\s*(yes|no|ok|okay|sure|yep|nope|nah|correct|exactly|approved?|confirmed?|sounds\\s+good|looks\\s+good|perfect|great|nice|good|got\\s+it|makes\\s+sense|understood)[\\s!?.]*$",
     flags: "i",
     class: "simple",
-    confidence: 0.8,
+    confidence: 0.5,
     source: "builtin",
   },
 

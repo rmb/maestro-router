@@ -168,26 +168,45 @@ vi.mock("../core/classifier-cache.js", () => ({
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function makeCostJson(stopReason: string, model: string, cost = 0.001): string {
+interface CostJsonOptions {
+  cost?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+}
+
+function makeCostJson(stopReason: string, model: string, options: number | CostJsonOptions = 0.001): string {
+  const opts: CostJsonOptions = typeof options === "number" ? { cost: options } : options;
+  const cost = opts.cost ?? 0.001;
+  const inputTokens = opts.inputTokens ?? 100;
+  const outputTokens = opts.outputTokens ?? 200;
+  const cacheCreationInputTokens = opts.cacheCreationInputTokens ?? 0;
+  const cacheReadInputTokens = opts.cacheReadInputTokens ?? 0;
+  const durationMs = opts.durationMs ?? 1000;
+  const durationApiMs = opts.durationApiMs ?? 800;
+
   const costBreakdown = {
     type: "result",
     total_cost_usd: cost,
-    duration_ms: 1000,
-    duration_api_ms: 800,
+    duration_ms: durationMs,
+    duration_api_ms: durationApiMs,
     stop_reason: stopReason,
     session_id: "test-session-id",
     usage: {
-      input_tokens: 100,
-      output_tokens: 200,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_creation_input_tokens: cacheCreationInputTokens,
+      cache_read_input_tokens: cacheReadInputTokens,
     },
     modelUsage: {
       [model]: {
-        inputTokens: 100,
-        outputTokens: 200,
-        cacheReadInputTokens: 0,
-        cacheCreationInputTokens: 0,
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
         costUSD: cost,
       },
     },
@@ -359,11 +378,30 @@ describe("T4 auto-resume on max_tokens", () => {
   });
 
   test("6. summed cost (original + retry) appears in telemetry", async () => {
-    const originalCost = 0.001;
-    const retryCost = 0.003;
+    // Use distinguishable values so any field that stops summing fails the test.
     const streamFn = makeStreamFn([
-      { capturedStdout: makeCostJson("max_tokens", "claude-haiku-4-5", originalCost) },
-      { capturedStdout: makeCostJson("end_turn", "claude-sonnet-4-6", retryCost) },
+      {
+        capturedStdout: makeCostJson("max_tokens", "claude-haiku-4-5", {
+          cost: 0.001,
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationInputTokens: 20,
+          cacheReadInputTokens: 10,
+          durationMs: 1200,
+          durationApiMs: 900,
+        }),
+      },
+      {
+        capturedStdout: makeCostJson("end_turn", "claude-sonnet-4-6", {
+          cost: 0.003,
+          inputTokens: 150,
+          outputTokens: 75,
+          cacheCreationInputTokens: 30,
+          cacheReadInputTokens: 15,
+          durationMs: 1800,
+          durationApiMs: 1300,
+        }),
+      },
     ]);
 
     await runCmd("complex question 2", streamFn);
@@ -373,9 +411,22 @@ describe("T4 auto-resume on max_tokens", () => {
       (c) => (c[0] as { type: string }).type === "decision",
     );
     expect(decisionCall).toBeDefined();
-    const decisionEvent = decisionCall![0] as { cost?: CostBreakdown };
-    // Cost should be the sum
-    expect(decisionEvent.cost?.totalCostUsd).toBeCloseTo(originalCost + retryCost, 5);
+    const decisionEvent = decisionCall![0] as { cost?: CostBreakdown; decision?: { diagnostics?: Array<{ code: string }> } };
+    const cost = decisionEvent.cost!;
+
+    // All fields must be sums of original + retry
+    expect(cost.totalCostUsd).toBeCloseTo(0.001 + 0.003, 5);
+    expect(cost.inputTokens).toBe(100 + 150);
+    expect(cost.outputTokens).toBe(50 + 75);
+    expect(cost.cacheCreationInputTokens).toBe(20 + 30);
+    expect(cost.cacheReadInputTokens).toBe(10 + 15);
+    expect(cost.durationMs).toBe(1200 + 1800);
+    expect(cost.durationApiMs).toBe(900 + 1300);
+
+    // Exactly ONE t4.auto_resume diagnostic on the decision event
+    const diagnostics = decisionEvent.decision?.diagnostics ?? [];
+    const t4Diags = diagnostics.filter((d) => d.code === "t4.auto_resume");
+    expect(t4Diags).toHaveLength(1);
   });
 
   test("7. stopReason in final cost reflects retry's stop reason (end_turn, not max_tokens)", async () => {

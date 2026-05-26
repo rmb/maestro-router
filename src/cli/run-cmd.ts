@@ -412,14 +412,6 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         effectiveParsed = {
           ...parsed,
           cost: summedCost,
-          diagnostics: [
-            ...parsed.diagnostics,
-            {
-              severity: "info" as const,
-              code: "t4.auto_resume",
-              message: `max_tokens on ${effectiveDecision.spec.model} → retry on ${retryCost.modelUsed ?? resolveT4UpgradeModel(effectiveDecision.spec.model) ?? "unknown"}`,
-            },
-          ],
         };
       }
 

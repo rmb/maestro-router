@@ -26,6 +26,13 @@ import { stripLineNumbers } from "./line-stripper.js";
 import { compressToolEnvelope } from "./tool-envelope.js";
 import { createBatchHintState, recordPromptAndMaybeAdvise } from "./batch-hint.js";
 import type { SessionStore } from "./session.js";
+import {
+  createToolVolumeState,
+  incrementToolVolume,
+  isHighVolumeTurn,
+  resetToolVolume,
+  upgradeModel,
+} from "./tool-volume.js";
 
 // I1: skip line-number stripping when RTK (rtk-ai/rtk) is already on PATH — it
 // performs the same compression at a lower level, so duplicating the work wastes
@@ -160,6 +167,9 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
   let compactSuggested = false;
   let restartSuggested = false;
 
+  // T2: track tool_use volume per turn; escalate model on high-volume turns.
+  const toolVolumeState = createToolVolumeState();
+
   // ── stdout: filter injected control_responses, populate toolUseMap,
   // flush pending telemetry entries when result frames arrive.
   if (child.stdout) {
@@ -204,6 +214,10 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
               if (firstKey !== undefined) toolUseMap.delete(firstKey);
             }
             toolUseMap.set(id, name);
+          }
+          // T2: accumulate tool call count for volume-based model escalation.
+          if (toolUseBlocks.length > 0) {
+            incrementToolVolume(toolVolumeState, toolUseBlocks.length);
           }
           // Flush oldest pending entry with cost data when a turn result arrives.
           if (frame.type === "result") {
@@ -291,8 +305,18 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       });
       recordClass(decision.class);
 
+      // T2: upgrade model one tier when this turn has exceeded the tool volume threshold.
+      const finalModel = isHighVolumeTurn(toolVolumeState)
+        ? upgradeModel(decision.spec.model)
+        : decision.spec.model;
+      if (finalModel !== decision.spec.model) {
+        opts.stderr.write(
+          `maestro: tool-volume escalation (${toolVolumeState.toolCallsThisTurn} tool calls) → ${finalModel}\n`,
+        );
+      }
+
       injectedSeq += 1;
-      const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
+      const setModel = buildSetModelRequest(finalModel, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
 
       // P3: inject set_max_thinking_tokens so effort routing actually works in
@@ -324,6 +348,8 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
     if (frame !== null && isUserTextMessage(frame)) {
       const promptText = extractPromptText(frame) ?? "";
       const t0 = Date.now();
+      // T2: reset tool volume counter — a new user turn begins.
+      resetToolVolume(toolVolumeState);
 
       // Slash commands (/model, /clear, /compact, etc.) are interactive
       // directives handled by the SDK host. Don't classify them, and

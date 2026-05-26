@@ -232,18 +232,19 @@ describe("getByFingerprint", () => {
 });
 
 describe("stop reason and effort escalation", () => {
-  test("updateStopReason persists and is readable via list()", async () => {
+  test("updatePostTurnData persists stopReason and lastCacheReadTokens in one write", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
     const { sessionId } = await store.getOrCreate("/foo", "haiku");
-    await store.updateStopReason(sessionId, "max_tokens");
+    await store.updatePostTurnData(sessionId, { stopReason: "max_tokens", lastCacheReadTokens: 42000 });
     const records = await store.list();
     const rec = records.find((r) => r.sessionId === sessionId);
     expect(rec?.lastStopReason).toBe("max_tokens");
+    expect(rec?.lastCacheReadTokens).toBe(42000);
   });
 
-  test("updateStopReason on unknown sessionId is a no-op (no throw)", async () => {
+  test("updatePostTurnData on unknown sessionId is a no-op (no throw)", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
-    await expect(store.updateStopReason("nonexistent-uuid", "end_turn")).resolves.toBeUndefined();
+    await expect(store.updatePostTurnData("nonexistent-uuid", { stopReason: "end_turn", lastCacheReadTokens: 0 })).resolves.toBeUndefined();
   });
 
   test("setEffortEscalated marks session; getEffortEscalated returns true", async () => {

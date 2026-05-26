@@ -489,10 +489,11 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             durationApiMs: effectiveParsed.cost.durationApiMs,
           });
 
-          // E1/E3: persist stop reason for next-turn escalation decisions
-          void sessions.updateStopReason(session.sessionId, effectiveParsed.cost.stopReason);
-          // Compaction advisory: persist cache_read for next turn's threshold check
-          void sessions.updateLastCacheRead(session.sessionId, effectiveParsed.cost.cacheReadInputTokens);
+          // E1/E3: persist stop reason + cache_read in one write (avoids concurrent read-modify-write races)
+          await sessions.updatePostTurnData(session.sessionId, {
+            stopReason: effectiveParsed.cost.stopReason,
+            lastCacheReadTokens: effectiveParsed.cost.cacheReadInputTokens,
+          });
 
           // E1.escalate: flag session for effort upgrade on next standard turn
           if (effectiveParsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {

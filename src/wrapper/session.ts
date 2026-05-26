@@ -75,10 +75,8 @@ export type SessionStore = {
   updateLastDecision(sessionId: string, prompt: string, cls: string): Promise<void>;
   /** Read the last decision for the given session without side effects. */
   getLastDecision(sessionId: string): Promise<{ prompt: string; cls: string; ts: string } | null>;
-  /** Persist the stop_reason from the last turn. */
-  updateStopReason(sessionId: string, stopReason: string): Promise<void>;
-  /** Persist cache_read_input_tokens from the last turn for compaction advisory. */
-  updateLastCacheRead(sessionId: string, tokens: number): Promise<void>;
+  /** Persist stop_reason and cache_read_input_tokens from the last turn in one write. */
+  updatePostTurnData(sessionId: string, data: { stopReason: string; lastCacheReadTokens: number }): Promise<void>;
   /** Mark the session as effort-escalated. */
   setEffortEscalated(sessionId: string): Promise<void>;
   /** Return true if the session has been effort-escalated. */
@@ -208,18 +206,10 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       return { prompt: r.lastPrompt, cls: r.lastDecisionClass, ts: r.lastDecisionAt };
     },
 
-    async updateStopReason(sessionId, stopReason) {
+    async updatePostTurnData(sessionId, data) {
       const records = await read();
       const updated = records.map((r) =>
-        r.sessionId === sessionId ? { ...r, lastStopReason: stopReason } : r,
-      );
-      await write(updated);
-    },
-
-    async updateLastCacheRead(sessionId, tokens) {
-      const records = await read();
-      const updated = records.map((r) =>
-        r.sessionId === sessionId ? { ...r, lastCacheReadTokens: tokens } : r,
+        r.sessionId === sessionId ? { ...r, lastStopReason: data.stopReason, lastCacheReadTokens: data.lastCacheReadTokens } : r,
       );
       await write(updated);
     },

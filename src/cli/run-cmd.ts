@@ -52,7 +52,7 @@ import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
 import { buildClaudeArgs, resolveAppendSystemPrompt } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
-import { computeFingerprint, prewarmFingerprints } from "../wrapper/prewarm.js";
+import { computeFingerprint } from "../wrapper/prewarm.js";
 import { detectContinuation } from "../wrapper/continuation.js";
 import { applyFirstTurnGuard } from "../wrapper/first-turn-guard.js";
 import { format, loadCliConfig, readState } from "./utils.js";
@@ -245,9 +245,13 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       // can recompute the same fingerprint from the spec without needing
       // userConfig. Same value flows to spawn.ts via decision.spec.
       const resolvedAppendPrompt = resolveAppendSystemPrompt(decision, cli.userConfig);
+      // Use effective bare: --bare is only applied when bareSupported (non-OAuth).
+      // On OAuth (Team/Pro), bareSupported=false so bare is never emitted — the
+      // fingerprint must reflect the actual system prompt, not the spec value.
+      const effectiveBare = pre.bareSupported && (decision.spec.bare ?? false);
       const fp = computeFingerprint({
         model: decision.spec.model,
-        bare: decision.spec.bare ?? false,
+        bare: effectiveBare,
         excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
         ...(decision.spec.tools ? { tools: decision.spec.tools } : {}),
         ...(decision.spec.mcpConfig ? { mcpConfig: decision.spec.mcpConfig } : {}),
@@ -311,24 +315,11 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         bareSupported: pre.bareSupported,
       });
 
-      // Prewarm adjacent fingerprints (other model tiers) fire-and-forget.
-      // Match the live spec so the prewarmed session has the same fingerprint
-      // as the real turn — otherwise the warm session is unreachable.
-      const PREWARM_MODELS = ["haiku", "sonnet", "opus"] as const;
-      const prewarmSpecs = PREWARM_MODELS
-        .filter((m) => m !== decision.spec.model)
-        .map((m) => ({
-          fingerprint: computeFingerprint({
-            model: m,
-            excludeDynamicSections: true,
-            ...(decision.spec.tools ? { tools: decision.spec.tools } : {}),
-            ...(decision.spec.mcpConfig ? { mcpConfig: decision.spec.mcpConfig } : {}),
-            appendSystemPrompt: resolvedAppendPrompt,
-          }),
-          model: m,
-          effort: "low",
-        }));
-      void prewarmFingerprints(process.cwd(), prewarmSpecs);
+      // Cross-model prewarm removed: per-model fingerprints differ in mcpConfig
+      // (reasoning/max keep MCP access; trivial/simple/standard/hard strip it),
+      // so prewarming with the current turn's config produced unreachable sessions.
+      // Sessions warm naturally on first use — 3 unique fingerprints per cwd after
+      // the profile.simple tools→default unification.
 
       // P1: M1 continuation hint is prepended to the user prompt rather than
       // mutating spec.appendSystemPrompt — keeps the cache prefix stable across

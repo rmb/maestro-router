@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.2.4 — 2026-05-26 · Auto-compact + paste condenser + race condition fix
+
+**Problem:** Three issues prevented savings from recovering: (1) `lastCacheReadTokens` was never persisted due to a race condition between two concurrent fire-and-forget writes; (2) the compaction advisory was passive — it could warn but not act; (3) large structured-data pastes (analytics dumps, tabular data) were sent verbatim to Claude even when only the summary mattered.
+
+### What changed
+
+**`session`: fix race condition in post-turn writes** (`src/wrapper/session.ts`)
+
+Two concurrent `void` read-modify-write operations on `sessions.json` — one for `lastStopReason`, one for `lastCacheReadTokens` — were overwriting each other. Last writer always won, so `lastCacheReadTokens` was never stored. Consolidated into a single `updatePostTurnData({ stopReason, lastCacheReadTokens })` awaited call. Compaction can now fire correctly.
+
+**`run-cmd`: auto-compact when cache_read exceeds threshold** (`src/cli/run-cmd.ts`)
+
+When `autoCompact: true` (new config key, default off), spawns `/compact` silently before the real prompt whenever the prior session's `cache_read_input_tokens` exceeds `autoCompactThresholdTokens` (default 300,000). Emits two stderr lines so the user sees the compaction. When `autoCompact: false`, falls back to the advisory message from v0.2.3.
+
+**`paste`: rule-based paste condenser** (`src/wrapper/paste.ts`)
+
+Detects structured-data-heavy prompts: length > 800 chars, ≥ 10 non-empty lines, < 5 code keywords, > 65% short lines (< 60 chars each). Truncates the middle, keeping 350 head + 150 tail chars plus a `[... N chars of structured data truncated ...]` marker. Enabled via `enablePasteCondenser: true` in `~/.maestro/config.json`.
+
+**`install.sh`: fix bash 3.2 incompatibility** (`scripts/install.sh`)
+
+macOS ships bash 3.2 which rejects `${var,,}` lowercase expansion. Replaced with explicit `[[ "$var" == "y" || "$var" == "Y" ]]` check. Also adds interactive prompt to install `@xenova/transformers` optional peer during `install.sh`.
+
+### Configuration
+
+```json
+// ~/.maestro/config.json
+{
+  "autoCompact": true,
+  "autoCompactThresholdTokens": 300000,
+  "enablePasteCondenser": true
+}
+```
+
+### Upgrade
+
+```sh
+npm install -g maestro-router@0.2.4
+```
+
+---
+
 ## v0.2.3 — 2026-05-26 · Classifier accuracy + compaction advisory
 
 **Problem:** Savings were still negative (-6%) after v0.2.2. Three remaining leaks: bare affirmations short-circuiting the pipeline at 0.8 confidence (preventing Markov from routing "yes/ok/sure" to the prior session's class); common low-context prompts hitting the LLM classifier at <0.2 confidence instead of heuristics; no signal when session cached context grew large enough to dominate per-turn cost.

@@ -1,6 +1,6 @@
 {
   "name": "maestro-router",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "A CLI wrapper that classifies each Claude Code prompt and routes it to the optimal model + thinking budget. Works on subscription, no API key required.",
   "type": "module",
   "license": "Apache-2.0",

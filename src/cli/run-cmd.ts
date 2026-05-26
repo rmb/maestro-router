@@ -283,12 +283,30 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             ...(cmdOpts.newSession ? { newSession: true } : {}),
           });
 
-      // Compaction advisory: warn when cached context is large enough that /compact pays for itself
-      const COMPACT_THRESHOLD = 300_000;
-      if (!session.isNew && priorCacheReadTokens > COMPACT_THRESHOLD) {
-        process.stderr.write(
-          `maestro: session at ~${Math.round(priorCacheReadTokens / 1000)}k cached context — /compact will reset it and reduce per-turn cache_read cost\n`,
-        );
+      // Compaction: when cached context exceeds threshold, either warn or auto-compact.
+      const COMPACT_THRESHOLD = cli.userConfig.autoCompactThresholdTokens ?? 300_000;
+      const needsCompact = !session.isNew && priorCacheReadTokens > COMPACT_THRESHOLD;
+      if (needsCompact) {
+        if (cli.userConfig.autoCompact) {
+          // Auto-compact: spawn /compact silently, then continue with the real prompt.
+          process.stderr.write(
+            `maestro: auto-compacting session (~${Math.round(priorCacheReadTokens / 1000)}k cached tokens)\n`,
+          );
+          const compactArgs = buildClaudeArgs({
+            decision: { ...decision, spec: { ...decision.spec, appendSystemPrompt: resolvedAppendPrompt } },
+            userConfig: cli.userConfig,
+            sessionId: session.sessionId,
+            isResume: true,
+            bareSupported: pre.bareSupported,
+          });
+          const nullStream = new (await import("node:stream")).Writable({ write(_c, _e, cb) { cb(); } });
+          await doStream({ args: compactArgs, prompt: "/compact", stdout: nullStream, stderr: process.stderr, forwardSigint: false });
+          process.stderr.write(`maestro: compacted — continuing with your prompt\n`);
+        } else {
+          process.stderr.write(
+            `maestro: session at ~${Math.round(priorCacheReadTokens / 1000)}k cached context — /compact will reset it and reduce per-turn cache_read cost\n`,
+          );
+        }
       }
 
       // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens

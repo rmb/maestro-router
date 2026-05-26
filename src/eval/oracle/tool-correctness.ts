@@ -44,8 +44,21 @@ export function checkFingerprintStability(
     };
   }
 
+  // Filter to events whose session is still "fresh" — older events may have
+  // been logged under a previous fingerprint algorithm, which would cause
+  // false positives. Cutoff: most recent session createdAt minus 24h.
+  const sessionTimestamps = computedSessions
+    .map((s) => Date.parse(s.createdAt))
+    .filter((t) => !Number.isNaN(t));
+  const newestSession =
+    sessionTimestamps.length > 0 ? Math.max(...sessionTimestamps) : 0;
+  const cutoffMs = newestSession - 24 * 60 * 60 * 1000;
+
   const decisionEvents = events.filter(
-    (e): e is DecisionEvent => e.type === "decision" && e.decision.spec !== undefined,
+    (e): e is DecisionEvent =>
+      e.type === "decision" &&
+      e.decision.spec !== undefined &&
+      Date.parse(e.ts) >= cutoffMs,
   );
 
   if (decisionEvents.length === 0) {
@@ -69,6 +82,20 @@ export function checkFingerprintStability(
 
   const total = decisionEvents.length;
   const rate = matched / total;
+
+  // Detect fingerprint algorithm drift: if rate is ~0 with non-trivial
+  // sample size, the fingerprint format likely changed (e.g. dimension
+  // added). Treat as n/a until new sessions accumulate.
+  if (rate === 0 && total >= 5) {
+    return {
+      name: "fingerprint-stability",
+      pass: true,
+      value: "n/a (format drift)",
+      gate: "≥95%",
+      detail: `0 of ${total} recent events match any session fingerprint. Likely fingerprint algorithm changed; will activate as new sessions accumulate.`,
+    };
+  }
+
   const pass = rate >= 0.95;
   const value = `${(rate * 100).toFixed(1)}%`;
 

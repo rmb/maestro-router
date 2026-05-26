@@ -207,6 +207,9 @@ export function registerRunCommand(program: Command): void {
         model: decision.spec.model,
         bare: decision.spec.bare ?? false,
         excludeDynamicSections: decision.spec.excludeDynamicSections ?? true,
+        ...(decision.spec.tools ? { tools: decision.spec.tools } : {}),
+        ...(decision.spec.mcpConfig ? { mcpConfig: decision.spec.mcpConfig } : {}),
+        appendSystemPrompt: resolvedAppendPrompt,
       });
 
       // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set
@@ -239,12 +242,13 @@ export function registerRunCommand(program: Command): void {
         };
       }
 
-      // M1 continuation: inject hint when prior turn was truncated and prompt signals continuation
+      // M1 continuation: previously injected the hint via appendSystemPrompt
+      // AFTER the fingerprint was computed — guaranteed cache miss. Now we pass
+      // the hint as a leading user-message line via a separate field that
+      // spawn.ts emits as a user-prompt prefix, not a system-prompt mutation.
+      let continuationHint: string | null = null;
       if (continuationResult) {
-        effectiveDecision = {
-          ...effectiveDecision,
-          spec: { ...effectiveDecision.spec, appendSystemPrompt: continuationResult.hint },
-        };
+        continuationHint = continuationResult.hint;
       }
 
       const args = buildClaudeArgs({
@@ -255,7 +259,9 @@ export function registerRunCommand(program: Command): void {
         bareSupported: pre.bareSupported,
       });
 
-      // Prewarm adjacent fingerprints (other model tiers) fire-and-forget
+      // Prewarm adjacent fingerprints (other model tiers) fire-and-forget.
+      // Match the live spec so the prewarmed session has the same fingerprint
+      // as the real turn — otherwise the warm session is unreachable.
       const PREWARM_MODELS = ["haiku", "sonnet", "opus"] as const;
       const prewarmSpecs = PREWARM_MODELS
         .filter((m) => m !== decision.spec.model)
@@ -263,15 +269,26 @@ export function registerRunCommand(program: Command): void {
           fingerprint: computeFingerprint({
             model: m,
             excludeDynamicSections: true,
+            ...(decision.spec.tools ? { tools: decision.spec.tools } : {}),
+            ...(decision.spec.mcpConfig ? { mcpConfig: decision.spec.mcpConfig } : {}),
+            appendSystemPrompt: resolvedAppendPrompt,
           }),
           model: m,
           effort: "low",
         }));
       void prewarmFingerprints(process.cwd(), prewarmSpecs);
 
+      // P1: M1 continuation hint is prepended to the user prompt rather than
+      // mutating spec.appendSystemPrompt — keeps the cache prefix stable across
+      // continuation turns. Cost: ~50 tokens of input vs guaranteed cache miss
+      // on the entire system prompt prefix (~14-37k tokens).
+      const promptWithHint = continuationHint
+        ? `${continuationHint}\n\n${stripped}`
+        : stripped;
+
       const result = await streamClaude({
         args,
-        prompt: stripped,
+        prompt: promptWithHint,
         stdout: process.stdout,
         stderr: process.stderr,
         forwardSigint: true,
@@ -283,6 +300,9 @@ export function registerRunCommand(program: Command): void {
       await sessions.appendClass(session.sessionId, effectiveDecision.class);
       // Buffer this turn's prompt + class so the next turn can emit a correction event.
       void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), effectiveDecision.class);
+
+      // P5: capture turn index for telemetry (after appendClass increment).
+      const turnIndex = await sessions.getTurnCount(session.sessionId);
 
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
       const telemetry = createTelemetry(
@@ -302,6 +322,8 @@ export function registerRunCommand(program: Command): void {
         decision: decisionWithCacheHit,
         ...(parsed?.cost ? { cost: parsed.cost } : {}),
         prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
+        sessionId: session.sessionId,
+        turnIndex,
       });
 
       if (parsed) {

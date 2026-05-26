@@ -116,8 +116,9 @@ describe("runSdkProxy — user message routing", () => {
       spawn: fc.spawn,
     });
 
-    // The proxy must have written the set_model request BEFORE the user message.
-    expect(fc.stdinWrites.length).toBe(2);
+    // The proxy must have written set_model + set_max_thinking_tokens (P3)
+    // BEFORE the user message.
+    expect(fc.stdinWrites.length).toBe(3);
     const setModel = JSON.parse(fc.stdinWrites[0]!.trim()) as {
       type: string;
       request_id: string;
@@ -129,7 +130,13 @@ describe("runSdkProxy — user message routing", () => {
     expect(setModel.request.model).toBe("haiku");
     expect(setModel.request_id.startsWith(MAESTRO_REQUEST_ID_PREFIX)).toBe(true);
 
-    const userForwarded = JSON.parse(fc.stdinWrites[1]!.trim()) as { type: string };
+    const setThink = JSON.parse(fc.stdinWrites[1]!.trim()) as {
+      type: string;
+      request: { subtype: string };
+    };
+    expect(setThink.request.subtype).toBe("set_max_thinking_tokens");
+
+    const userForwarded = JSON.parse(fc.stdinWrites[2]!.trim()) as { type: string };
     expect(userForwarded.type).toBe("user");
   });
 
@@ -326,10 +333,10 @@ describe("runSdkProxy — multi-turn + slash commands", () => {
       spawn: fc.spawn,
     });
 
-    // Order: set_model(haiku), user1, set_model(sonnet), user2
-    expect(fc.stdinWrites).toHaveLength(4);
+    // Order: set_model(haiku), set_thinking, user1, set_model(sonnet), set_thinking, user2
+    expect(fc.stdinWrites).toHaveLength(6);
     const sm1 = JSON.parse(fc.stdinWrites[0]!.trim());
-    const sm2 = JSON.parse(fc.stdinWrites[2]!.trim());
+    const sm2 = JSON.parse(fc.stdinWrites[3]!.trim());
     expect(sm1.request.model).toBe(balancedProfile.classes.trivial.model);
     expect(sm2.request.model).toBe(balancedProfile.classes.standard.model);
     expect(sm1.request_id).not.toBe(sm2.request_id);
@@ -414,8 +421,8 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     fc.close(0);
     await proxyP;
 
-    // The proxy should have injected set_model (haiku) then the tool_result frame.
-    expect(fc.stdinWrites).toHaveLength(2);
+    // The proxy should have injected set_model + set_max_thinking_tokens (P3) then the tool_result frame.
+    expect(fc.stdinWrites).toHaveLength(3);
     const setModel = JSON.parse(fc.stdinWrites[0]!.trim()) as {
       type: string;
       request: { subtype: string; model: string };
@@ -424,7 +431,7 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(setModel.request.subtype).toBe("set_model");
     expect(setModel.request.model).toBe(balancedProfile.classes.trivial.model); // haiku
 
-    const forwarded = JSON.parse(fc.stdinWrites[1]!.trim()) as { type: string };
+    const forwarded = JSON.parse(fc.stdinWrites[2]!.trim()) as { type: string };
     expect(forwarded.type).toBe("user");
   });
 
@@ -465,8 +472,8 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(routeCalls).toHaveLength(1);
     expect(routeCalls[0]!.metadata?.resolvedToolName).toBeUndefined();
 
-    // set_model + tool_result frame forwarded.
-    expect(fc.stdinWrites).toHaveLength(2);
+    // set_model + set_max_thinking_tokens + tool_result frame forwarded.
+    expect(fc.stdinWrites).toHaveLength(3);
   });
 
   test("toolUseMap evicts oldest entry when size exceeds 50", async () => {
@@ -685,12 +692,12 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     fc.close(0);
     await proxyP;
 
-    // The proxy should have injected set_model and forwarded the tool_result.
-    // stdinWrites[0] = set_model, stdinWrites[1] = stripped tool_result
-    expect(fc.stdinWrites).toHaveLength(2);
+    // The proxy should have injected set_model + set_max_thinking_tokens (P3)
+    // then the tool_result. stdinWrites[0]=set_model, [1]=set_thinking, [2]=stripped tool_result
+    expect(fc.stdinWrites).toHaveLength(3);
 
     // Parse the forwarded tool_result frame and verify line numbers are stripped.
-    const strippedFrame = JSON.parse(fc.stdinWrites[1]!.trim()) as {
+    const strippedFrame = JSON.parse(fc.stdinWrites[2]!.trim()) as {
       type: string;
       message: { content: Array<{ type: string; content: string }> };
     };

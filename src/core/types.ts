@@ -181,6 +181,19 @@ export type UserConfig = {
     eventsLogged?: number;
     lastWriteAt?: string | null;
   };
+  /**
+   * P3: opt out of `set_max_thinking_tokens` injection in sdk-proxy mode.
+   * The control_request is reverse-engineered from cli.js zod schemas and could
+   * change between CC versions. Default true (inject); set false if it causes
+   * issues after a Claude Code update.
+   */
+  injectSetMaxThinkingTokens?: boolean;
+  /**
+   * P8: opt out of MCP isolation on standard/hard classes. Default false (isolate).
+   * Set true if you need project MCP servers available on standard-class turns.
+   * Cost: 3-10k cache_creation tokens per first-turn on machines with active MCP.
+   */
+  disableStandardMcpIsolation?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */
@@ -261,6 +274,26 @@ export type CostBreakdown = {
   outputTokens: number;
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
+  /**
+   * P4: Anthropic charges 2× for the 1h ephemeral cache tier vs the 5m tier.
+   * Splitting these surfaces whether long session reuse is paying the 1h premium.
+   * Sum equals cacheCreationInputTokens when both are reported.
+   */
+  cacheCreationEphemeral1hTokens?: number;
+  cacheCreationEphemeral5mTokens?: number;
+  /**
+   * P2: Active context window the model used. 1M variants (claude-opus-4-7[1m])
+   * cost 2× normal input. Detected from `[1m]` suffix on modelUsage key or
+   * explicit contextWindow field.
+   */
+  contextWindow?: number;
+  /** P2: Max output tokens for this spawn (from modelUsage[*].maxOutputTokens). */
+  maxOutputTokens?: number;
+  /**
+   * P2: True when the 1M-context Opus variant was used. Telemetry/oracle signal
+   * for cost inflation detection.
+   */
+  is1mVariant?: boolean;
   durationMs: number;
   durationApiMs: number;
   stopReason: string;
@@ -285,6 +318,10 @@ export type TelemetryEvent =
       cost?: CostBreakdown;
       /** Truncated to PROMPT_TRUNCATE_CHARS to bound log growth. */
       prompt?: string;
+      /** P5: Session this decision belongs to. Enables per-session analysis. */
+      sessionId?: string;
+      /** P5: 1-based turn index within the session. */
+      turnIndex?: number;
     }
   | { type: "override"; ts: string; from: Class; to: Class; prompt: string }
   | {

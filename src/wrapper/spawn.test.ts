@@ -144,8 +144,9 @@ describe("buildClaudeArgs — S9 MCP isolation", () => {
   });
 
   test("omits MCP flags when mcpConfig undefined", () => {
+    // reasoning class has no mcpConfig by default (only trivial/simple/standard/hard do as of P8)
     const args = buildClaudeArgs({
-      decision: baseDecision("standard"),
+      decision: baseDecision("reasoning"),
       userConfig: emptyConfig,
       sessionId: "x",
       isResume: false,

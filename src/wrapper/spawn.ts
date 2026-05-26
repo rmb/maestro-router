@@ -51,8 +51,12 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--tools", spec.tools);
   }
 
-  // S9: MCP isolation — when mcpConfig present, force strict mode and pass the inline JSON
-  if (spec.mcpConfig !== undefined) {
+  // S9: MCP isolation — when mcpConfig present, force strict mode and pass the inline JSON.
+  // P8 opt-out: standard/hard classes received MCP isolation in P8; users who need
+  // project MCP servers on standard turns can disable via disableStandardMcpIsolation.
+  const isStandardOrHard = decision.class === "standard" || decision.class === "hard";
+  const skipMcp = userConfig.disableStandardMcpIsolation === true && isStandardOrHard;
+  if (spec.mcpConfig !== undefined && !skipMcp) {
     args.push("--strict-mcp-config", "--mcp-config", spec.mcpConfig);
   }
 

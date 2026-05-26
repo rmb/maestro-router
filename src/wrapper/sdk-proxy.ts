@@ -23,6 +23,8 @@ import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
 import { parseOutput } from "./output.js";
 import { stripLineNumbers } from "./line-stripper.js";
+import { compressToolEnvelope } from "./tool-envelope.js";
+import { createBatchHintState, recordPromptAndMaybeAdvise } from "./batch-hint.js";
 import type { SessionStore } from "./session.js";
 
 // I1: skip line-number stripping when RTK (rtk-ai/rtk) is already on PATH — it
@@ -39,7 +41,10 @@ function rtkOnPath(): boolean {
 const RTK_PRESENT = rtkOnPath();
 import {
   buildSetModelRequest,
+  buildSetThinkingTokensRequest,
+  effortToThinkingTokens,
   extractPromptText,
+  extractRateLimitInfo,
   extractToolUseBlocks,
   extractToolUseIds,
   isToolResultMessage,
@@ -83,6 +88,13 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) : s;
 }
 
+/** P6: emergency model downgrade ladder for rate-limit pressure. */
+function downgradeUnderPressure(model: string): string {
+  if (model.includes("opus")) return "sonnet";
+  if (model.includes("sonnet")) return "haiku";
+  return model;
+}
+
 /** Maximum number of tool_use_id entries to keep in the tracking map. */
 const TOOL_USE_MAP_MAX = 50;
 
@@ -124,7 +136,28 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
     decision: Decision;
     ts: string;
     prompt: string;
+    turnIndex?: number;
   }> = [];
+
+  // P5: count turns in this sdk-proxy run for telemetry.turnIndex
+  let panelTurnCount = 0;
+
+  // P9: batch-hint state — emits one-shot advisory on quick-fire short prompts
+  const batchHint = createBatchHintState();
+
+  // P6: track rate-limit pressure. When the 5h window is within 5 minutes of
+  // exhaustion, force-downgrade subsequent set_model requests to haiku.
+  // Resets when the rate_limit_event reports `status: "allowed"`.
+  let rateLimitPressure = false;
+  let rateLimitWarned = false;
+
+  // P10: track cumulative cache_read tokens for session-bloat warnings.
+  // Empirical thresholds from real telemetry analysis:
+  //   500k → ~5-10× boot cost; soft warning (suggest /compact)
+  //   2M   → 30-100× boot cost; hard warning (suggest restart)
+  let maxCacheReadSeen = 0;
+  let compactSuggested = false;
+  let restartSuggested = false;
 
   // ── stdout: filter injected control_responses, populate toolUseMap,
   // flush pending telemetry entries when result frames arrive.
@@ -139,6 +172,28 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
         const frame = parseFrame(line);
         if (frame !== null) {
           if (matchesInjectedRequestId(frame)) continue;
+
+          // P6: rate-limit signal — proactively pressure-downgrade when quota
+          // is close to exhaustion or overage is disabled.
+          const rli = extractRateLimitInfo(frame);
+          if (rli !== null) {
+            const secondsToReset = rli.resetsAt - Math.floor(Date.now() / 1000);
+            const isLimited = rli.status === "limited";
+            const isCloseToReset = secondsToReset > 0 && secondsToReset < 300;
+            const overageBlocked =
+              rli.overageStatus === "rejected" || rli.overageDisabledReason !== undefined;
+            rateLimitPressure = isLimited || isCloseToReset;
+            if ((rateLimitPressure || overageBlocked) && !rateLimitWarned) {
+              rateLimitWarned = true;
+              const detail = overageBlocked
+                ? `overage blocked (${rli.overageDisabledReason ?? "rejected"})`
+                : `${rli.rateLimitType} window resets in ${Math.max(secondsToReset, 0)}s`;
+              opts.stderr.write(
+                `maestro: rate limit pressure — ${detail}; downgrading expensive models.\n`,
+              );
+            }
+          }
+
           // Track tool_use blocks from assistant frames for per-tool routing.
           const toolUseBlocks = extractToolUseBlocks(frame);
           for (const { id, name } of toolUseBlocks) {
@@ -155,12 +210,31 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
             if (p !== undefined) {
               const parsed = parseOutput(JSON.stringify(frame), opts.userConfig);
               const cacheHit = (parsed?.cost?.cacheReadInputTokens ?? 0) > 0;
+
+              // P10: session-bloat warnings keyed on cache_read tokens.
+              const cacheRead = parsed?.cost?.cacheReadInputTokens ?? 0;
+              if (cacheRead > maxCacheReadSeen) maxCacheReadSeen = cacheRead;
+              if (!compactSuggested && maxCacheReadSeen > 500_000) {
+                compactSuggested = true;
+                opts.stderr.write(
+                  `maestro: session context now ${(maxCacheReadSeen / 1000).toFixed(0)}k cache_read tokens (~5-10× boot cost). Consider /compact.\n`,
+                );
+              }
+              if (!restartSuggested && maxCacheReadSeen > 2_000_000) {
+                restartSuggested = true;
+                opts.stderr.write(
+                  `maestro: session context now ${(maxCacheReadSeen / 1_000_000).toFixed(1)}M cache_read tokens (30-100× boot cost). Cheaper to restart than continue.\n`,
+                );
+              }
+
               opts.telemetry.log({
                 type: "decision",
                 ts: p.ts,
                 decision: { ...p.decision, cacheHit },
                 ...(parsed ? { cost: parsed.cost } : {}),
                 ...(p.prompt ? { prompt: p.prompt } : {}),
+                ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+                ...(p.turnIndex !== undefined ? { turnIndex: p.turnIndex } : {}),
               }).catch(() => { /* telemetry must never block routing */ });
             }
           }
@@ -211,10 +285,24 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
 
-      // I1: remove line-number prefixes to reduce token inflation from location metadata.
-      // Skip when RTK is on PATH — it already does this compression.
-      const strippedFrame = skipI1 ? frame : transformToolResults(frame, stripLineNumbers);
-      const strippedLine = JSON.stringify(strippedFrame);
+      // P3: inject set_max_thinking_tokens so effort routing actually works in
+      // sdk-proxy mode (spawn-time --effort isn't available here).
+      if (opts.userConfig.injectSetMaxThinkingTokens !== false) {
+        injectedSeq += 1;
+        const setThink = buildSetThinkingTokensRequest(
+          effortToThinkingTokens(decision.spec.effort),
+          injectedSeq,
+        );
+        child.stdin?.write(JSON.stringify(setThink) + "\n");
+      }
+
+      // I1 + P7: chain transforms. I1 strips line-numbers (skipped when RTK on PATH).
+      // P7 collapses Claude-Code-specific envelope boilerplate (file ack, todo ack,
+      // file-state footer, stream-closed noise) — orthogonal to RTK, always on.
+      let transformed = frame;
+      if (!skipI1) transformed = transformToolResults(transformed, stripLineNumbers);
+      transformed = transformToolResults(transformed, compressToolEnvelope);
+      const strippedLine = JSON.stringify(transformed);
       child.stdin?.write(strippedLine + "\n");
 
       // Tool result routing: classifier runs, set_model injected, but decision
@@ -242,20 +330,45 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       );
 
       // Inject set_model BEFORE forwarding the user message so claude
-      // honors the new model on this turn.
+      // honors the new model on this turn. P6: under rate-limit pressure,
+      // force-downgrade to the cheapest model that still serves the class.
+      const modelToUse = rateLimitPressure
+        ? downgradeUnderPressure(decision.spec.model)
+        : decision.spec.model;
       injectedSeq += 1;
-      const setModel = buildSetModelRequest(decision.spec.model, injectedSeq);
+      const setModel = buildSetModelRequest(modelToUse, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
+
+      // P3: inject set_max_thinking_tokens for real effort control in panel mode.
+      // Cap thinking under rate-limit pressure regardless of decision effort.
+      // Opt-out via userConfig.injectSetMaxThinkingTokens=false (protocol is
+      // reverse-engineered from cli.js — could change across CC versions).
+      if (opts.userConfig.injectSetMaxThinkingTokens !== false) {
+        const effortForThink = rateLimitPressure ? "low" : decision.spec.effort;
+        injectedSeq += 1;
+        const setThink = buildSetThinkingTokensRequest(
+          effortToThinkingTokens(effortForThink),
+          injectedSeq,
+        );
+        child.stdin?.write(JSON.stringify(setThink) + "\n");
+      }
+
       child.stdin?.write(line + "\n");
 
       // Persist routing class for Markov context on subsequent turns.
       recordClass(decision.class);
+      panelTurnCount += 1;
+
+      // P9: emit batch-hint advisory on quick-fire clusters (one-shot per run)
+      const hint = recordPromptAndMaybeAdvise(batchHint, decision.class);
+      if (hint) opts.stderr.write(`${hint}\n`);
 
       // Defer telemetry: flush when result frame arrives on stdout.
       pendingQueue.push({
         decision: { ...decision, latencyMs: Date.now() - t0 },
         ts: new Date().toISOString(),
         prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
+        turnIndex: panelTurnCount,
       });
 
       continue;

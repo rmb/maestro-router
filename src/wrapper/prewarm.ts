@@ -18,9 +18,15 @@ export type FingerprintSpec = {
 };
 
 /**
- * Compute the system-prompt fingerprint from stable session config.
- * Includes: model tier, bare mode, excludeDynamicSections.
- * Excludes: per-class tools/mcpConfig (applied at spawn time, not session key time).
+ * Compute the system-prompt fingerprint from ALL stable cache-affecting dimensions.
+ * The Anthropic prompt cache is keyed by exact prefix bytes — any of these changes
+ * invalidates the cache, so the fingerprint must capture them all.
+ *
+ * P1: previously only hashed {model, bare, excludeDynamic}, causing silent cache
+ * misses on class swaps (different tools/mcpConfig/appendSystemPrompt) that
+ * collided into the same fingerprint bucket. Now hashes 6 dimensions with
+ * normalization so user-supplied variants don't accidentally invalidate.
+ *
  * Pure function — no I/O.
  * budget: 0ms (no I/O, pure hash)
  */
@@ -28,6 +34,9 @@ export function computeFingerprint(spec: {
   model: string;
   bare?: boolean;
   excludeDynamicSections?: boolean;
+  tools?: string;
+  mcpConfig?: string;
+  appendSystemPrompt?: string;
 }): string {
   return createHash("sha256")
     .update(
@@ -35,10 +44,48 @@ export function computeFingerprint(spec: {
         spec.model,
         spec.bare ? "bare" : "full",
         spec.excludeDynamicSections ? "exclude" : "include",
+        normalizeTools(spec.tools),
+        normalizeMcpConfig(spec.mcpConfig),
+        normalizeAppendPrompt(spec.appendSystemPrompt),
       ]),
     )
     .digest("hex")
     .slice(0, 16);
+}
+
+/** Sort tool list so "Read,Edit" and "Edit,Read" produce the same fingerprint. */
+function normalizeTools(tools: string | undefined): string {
+  if (!tools || tools === "default") return "default";
+  return tools.split(",").map((t) => t.trim()).filter(Boolean).sort().join(",");
+}
+
+/** Canonicalize JSON so {a:1,b:2} and {b:2,a:1} produce the same fingerprint. */
+function normalizeMcpConfig(json: string | undefined): string {
+  if (!json) return "inherit";
+  try {
+    return JSON.stringify(sortKeys(JSON.parse(json) as unknown));
+  } catch {
+    return json;
+  }
+}
+
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === "object") {
+    return Object.keys(v as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, k) => {
+        acc[k] = sortKeys((v as Record<string, unknown>)[k]);
+        return acc;
+      }, {});
+  }
+  return v;
+}
+
+/** Collapse whitespace + trim so trivial formatting differences don't bust cache. */
+function normalizeAppendPrompt(s: string | undefined): string {
+  if (!s) return "";
+  return s.replace(/\s+/g, " ").trim();
 }
 
 /**

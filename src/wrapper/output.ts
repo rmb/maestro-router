@@ -32,6 +32,11 @@ type ClaudeJsonOutput = {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
     service_tier?: string;
+    /** P4: ephemeral cache TTL breakdown (1h costs 2× 5m). */
+    cache_creation?: {
+      ephemeral_1h_input_tokens?: number;
+      ephemeral_5m_input_tokens?: number;
+    };
   };
   modelUsage?: Record<
     string,
@@ -41,6 +46,9 @@ type ClaudeJsonOutput = {
       cacheReadInputTokens?: number;
       cacheCreationInputTokens?: number;
       costUSD?: number;
+      /** P2: 200k or 1_000_000 (1M variant costs 2× input). */
+      contextWindow?: number;
+      maxOutputTokens?: number;
     }
   >;
 };
@@ -81,17 +89,31 @@ export function parseOutput(raw: string, userConfig: UserConfig = {}): ParsedOut
       ? usage.cache_read_input_tokens
       : (modelEntry?.cacheReadInputTokens ?? 0);
 
+  const modelName = pickModelName(parsed.modelUsage);
+  const is1m = modelName.includes("[1m]");
+  const ephem1h = usage.cache_creation?.ephemeral_1h_input_tokens;
+  const ephem5m = usage.cache_creation?.ephemeral_5m_input_tokens;
+
   const cost: CostBreakdown = {
     totalCostUsd: parsed.total_cost_usd ?? modelEntry?.costUSD ?? 0,
     inputTokens,
     outputTokens,
     cacheCreationInputTokens: cacheCreation,
     cacheReadInputTokens: cacheRead,
+    ...(typeof ephem1h === "number" ? { cacheCreationEphemeral1hTokens: ephem1h } : {}),
+    ...(typeof ephem5m === "number" ? { cacheCreationEphemeral5mTokens: ephem5m } : {}),
+    ...(typeof modelEntry?.contextWindow === "number"
+      ? { contextWindow: modelEntry.contextWindow }
+      : {}),
+    ...(typeof modelEntry?.maxOutputTokens === "number"
+      ? { maxOutputTokens: modelEntry.maxOutputTokens }
+      : {}),
+    ...(is1m ? { is1mVariant: true } : {}),
     durationMs: parsed.duration_ms ?? 0,
     durationApiMs: parsed.duration_api_ms ?? 0,
     stopReason: parsed.stop_reason ?? "unknown",
     serviceTier: parsed.usage?.service_tier ?? "unknown",
-    modelUsed: pickModelName(parsed.modelUsage),
+    modelUsed: modelName,
   };
 
   const diagnostics: Diagnostic[] = [];
@@ -101,6 +123,14 @@ export function parseOutput(raw: string, userConfig: UserConfig = {}): ParsedOut
       severity: "hint",
       code: "info.compact_recommended",
       message: `cache_creation_input_tokens=${cost.cacheCreationInputTokens} exceeded ${threshold}; consider /clear or /compact to reset cache cost`,
+    });
+  }
+  // P2: detect 1M Opus variant when context isn't needed (2x input cost inflation).
+  if (is1m && cost.inputTokens > 0 && cost.inputTokens < 150_000) {
+    diagnostics.push({
+      severity: "warning",
+      code: "info.1m_variant_unused",
+      message: `1M-context variant ${modelName} used with only ${cost.inputTokens} input tokens; 200k variant would cost ~50% less.`,
     });
   }
   if (parsed.subtype === "error_max_budget_usd") {

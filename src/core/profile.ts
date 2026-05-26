@@ -48,8 +48,11 @@ export const balancedProfile: Profile = {
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.3,
     },
-    standard: { model: "sonnet", effort: "low", tools: "default", maxBudgetUsd: 1.0, maxOutputTokens: 16000 },
-    hard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
+    // P8: standard/hard isolate inherited MCP servers (saves 3-10k cache_creation
+    // tokens on machines with active MCP configs). Tools left as "default" — MCP
+    // isolation is the cheaper win without restricting tool access.
+    standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 1.0, maxOutputTokens: 16000 },
+    hard: { model: "sonnet", effort: "high", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
     reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
     max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
@@ -74,8 +77,9 @@ export const cheapProfile: Profile = {
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.1,
     },
-    standard: { model: "sonnet", effort: "low", tools: "default", maxBudgetUsd: 0.5 },
-    hard: { model: "sonnet", effort: "medium", tools: "default", maxBudgetUsd: 2.0 },
+    // P8: cheap profile also gets MCP isolation on standard/hard
+    standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
+    hard: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 2.0 },
     reasoning: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0 },
     max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },

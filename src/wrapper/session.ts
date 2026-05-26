@@ -33,6 +33,11 @@ export type SessionRecord = {
   lastStopReason?: string;
   /** True if this session has been effort-escalated (for E1.escalate). */
   effortEscalated?: boolean;
+  /**
+   * P5: cumulative turn count for this session. Incremented on appendClass.
+   * Used to log turnIndex on each decision event for per-session analysis.
+   */
+  turnCount?: number;
 };
 
 export type SessionStoreOptions = {
@@ -74,6 +79,8 @@ export type SessionStore = {
   setEffortEscalated(sessionId: string): Promise<void>;
   /** Return true if the session has been effort-escalated. */
   getEffortEscalated(sessionId: string): Promise<boolean>;
+  /** P5: read the cumulative turn count for telemetry. Returns 0 for unknown sessions. */
+  getTurnCount(sessionId: string): Promise<number>;
   list(): Promise<SessionRecord[]>;
 };
 
@@ -175,7 +182,7 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
         if (r.sessionId !== sessionId) return r;
         const prev = r.recentClasses ?? [];
         const next = [...prev, cls].slice(-5); // keep last 5
-        return { ...r, recentClasses: next };
+        return { ...r, recentClasses: next, turnCount: (r.turnCount ?? 0) + 1 };
       });
       await write(updated);
     },
@@ -217,6 +224,12 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       const records = await read();
       const r = records.find((s) => s.sessionId === sessionId);
       return r?.effortEscalated === true;
+    },
+
+    async getTurnCount(sessionId) {
+      const records = await read();
+      const r = records.find((s) => s.sessionId === sessionId);
+      return r?.turnCount ?? 0;
     },
 
     async list() {

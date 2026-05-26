@@ -490,6 +490,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         sessionId: session.sessionId,
         turnIndex,
+        isNewSession: session.isNew,
       });
 
       if (effectiveParsed) {

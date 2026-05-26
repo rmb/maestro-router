@@ -247,6 +247,155 @@ describe("1M variant baseline pricing", () => {
   });
 });
 
+describe("cacheReadCostUsd", () => {
+  test("computes cache_read cost for haiku model (0.10/1M tokens)", () => {
+    const event: TelemetryEvent = {
+      type: "decision",
+      ts: "2026-05-21T10:00:00.000Z",
+      decision: {
+        class: "trivial",
+        classifier: "heuristic",
+        confidence: 0.95,
+        spec: { model: "haiku", effort: "low", maxBudgetUsd: 0.05 },
+        latencyMs: 5,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.001,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 1_000_000,
+        durationMs: 300,
+        durationApiMs: 250,
+        stopReason: "end_turn",
+        modelUsed: "claude-haiku-4-5",
+        serviceTier: "default",
+      },
+    };
+    const summary = computeSummary([event], 7);
+    // 1_000_000 * (0.10 / 1_000_000) = 0.10
+    expect(summary.cacheReadCostUsd).toBeCloseTo(0.10, 4);
+  });
+
+  test("computes cache_read cost for sonnet model (0.30/1M tokens)", () => {
+    const event: TelemetryEvent = {
+      type: "decision",
+      ts: "2026-05-21T10:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model: "sonnet", effort: "medium", maxBudgetUsd: 0.1 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.005,
+        inputTokens: 200,
+        outputTokens: 100,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 1_000_000,
+        durationMs: 500,
+        durationApiMs: 450,
+        stopReason: "end_turn",
+        modelUsed: "claude-sonnet-4-6",
+        serviceTier: "default",
+      },
+    };
+    const summary = computeSummary([event], 7);
+    // 1_000_000 * (0.30 / 1_000_000) = 0.30
+    expect(summary.cacheReadCostUsd).toBeCloseTo(0.30, 4);
+  });
+
+  test("cacheReadCostUsd is 0 when no cache_read tokens", () => {
+    const summary = computeSummary([makeDecision({ outputTokens: 100 })], 7);
+    expect(summary.cacheReadCostUsd).toBe(0);
+  });
+
+  test("accumulates cache_read cost across multiple turns", () => {
+    const makeCacheRead = (model: string, tokens: number): TelemetryEvent => ({
+      type: "decision",
+      ts: "2026-05-21T10:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model, effort: "medium", maxBudgetUsd: 0.1 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.001,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: tokens,
+        durationMs: 300,
+        durationApiMs: 250,
+        stopReason: "end_turn",
+        modelUsed: `claude-${model}-latest`,
+        serviceTier: "default",
+      },
+    });
+    // haiku: 1M * 0.10/1M = 0.10; sonnet: 1M * 0.30/1M = 0.30 → total 0.40
+    const events: TelemetryEvent[] = [
+      makeCacheRead("haiku", 1_000_000),
+      makeCacheRead("sonnet", 1_000_000),
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.cacheReadCostUsd).toBeCloseTo(0.40, 4);
+  });
+});
+
+describe("freshSessionRate", () => {
+  test("counts isNewSession=true events as fresh sessions", () => {
+    const fresh: TelemetryEvent = {
+      ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>,
+      isNewSession: true,
+    };
+    const reused: TelemetryEvent = {
+      ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>,
+      isNewSession: false,
+    };
+    const summary = computeSummary([fresh, reused, fresh], 7);
+    // 2 fresh out of 3 = 0.6667
+    expect(summary.freshSessionRate).toBeCloseTo(2 / 3, 3);
+  });
+
+  test("events missing isNewSession do not count as fresh", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision({ outputTokens: 100 }), // undefined isNewSession
+      makeDecision({ outputTokens: 100 }),
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.freshSessionRate).toBe(0);
+  });
+
+  test("freshSessionRate is 0 with no events", () => {
+    const summary = computeSummary([], 7);
+    expect(summary.freshSessionRate).toBe(0);
+  });
+
+  test("freshSessionRate is 1 when all turns are fresh sessions", () => {
+    const events: TelemetryEvent[] = [
+      { ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>, isNewSession: true },
+      { ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>, isNewSession: true },
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.freshSessionRate).toBe(1);
+  });
+
+  test("isNewSession=false does not count as fresh", () => {
+    const events: TelemetryEvent[] = [
+      { ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>, isNewSession: false },
+      { ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>, isNewSession: true },
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.freshSessionRate).toBeCloseTo(0.5, 3);
+  });
+});
+
 describe("durationApiMsP90ByClass", () => {
   test("p90 of 10 values is at index 8", () => {
     // 10 standard decisions with durationApiMs: 100, 200, ..., 1000

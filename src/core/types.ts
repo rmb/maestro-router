@@ -352,6 +352,8 @@ export type TelemetryEvent =
       sessionId?: string;
       /** P5: 1-based turn index within the session. */
       turnIndex?: number;
+      /** True when this turn started a brand-new session (vs. reusing an existing one). */
+      isNewSession?: boolean;
     }
   | { type: "override"; ts: string; from: Class; to: Class; prompt: string }
   | {

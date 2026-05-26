@@ -38,6 +38,13 @@ const CACHE_WRITE_RATE: Record<string, number> = {
   opus: OPUS_CACHE_WRITE_PER_TOK,
 };
 
+/** Cache read rates per model alias (USD per token). */
+const CACHE_READ_RATE: Record<string, number> = {
+  haiku: 0.10 / 1_000_000,
+  sonnet: 0.30 / 1_000_000,
+  opus: OPUS_CACHE_READ_PER_TOK,
+};
+
 /**
  * Estimate the cache_creation cost from token count + model alias.
  * Used to report actual write cost rather than full-turn cost.
@@ -48,6 +55,18 @@ function estimateCacheWriteCost(model: string, tokens: number, is1m: boolean): n
   if (lower.includes("haiku")) return tokens * CACHE_WRITE_RATE.haiku!;
   if (lower.includes("opus")) return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
   return tokens * CACHE_WRITE_RATE.sonnet!; // sonnet default
+}
+
+/**
+ * Estimate the cache_read cost from token count + model alias.
+ * Used to report how much of the session spend is pure re-read tax.
+ */
+function estimateCacheReadCost(model: string, tokens: number, is1m: boolean): number {
+  if (tokens <= 0) return 0;
+  const lower = model.toLowerCase();
+  if (lower.includes("haiku")) return tokens * CACHE_READ_RATE.haiku!;
+  if (lower.includes("opus")) return tokens * (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK);
+  return tokens * CACHE_READ_RATE.sonnet!; // sonnet default
 }
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -66,6 +85,10 @@ type Summary = {
   has1mVariant: boolean;
   /** Count of events that used the 1M variant. */
   count1mVariant: number;
+  /** Actual cost charged for cache_read tokens across all turns. */
+  cacheReadCostUsd: number;
+  /** Fraction of decision events where isNewSession === true (fresh fingerprint). */
+  freshSessionRate: number;
   perClass: Record<
     Class,
     {
@@ -140,6 +163,8 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   let totalCacheCreationTokens1m = 0;
   let totalCacheReadTokens1m = 0;
   let count1mVariant = 0;
+  let cacheReadCostUsd = 0;
+  let freshSessionCount = 0;
 
   for (const e of events) {
     if (e.type === "decision") {
@@ -169,6 +194,11 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         totalOutputTokens += e.cost.outputTokens;
         totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
         totalCacheReadTokens += e.cost.cacheReadInputTokens;
+        cacheReadCostUsd += estimateCacheReadCost(
+          e.decision.spec.model,
+          e.cost.cacheReadInputTokens,
+          e.cost.is1mVariant ?? false,
+        );
         if (e.cost.is1mVariant) {
           count1mVariant++;
           totalInputTokens1m += e.cost.inputTokens;
@@ -177,6 +207,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         }
         durationApiMsByClass[cls].push(e.cost.durationApiMs);
       }
+      if (e.isNewSession === true) freshSessionCount++;
     } else if (e.type === "override") {
       const key = `${e.from}>${e.to}`;
       const cur = overridePairs.get(key) ?? { from: e.from, to: e.to, count: 0 };
@@ -220,6 +251,8 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     cacheReadSavingsTokens: cacheReadTokens,
     has1mVariant: count1mVariant > 0,
     count1mVariant,
+    cacheReadCostUsd: round(cacheReadCostUsd, 4),
+    freshSessionRate: totalRequests > 0 ? round(freshSessionCount / totalRequests, 4) : 0,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
@@ -320,6 +353,14 @@ function renderHuman(s: Summary): string {
   lines.push(
     `  ${bold("session boot")}    ${gray(usd(s.cacheCreationCostUsd))}  ${dim("(cache_creation cost)")}`,
   );
+  lines.push(
+    `  ${bold("cache_read cost")} ${gray(usd(s.cacheReadCostUsd))}  ${dim(`(${pct(s.totalCostUsd > 0 ? s.cacheReadCostUsd / s.totalCostUsd : 0, 1)} of spend)`)}`,
+  );
+  if (s.freshSessionRate > 0) {
+    lines.push(
+      `  ${bold("fresh sessions")}  ${cyan(pct(s.freshSessionRate, 1))}  ${dim("(new sessions)")}`,
+    );
+  }
 
   lines.push("");
   lines.push(dim("  per-class"));

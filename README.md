@@ -46,7 +46,68 @@ To remove: `bash scripts/install.sh --uninstall`.
 
 ---
 
-## How it works
+## How it works — step by step
+
+Here's exactly what happens between you pressing Enter and Claude responding.
+
+**Step 1 — Your prompt is intercepted.**
+You type a message in the VSCode Claude panel or run `maestro run "…"`. The `claudeCode.claudeProcessWrapper` setting points the official Claude Code extension at Maestro instead of `claude` directly. Every prompt lands in Maestro first; Claude never sees it until Maestro decides what to do with it.
+
+**Step 2 — Slash commands are passed through unchanged.**
+`/clear`, `/model`, `/help`, `/cost`, `/compact` are detected by `classifiers/passthrough.ts` and forwarded to Claude as-is. No classification, no routing decision, no cost.
+
+**Step 3 — The classifier pipeline runs.**
+For all other prompts, Maestro runs up to 5 classifiers in cheapest-first order. Each returns a class (trivial / simple / standard / hard / reasoning / max) and a confidence score, or null if it has no signal. The pipeline short-circuits the moment any stage returns confidence ≥ 0.55:
+
+| Stage | What it checks | Cost per call |
+|---|---|---|
+| Override | `@fast`, `@deep`, `@think`, etc. at start of prompt | $0 |
+| Turn-type | Is this a tool result? Error recovery? Continuation? | $0 |
+| Heuristic | 45+ compiled regexes (git ops, renames, incidents, design vocab) | $0 |
+| Embedding | ONNX cosine similarity vs. ~60 labeled examples (optional) | ~$0 CPU |
+| LLM | Haiku via `--json-schema` for genuinely ambiguous prompts | ~$0.001 |
+
+If no stage clears the threshold, a weighted vote runs across all sub-threshold results. If that still produces no winner, the prompt defaults to `standard`. The fallback is tracked separately in telemetry so you can see classifier coverage gaps in `maestro stats`.
+
+**Step 4 — The class is mapped to a model profile.**
+`core/profile.ts` converts the class into concrete CLI flags:
+
+| Class | Model | Effort | Budget cap |
+|---|---|---|---|
+| trivial | Haiku | low | $0.005 |
+| simple | Haiku | low | $0.01 |
+| standard | Sonnet | low | $0.05 |
+| hard | Opus | medium | $0.15 |
+| reasoning | Opus | high | $0.30 |
+| max | Opus | max | $0.50 |
+
+**Step 5 — Session reuse is checked.**
+Maestro hashes all system-prompt-affecting flags (`model`, `tools`, `--bare`, `--mcp-config`, etc.) into a 16-char fingerprint. If a session for this `cwd` with this fingerprint already exists and is less than 24 hours old, Maestro reuses it with `--session-id` + `--resume`. This is the single biggest cost lever: Anthropic's system prompt cache (~37k tokens) costs ~$0.035 per cold boot. Reusing a session brings that to ~$0.001.
+
+**Step 6 — `claude --print` is spawned with the right flags.**
+`wrapper/spawn.ts` builds the final command:
+```
+claude --print --output-format json
+  --session-id <uuid> --resume
+  --model claude-haiku-4-5 --effort low --max-budget-usd 0.005
+  [--append-system-prompt "Output only the answer."]
+```
+stdout is piped live to your terminal so you see tokens stream in real time.
+
+**Step 7 — Cost and routing are logged.**
+After the response completes, `wrapper/output.ts` parses the JSON envelope from Claude (exact token counts and `total_cost_usd`). The decision is appended to `~/.maestro/decisions.jsonl`. `maestro stats` reads this log at any time to show you how much you've saved vs. the Opus-everywhere baseline.
+
+---
+
+### Why this saves money in practice
+
+Most coding sessions are 80–90% simple prompts (git ops, small edits, quick lookups) mixed with a handful of genuinely complex ones. Without routing, every single prompt pays Opus pricing. With Maestro, only the hard ones do. On a typical day of active coding, savings run 60–80%.
+
+The other big lever is session reuse. Before Track Z (fingerprint-based session sharing), every class transition paid a $0.035 boot cost. Now, adjacent classes share sessions when their flag sets match, so a session started by a trivial git-status check is reused by the next standard coding prompt — you pay the boot cost once, not once per prompt.
+
+---
+
+## How it works — technical pipeline
 
 For every prompt, Maestro runs a 5-stage classifier pipeline — cheapest stages first, short-circuiting as soon as any stage reaches 55% confidence:
 

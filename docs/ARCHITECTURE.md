@@ -16,6 +16,98 @@ Three constraints ruled out an HTTP proxy approach:
 
 **VSCode panel coverage.** The official `anthropic.claude-code` extension exposes `claudeCode.claudeProcessWrapper`. Pointing it at `maestro` routes every panel invocation through Maestro without touching the extension. The `--input-format stream-json` channel is owned by Maestro as a per-turn proxy — each user message is classified and forwarded as `claude --print --resume`, so routing can change mid-session as complexity changes.
 
+## End-to-end walkthrough — a concrete example
+
+This traces a single prompt from keypress to response to illustrate how every component connects.
+
+**Scenario:** You type `"add error handling to the fetch call in src/api.ts"` in the VSCode Claude panel.
+
+---
+
+**1. Interception (`wrapper/stream-json-proxy.ts`)**
+
+The VSCode extension sends the message to Maestro's `--input-format stream-json` stdin channel instead of directly to Claude. Maestro receives the raw JSON turn object and extracts the user text.
+
+**2. Passthrough check (`classifiers/passthrough.ts`)**
+
+The text doesn't start with `/`, so it's not a slash command. Passthrough returns null. The turn proceeds to classification.
+
+**3. Override check (`classifiers/override.ts`)**
+
+No `@fast`, `@deep`, or `@think` prefix. Returns `{ class: null }`. Pipeline continues.
+
+**4. Turn-type check (`classifiers/turn-type.ts`)**
+
+Prior turn was a user message (not a tool result). Turn text doesn't match error-recovery patterns. Returns `{ class: null }`. Pipeline continues.
+
+**5. Heuristic classification (`classifiers/heuristic.ts`)**
+
+The text matches the `add_feature_simple` rule (`/\b(add|implement|write)\b.*\b(error handling|validation|logging)\b/i`) at confidence 0.62. This clears the 0.55 threshold. Pipeline short-circuits — stages 4 and 5 never run.
+
+**Classification result:** `{ class: "standard", confidence: 0.62, classifier: "heuristic" }`
+
+**6. Classifier cache write (`core/classifier-cache.ts`)**
+
+`sha256("add error handling to the fetch call in src/api.ts")` is written to the in-process LRU with a 24-hour TTL. Next identical prompt skips the pipeline entirely.
+
+**7. Profile resolution (`core/profile.ts`)**
+
+`standard` maps to: `model: claude-sonnet-4-6`, `effort: low` (E1 cost-reduction), `maxBudgetUsd: 0.05`. A brevity hint is selected: "Aim for under 4000 tokens. Prefer code over prose."
+
+**8. Session fingerprint (`wrapper/session.ts`)**
+
+Flags that affect the system-prompt prefix are hashed:
+`sha256(["claude-sonnet-4-6", "all", null, false, false, "Aim for under 4000 tokens…"]).slice(0,16)` → `a3f7d2c1e8b940a2`
+
+`getByFingerprint(cwd, "a3f7d2c1e8b940a2")` finds a session from 4 hours ago. **Session reused.** No cold boot cost.
+
+**9. Spawn (`wrapper/spawn.ts`)**
+
+```bash
+claude --print --output-format json \
+  --session-id a1b2c3d4-… --resume \
+  --model claude-sonnet-4-6 --effort low --max-budget-usd 0.05 \
+  --append-system-prompt "Aim for under 4000 tokens. Prefer code over prose."
+```
+
+stdin receives the prompt text. stdout is piped live to your terminal.
+
+**10. Stream (`wrapper/stream.ts`)**
+
+Tokens stream to your terminal in real time. SIGINT is forwarded so Ctrl-C works normally.
+
+**11. Output parsing (`wrapper/output.ts`)**
+
+JSON envelope from Claude:
+```json
+{
+  "total_cost_usd": 0.0083,
+  "cache_read_input_tokens": 36840,
+  "input_tokens": 142,
+  "output_tokens": 287,
+  "stop_reason": "end_turn"
+}
+```
+
+Stop reason is `end_turn` (not `max_tokens`), so the classifier cache entry stays valid.
+
+**12. Telemetry (`core/telemetry.ts`)**
+
+Decision record appended to `~/.maestro/decisions.jsonl`:
+```json
+{
+  "prompt": "add error handling to the fetch call in src/api.ts",
+  "decision": { "class": "standard", "classifier": "heuristic", "confidence": 0.62 },
+  "cost": { "actual": 0.0083, "hypothetical_opus": 0.048 },
+  "sessionId": "a1b2c3d4-…",
+  "fingerprint": "a3f7d2c1e8b940a2"
+}
+```
+
+**Net cost for this turn: $0.0083. Without routing (Opus everywhere): $0.048. Savings: 83%.**
+
+---
+
 ## Per-prompt data flow
 
 ```

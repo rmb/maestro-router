@@ -75,6 +75,18 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
     args.push("--bare");
   }
 
+  // S11: --no-session-persistence for trivial one-shots (saves disk/keychain I/O)
+  if (spec.noPersist === true) {
+    args.push("--no-session-persistence");
+  }
+
+  // S12: minimal context for trivial turns (strip skills/settings surface)
+  const isTrivialClass = decision.class === "trivial";
+  const minimalContext = userConfig.trivialMinimalContext === true && isTrivialClass;
+  if (minimalContext) {
+    args.push("--setting-sources", "user", "--disable-slash-commands");
+  }
+
   return args;
 }
 

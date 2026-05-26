@@ -331,6 +331,93 @@ describe("buildClaudeArgs — X.soft appendSystemPrompt (default stable path)", 
   });
 });
 
+describe("buildClaudeArgs — S11 --no-session-persistence", () => {
+  test("emits --no-session-persistence when spec.noPersist=true", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, noPersist: true },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--no-session-persistence");
+  });
+
+  test("omits --no-session-persistence when spec.noPersist=false", () => {
+    const decision = {
+      ...baseDecision("trivial"),
+      spec: { ...balancedProfile.classes.trivial, noPersist: false },
+    };
+    const args = buildClaudeArgs({
+      decision,
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--no-session-persistence");
+  });
+
+  test("omits --no-session-persistence when spec.noPersist is undefined", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--no-session-persistence");
+  });
+});
+
+describe("buildClaudeArgs — S12 minimal context (trivialMinimalContext)", () => {
+  test("emits --setting-sources user --disable-slash-commands when trivialMinimalContext=true on trivial class", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: { trivialMinimalContext: true },
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).toContain("--setting-sources");
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("user");
+    expect(args).toContain("--disable-slash-commands");
+  });
+
+  test("omits minimal-context flags when trivialMinimalContext=false", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: { trivialMinimalContext: false },
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--setting-sources");
+    expect(args).not.toContain("--disable-slash-commands");
+  });
+
+  test("omits minimal-context flags when trivialMinimalContext=true but class is not trivial", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("standard"),
+      userConfig: { trivialMinimalContext: true },
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--setting-sources");
+    expect(args).not.toContain("--disable-slash-commands");
+  });
+
+  test("omits minimal-context flags when trivialMinimalContext is undefined", () => {
+    const args = buildClaudeArgs({
+      decision: baseDecision("trivial"),
+      userConfig: emptyConfig,
+      sessionId: "x",
+      isResume: false,
+    });
+    expect(args).not.toContain("--setting-sources");
+    expect(args).not.toContain("--disable-slash-commands");
+  });
+});
+
 describe("buildClaudeArgs — X.soft appendSystemPrompt (restorePerClassBrevity=true legacy path)", () => {
   const legacyConfig: UserConfig = { restorePerClassBrevity: true };
 

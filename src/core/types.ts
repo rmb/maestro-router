@@ -39,6 +39,8 @@ export type ClassSpec = {
   excludeDynamicSections?: boolean;
   /** Class-specific append to system prompt (X.soft). */
   appendSystemPrompt?: string;
+  /** Disable session persistence via `--no-session-persistence` (S11). */
+  noPersist?: boolean;
   /**
    * PostHog project API key (starts with `phc_`). When set, Maestro emits
    * `maestro_decision` and `maestro_override` events to PostHog on every spawn.
@@ -224,6 +226,13 @@ export type UserConfig = {
    * Reduces cache_creation tokens on first-turn data-paste turns. Default false.
    */
   enablePasteCondenser?: boolean;
+  /**
+   * When true (default false), trivial turns use --setting-sources user and
+   * --disable-slash-commands to strip skills and settings surface, reducing
+   * system prompt bloat on one-shot terminal turns. Cache fingerprint differs
+   * when enabled, so trivial/full context are tracked separately.
+   */
+  trivialMinimalContext?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

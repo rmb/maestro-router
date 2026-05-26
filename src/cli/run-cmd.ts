@@ -54,6 +54,7 @@ import { buildClaudeArgs, resolveAppendSystemPrompt } from "../wrapper/spawn.js"
 import { streamClaude } from "../wrapper/stream.js";
 import { computeFingerprint, prewarmFingerprints } from "../wrapper/prewarm.js";
 import { detectContinuation } from "../wrapper/continuation.js";
+import { applyFirstTurnGuard } from "../wrapper/first-turn-guard.js";
 import { format, loadCliConfig, readState } from "./utils.js";
 
 const log = (msg: string, quiet?: boolean): void => {
@@ -281,6 +282,16 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             },
           ],
         };
+      }
+
+      // First-turn guard: session.isNew means no prior session existed for this cwd+fingerprint.
+      const runCmdGuardEnabled = cli.userConfig.disableFirstTurnGuard !== true;
+      const isFirstTurn = session.isNew;
+      effectiveDecision = runCmdGuardEnabled
+        ? applyFirstTurnGuard(effectiveDecision, isFirstTurn)
+        : effectiveDecision;
+      if (isFirstTurn && runCmdGuardEnabled && effectiveDecision.spec.model !== decision.spec.model) {
+        log(`first-turn guard: ${decision.spec.model} → ${effectiveDecision.spec.model} (avoid $3-12 boot cost)`, quiet);
       }
 
       // M1 continuation: previously injected the hint via appendSystemPrompt

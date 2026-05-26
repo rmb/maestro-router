@@ -201,6 +201,14 @@ export type UserConfig = {
    * Only applies to run-cmd mode; sdk-proxy/panel mode is unaffected.
    */
   autoResumeOnMaxTokens?: boolean;
+  /**
+   * Disable the first-turn Opus guard. Default false (guard ON).
+   * When enabled (default), the first turn of a new session that routes to Opus
+   * is downgraded to Sonnet to avoid a $3-12 cache_creation boot. Set true to
+   * disable if you specifically need Opus on the first turn (e.g., one-shot
+   * planning queries that won't have follow-ups).
+   */
+  disableFirstTurnGuard?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

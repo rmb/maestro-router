@@ -33,6 +33,7 @@ import {
   resetToolVolume,
   upgradeModel,
 } from "./tool-volume.js";
+import { applyFirstTurnGuard } from "./first-turn-guard.js";
 
 // I1: skip line-number stripping when RTK (rtk-ai/rtk) is already on PATH — it
 // performs the same compression at a lower level, so duplicating the work wastes
@@ -303,13 +304,26 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       const decision: Decision = await opts.pipeline.route(request, {
         sessionContext: { recentClasses: [...recentClasses] },
       });
-      recordClass(decision.class);
+
+      // First-turn guard: recentClasses.length === 0 means no prior interaction in this session.
+      const guardEnabled = opts.userConfig.disableFirstTurnGuard !== true;
+      const toolResultIsFirstTurn = recentClasses.length === 0;
+      const guardedDecision = guardEnabled
+        ? applyFirstTurnGuard(decision, toolResultIsFirstTurn)
+        : decision;
+      if (guardedDecision.spec.model !== decision.spec.model) {
+        opts.stderr.write(
+          `maestro: first-turn guard: ${decision.spec.model} → ${guardedDecision.spec.model} (avoid $3-12 boot cost)\n`,
+        );
+      }
+
+      recordClass(guardedDecision.class);
 
       // T2: upgrade model one tier when this turn has exceeded the tool volume threshold.
       const finalModel = isHighVolumeTurn(toolVolumeState)
-        ? upgradeModel(decision.spec.model)
-        : decision.spec.model;
-      if (finalModel !== decision.spec.model) {
+        ? upgradeModel(guardedDecision.spec.model)
+        : guardedDecision.spec.model;
+      if (finalModel !== guardedDecision.spec.model) {
         opts.stderr.write(
           `maestro: tool-volume escalation (${toolVolumeState.toolCallsThisTurn} tool calls) → ${finalModel}\n`,
         );
@@ -324,7 +338,7 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       if (opts.userConfig.injectSetMaxThinkingTokens !== false) {
         injectedSeq += 1;
         const setThink = buildSetThinkingTokensRequest(
-          effortToThinkingTokens(decision.spec.effort),
+          effortToThinkingTokens(guardedDecision.spec.effort),
           injectedSeq,
         );
         child.stdin?.write(JSON.stringify(setThink) + "\n");
@@ -365,12 +379,24 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
         { sessionContext: { recentClasses: [...recentClasses] } },
       );
 
+      // First-turn guard: panelTurnCount === 0 means this is the first user turn.
+      const userTurnGuardEnabled = opts.userConfig.disableFirstTurnGuard !== true;
+      const isFirstUserTurn = panelTurnCount === 0;
+      const guardedDecision = userTurnGuardEnabled
+        ? applyFirstTurnGuard(decision, isFirstUserTurn)
+        : decision;
+      if (guardedDecision.spec.model !== decision.spec.model) {
+        opts.stderr.write(
+          `maestro: first-turn guard: ${decision.spec.model} → ${guardedDecision.spec.model} (avoid $3-12 boot cost)\n`,
+        );
+      }
+
       // Inject set_model BEFORE forwarding the user message so claude
       // honors the new model on this turn. P6: under rate-limit pressure,
       // force-downgrade to the cheapest model that still serves the class.
       const modelToUse = rateLimitPressure
-        ? downgradeUnderPressure(decision.spec.model)
-        : decision.spec.model;
+        ? downgradeUnderPressure(guardedDecision.spec.model)
+        : guardedDecision.spec.model;
       injectedSeq += 1;
       const setModel = buildSetModelRequest(modelToUse, injectedSeq);
       child.stdin?.write(JSON.stringify(setModel) + "\n");
@@ -380,7 +406,7 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       // Opt-out via userConfig.injectSetMaxThinkingTokens=false (protocol is
       // reverse-engineered from cli.js — could change across CC versions).
       if (opts.userConfig.injectSetMaxThinkingTokens !== false) {
-        const effortForThink = rateLimitPressure ? "low" : decision.spec.effort;
+        const effortForThink = rateLimitPressure ? "low" : guardedDecision.spec.effort;
         injectedSeq += 1;
         const setThink = buildSetThinkingTokensRequest(
           effortToThinkingTokens(effortForThink),
@@ -392,16 +418,16 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       child.stdin?.write(line + "\n");
 
       // Persist routing class for Markov context on subsequent turns.
-      recordClass(decision.class);
+      recordClass(guardedDecision.class);
       panelTurnCount += 1;
 
       // P9: emit batch-hint advisory on quick-fire clusters (one-shot per run)
-      const hint = recordPromptAndMaybeAdvise(batchHint, decision.class);
+      const hint = recordPromptAndMaybeAdvise(batchHint, guardedDecision.class);
       if (hint) opts.stderr.write(`${hint}\n`);
 
       // Defer telemetry: flush when result frame arrives on stdout.
       pendingQueue.push({
-        decision: { ...decision, latencyMs: Date.now() - t0 },
+        decision: { ...guardedDecision, latencyMs: Date.now() - t0 },
         ts: new Date().toISOString(),
         prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
         turnIndex: panelTurnCount,

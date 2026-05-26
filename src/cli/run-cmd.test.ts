@@ -361,7 +361,11 @@ describe("T4 auto-resume on max_tokens", () => {
       { capturedStdout: makeCostJson("max_tokens", "claude-opus-4-7", 0.05) },
     ]);
 
-    const { stderrOutput } = await runCmd("max question", streamFn);
+    // disableFirstTurnGuard=true so opus reaches spawn unmodified (guard disabled).
+    // This tests T4's own no-retry-at-top-model behaviour in isolation.
+    const { stderrOutput } = await runCmd("max question", streamFn, {
+      userConfig: { disableFirstTurnGuard: true },
+    });
 
     expect(streamFn).toHaveBeenCalledTimes(1);
     expect(stderrOutput).toMatch(/already top model/);

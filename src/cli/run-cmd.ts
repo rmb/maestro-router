@@ -158,6 +158,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
 
       // Read lastStopReason from prior session for E1/E3 signals
       const priorStopReason = priorSession?.lastStopReason ?? null;
+      const priorCacheReadTokens = priorSession?.lastCacheReadTokens ?? 0;
 
       // Detect M1 continuation before routing
       const continuationResult = detectContinuation(stripped, priorStopReason);
@@ -266,6 +267,14 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         : await sessions.getByFingerprint(process.cwd(), fp, {
             ...(cmdOpts.newSession ? { newSession: true } : {}),
           });
+
+      // Compaction advisory: warn when cached context is large enough that /compact pays for itself
+      const COMPACT_THRESHOLD = 300_000;
+      if (!session.isNew && priorCacheReadTokens > COMPACT_THRESHOLD) {
+        process.stderr.write(
+          `maestro: session at ~${Math.round(priorCacheReadTokens / 1000)}k cached context — /compact will reset it and reduce per-turn cache_read cost\n`,
+        );
+      }
 
       // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens
       const isEscalated = session.isNew ? false : await sessions.getEffortEscalated(session.sessionId);
@@ -467,6 +476,8 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
 
           // E1/E3: persist stop reason for next-turn escalation decisions
           void sessions.updateStopReason(session.sessionId, effectiveParsed.cost.stopReason);
+          // Compaction advisory: persist cache_read for next turn's threshold check
+          void sessions.updateLastCacheRead(session.sessionId, effectiveParsed.cost.cacheReadInputTokens);
 
           // E1.escalate: flag session for effort upgrade on next standard turn
           if (effectiveParsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {

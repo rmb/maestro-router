@@ -31,6 +31,8 @@ export type SessionRecord = {
   lastDecisionAt?: string;
   /** Stop reason from the last turn (for E1.escalate and E4 in run-cmd.ts). */
   lastStopReason?: string;
+  /** cache_read_input_tokens from the last turn — used for compaction advisory. */
+  lastCacheReadTokens?: number;
   /** True if this session has been effort-escalated (for E1.escalate). */
   effortEscalated?: boolean;
   /**
@@ -75,6 +77,8 @@ export type SessionStore = {
   getLastDecision(sessionId: string): Promise<{ prompt: string; cls: string; ts: string } | null>;
   /** Persist the stop_reason from the last turn. */
   updateStopReason(sessionId: string, stopReason: string): Promise<void>;
+  /** Persist cache_read_input_tokens from the last turn for compaction advisory. */
+  updateLastCacheRead(sessionId: string, tokens: number): Promise<void>;
   /** Mark the session as effort-escalated. */
   setEffortEscalated(sessionId: string): Promise<void>;
   /** Return true if the session has been effort-escalated. */
@@ -208,6 +212,14 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       const records = await read();
       const updated = records.map((r) =>
         r.sessionId === sessionId ? { ...r, lastStopReason: stopReason } : r,
+      );
+      await write(updated);
+    },
+
+    async updateLastCacheRead(sessionId, tokens) {
+      const records = await read();
+      const updated = records.map((r) =>
+        r.sessionId === sessionId ? { ...r, lastCacheReadTokens: tokens } : r,
       );
       await write(updated);
     },

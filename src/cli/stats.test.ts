@@ -394,6 +394,33 @@ describe("freshSessionRate", () => {
     const summary = computeSummary(events, 7);
     expect(summary.freshSessionRate).toBeCloseTo(0.5, 3);
   });
+
+  test("freshSessionCount is the raw integer count of fresh sessions", () => {
+    const fresh: TelemetryEvent = {
+      ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>,
+      isNewSession: true,
+    };
+    const reused: TelemetryEvent = {
+      ...makeDecision({ outputTokens: 100 }) as Extract<TelemetryEvent, { type: "decision" }>,
+      isNewSession: false,
+    };
+    const summary = computeSummary([fresh, reused, fresh, fresh], 7);
+    expect(summary.freshSessionCount).toBe(3);
+  });
+
+  test("freshSessionCount is 0 with no events", () => {
+    const summary = computeSummary([], 7);
+    expect(summary.freshSessionCount).toBe(0);
+  });
+
+  test("freshSessionCount is 0 when no events have isNewSession=true", () => {
+    const events: TelemetryEvent[] = [
+      makeDecision({ outputTokens: 100 }),
+      makeDecision({ outputTokens: 100 }),
+    ];
+    const summary = computeSummary(events, 7);
+    expect(summary.freshSessionCount).toBe(0);
+  });
 });
 
 describe("durationApiMsP90ByClass", () => {

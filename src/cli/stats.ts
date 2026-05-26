@@ -89,6 +89,8 @@ type Summary = {
   cacheReadCostUsd: number;
   /** Fraction of decision events where isNewSession === true (fresh fingerprint). */
   freshSessionRate: number;
+  /** Raw count of decision events where isNewSession === true. */
+  freshSessionCount: number;
   perClass: Record<
     Class,
     {
@@ -253,6 +255,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     count1mVariant,
     cacheReadCostUsd: round(cacheReadCostUsd, 4),
     freshSessionRate: totalRequests > 0 ? round(freshSessionCount / totalRequests, 4) : 0,
+    freshSessionCount,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
@@ -358,7 +361,7 @@ function renderHuman(s: Summary): string {
   );
   if (s.freshSessionRate > 0) {
     lines.push(
-      `  ${bold("fresh sessions")}  ${cyan(pct(s.freshSessionRate, 1))}  ${dim("(new sessions)")}`,
+      `  ${bold("fresh sessions")}  ${cyan(pct(s.freshSessionRate, 1))}  ${dim(`(${s.freshSessionCount} new sessions)`)}`,
     );
   }
 

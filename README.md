@@ -278,6 +278,77 @@ If missing: `maestro install-vscode` then reload the window.
 
 ---
 
+## FAQ
+
+**Q: I installed Maestro but my prompts are still hitting Opus. How do I verify routing is working?**
+
+After running `bash scripts/install.sh`, reload VSCode (`Cmd+Shift+P` → "Developer: Reload Window"). Routing is only active when the panel extension uses Maestro as its wrapper. Verify with:
+```bash
+tail -1 ~/.maestro/decisions.jsonl | python3 -c "import json,sys; e=json.loads(sys.stdin.read()); print(e['decision']['class'], e.get('prompt','')[:60])"
+```
+If the file is empty, the `claudeCode.claudeProcessWrapper` setting was not applied — run the installer again and confirm VSCode reloaded.
+
+---
+
+**Q: My first prompt costs as much as before. Why isn't Maestro saving money?**
+
+The first turn of any new session pays a cold-start cost of ~$0.035 due to Claude Code's 37k-token system prompt being written to cache. This is expected. Savings accumulate from the second turn onward when Maestro reuses the session (`--session-id` + `--resume`). Never open a new terminal window mid-task — Maestro reuses sessions by `cwd`, so staying in the same directory is the single biggest cost lever. Check `maestro stats` after a full work session to see real savings.
+
+---
+
+**Q: Maestro routed a complex task to Haiku and the answer was wrong. How do I fix this?**
+
+Use an override prefix to force a higher model for that prompt:
+- `@think <prompt>` → Opus with high effort
+- `@deep <prompt>` → Opus max
+- `@fast <prompt>` → Haiku (explicitly cheap)
+
+For systematic misrouting of a prompt pattern, run `maestro tune` — it analyzes recent decisions and suggests heuristic rules to add to `heuristics.json` so the fix applies automatically going forward.
+
+---
+
+**Q: `pnpm install` fails with a build script error. How do I install?**
+
+pnpm 11 blocks packages with unapproved build scripts (esbuild's `postinstall` is a common trigger). Run:
+```bash
+pnpm install --ignore-scripts
+```
+Vitest bundles its own runtime and works without esbuild's prebuilt binary, so `--ignore-scripts` is safe here. If `pnpm-workspace.yaml` `onlyBuiltDependencies` doesn't take effect, `.npmrc` also won't help — the `--ignore-scripts` flag is the only reliable workaround on pnpm 11.
+
+---
+
+**Q: `--max-budget-usd` terminated my prompt early but charged me 6× the cap. Is this a bug?**
+
+No — the cap is a soft backstop, not a hard limit. The Claude CLI honors it at a coarse checkpoint, meaning the actual cost can overshoot by several multiples (observed up to 6.3×). Maestro accounts for this: profile budget caps are set ~50% above expected cost to avoid normal completions triggering it. If a prompt is regularly hitting the cap and truncating, the prompt class is too low — use `@think` or `@deep` to route it to a higher profile with a larger budget.
+
+---
+
+**Q: When should I use `maestro stats` vs `maestro bench` vs `maestro bench --tournament`?**
+
+They answer different questions:
+
+- **`maestro stats`** — use this daily/weekly to see how much money you've saved vs. the Opus-everywhere baseline and spot trends. It reads your local `~/.maestro/decisions.jsonl` instantly (no API calls, no cost). Add `--since 30` for a 30-day window. Start here every time you want a pulse check.
+
+- **`maestro bench`** — use this after touching the classifier pipeline (heuristics, embeddings, or LLM stage). It runs the labeled eval set locally and reports accuracy. Required gate: no >2% regression vs. the locked baseline. Zero API cost because it excludes the LLM classifier by default.
+
+- **`maestro bench --tournament --confirm-cost`** — use this when you want to empirically verify that a specific prompt class can safely be downgraded to a cheaper model without quality loss. It runs real Claude calls (costs $1–5 depending on sample size), so `--confirm-cost` is required as a deliberate gate. Run it before committing a profile change that lowers a model tier, or after `maestro tune --apply` to validate the new heuristics under real conditions. Not something you run daily — treat it like a load test: run it intentionally, not habitually.
+
+---
+
+**Q: When should I use `maestro tune` and what's the difference between its modes?**
+
+`maestro tune` is how you teach Maestro to stop misrouting a prompt pattern you keep seeing. There are three workflows:
+
+- **`maestro tune`** (no flags) — shows suggested regex rules inferred from your recent telemetry where the LLM classifier overrode the heuristic classifier. Run this when `maestro stats` reports a high LLM-fallback rate or you notice repeated misroutes. It doesn't change anything yet — review the suggestions first.
+
+- **`maestro tune --apply`** — writes the approved rules to `~/.maestro/heuristics.json`. Run this only after reviewing the suggestions from the plain `tune` run and after `maestro bench` confirms no regression. These rules take effect immediately on the next prompt — no restart needed.
+
+- **`maestro tune --learn`** — more aggressive: mines LLM-overrides from telemetry and folds patterns directly into heuristics. `maestro stats` will prompt you to run this when it detects coverage gaps. Follow that prompt rather than running it speculatively.
+
+The rough workflow is: `stats` surfaces the gap → `tune` proposes the fix → `bench` validates it → `tune --apply` ships it.
+
+---
+
 ## More reading
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data flow, module layout, design decisions

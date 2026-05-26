@@ -46,6 +46,7 @@ import {
   extractPromptText,
   extractRateLimitInfo,
   extractToolUseBlocks,
+  extractToolResultInfo,
   extractToolUseIds,
   isToolResultMessage,
   isUserTextMessage,
@@ -271,10 +272,19 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       const resolvedToolName =
         ids.length > 0 ? toolUseMap.get(ids[0]!) : undefined;
 
-      const request: Request =
-        resolvedToolName !== undefined
-          ? { prompt: "", metadata: { resolvedToolName } }
-          : { prompt: "" };
+      const trInfo = extractToolResultInfo(frame);
+      const request: Request = {
+        prompt: "",
+        metadata: {
+          ...(resolvedToolName !== undefined ? { resolvedToolName } : {}),
+          ...(trInfo !== null
+            ? {
+                toolResultContentLength: trInfo.contentLength,
+                toolResultContentSample: trInfo.content,
+              }
+            : {}),
+        },
+      };
 
       const decision: Decision = await opts.pipeline.route(request, {
         sessionContext: { recentClasses: [...recentClasses] },

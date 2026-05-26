@@ -148,6 +148,59 @@ export function isToolResultMessage(frame: Frame): boolean {
   );
 }
 
+/**
+ * Extract content info from tool_result blocks in a user frame.
+ * Returns null if the frame has no tool_result blocks with string content.
+ */
+export function extractToolResultInfo(
+  frame: Frame,
+): { contentLength: number; content: string } | null {
+  const message = frame.message;
+  if (typeof message !== "object" || message === null) return null;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+
+  let totalLength = 0;
+  let firstSample = "";
+  let found = false;
+
+  for (const b of content) {
+    if (
+      typeof b === "object" &&
+      b !== null &&
+      (b as { type?: unknown }).type === "tool_result"
+    ) {
+      found = true;
+      const blockContent = (b as { content?: unknown }).content;
+      if (typeof blockContent === "string") {
+        totalLength += blockContent.length;
+        if (firstSample.length === 0) {
+          firstSample = blockContent.slice(0, 500);
+        }
+      } else if (Array.isArray(blockContent)) {
+        // content can be an array of sub-blocks
+        for (const sub of blockContent) {
+          if (
+            typeof sub === "object" &&
+            sub !== null &&
+            (sub as { type?: unknown }).type === "text" &&
+            typeof (sub as { text?: unknown }).text === "string"
+          ) {
+            const text = (sub as { text: string }).text;
+            totalLength += text.length;
+            if (firstSample.length === 0) {
+              firstSample = text.slice(0, 500);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!found) return null;
+  return { contentLength: totalLength, content: firstSample };
+}
+
 /** Extract tool_use_id strings from all tool_result blocks in a user frame. */
 export function extractToolUseIds(frame: Frame): string[] {
   const message = frame.message;

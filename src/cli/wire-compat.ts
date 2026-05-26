@@ -30,6 +30,7 @@ import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
 import { overrideClassifier } from "../classifiers/override.js";
 import { toolOverrideClassifier } from "../classifiers/tool-override.js";
+import { toolResultContentClassifier } from "../classifiers/tool-result-content.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
 import { createPipeline } from "../core/pipeline.js";
 import type { Pipeline } from "../core/pipeline.js";
@@ -235,7 +236,7 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
       : heuristicClassifier;
   // K2: markov prior goes first in the classifiers array, but pipeline evaluates it
   // only when sessionContext.recentClasses is present. Early position is declarative.
-  const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolOverrideClassifier, markovClassifier, heuristic];
+  const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolOverrideClassifier, toolResultContentClassifier, markovClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
   // LLM stage is on by default. Cold-cache penalty (~$0.04, 13-20s) only hits
   // the first turn after a VSCode restart; subsequent turns hit cache_read and

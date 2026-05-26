@@ -90,6 +90,8 @@ type Summary = {
   freshSessionRate: number;
   /** Raw count of decision events where isNewSession === true. */
   freshSessionCount: number;
+  /** Count of auto-compact events fired in this window. */
+  autoCompactCount: number;
   perClass: Record<
     Class,
     {
@@ -166,6 +168,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   let count1mVariant = 0;
   let cacheReadCostUsd = 0;
   let freshSessionCount = 0;
+  let autoCompactCount = 0;
 
   for (const e of events) {
     if (e.type === "decision") {
@@ -215,6 +218,8 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
       cur.count++;
       overridePairs.set(key, cur);
       perClass[e.from].overrides++;
+    } else if (e.type === "compact") {
+      autoCompactCount++;
     }
   }
 
@@ -255,6 +260,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     cacheReadCostUsd: round(cacheReadCostUsd, 4),
     freshSessionRate: totalRequests > 0 ? round(freshSessionCount / totalRequests, 4) : 0,
     freshSessionCount,
+    autoCompactCount,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
@@ -361,6 +367,11 @@ function renderHuman(s: Summary): string {
   if (s.freshSessionRate > 0) {
     lines.push(
       `  ${bold("fresh sessions")}  ${cyan(pct(s.freshSessionRate, 1))}  ${dim(`(${s.freshSessionCount} new sessions)`)}`,
+    );
+  }
+  if (s.autoCompactCount > 0) {
+    lines.push(
+      `  ${bold("auto-compacts")}   ${cyan(String(s.autoCompactCount))}`,
     );
   }
 

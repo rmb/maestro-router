@@ -388,4 +388,12 @@ export type TelemetryEvent =
       correctedToClass: Class;
       hint: string;
       prevPrompt: string;
+    }
+  | {
+      /** Emitted when auto-compact fires before the real prompt turn. */
+      type: "compact";
+      ts: string;
+      sessionId: string;
+      /** cache_read_input_tokens from the prior turn — the value that triggered compaction. */
+      priorCacheReadTokens: number;
     };

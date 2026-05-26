@@ -301,6 +301,15 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
           });
           const nullStream = new (await import("node:stream")).Writable({ write(_c, _e, cb) { cb(); } });
           await doStream({ args: compactArgs, prompt: "/compact", stdout: nullStream, stderr: process.stderr, forwardSigint: false });
+          const telCompact = createTelemetry(
+            cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
+          );
+          void telCompact.log({
+            type: "compact",
+            ts: new Date().toISOString(),
+            sessionId: session.sessionId,
+            priorCacheReadTokens,
+          });
           process.stderr.write(`maestro: compacted — continuing with your prompt\n`);
         } else {
           process.stderr.write(

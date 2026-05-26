@@ -423,6 +423,58 @@ describe("freshSessionRate", () => {
   });
 });
 
+describe("autoCompactCount", () => {
+  test("returns 0 when no compact events", () => {
+    const events: TelemetryEvent[] = [makeDecision(), makeDecision({ outputTokens: 100 })];
+    const summary = computeSummary(events, 7);
+    expect(summary.autoCompactCount).toBe(0);
+  });
+
+  test("returns 0 with no events", () => {
+    const summary = computeSummary([], 7);
+    expect(summary.autoCompactCount).toBe(0);
+  });
+
+  test("counts compact events correctly", () => {
+    const compact: TelemetryEvent = {
+      type: "compact",
+      ts: "2026-05-21T10:00:00.000Z",
+      sessionId: "sess-abc",
+      priorCacheReadTokens: 350_000,
+    };
+    const events: TelemetryEvent[] = [makeDecision(), compact, compact];
+    const summary = computeSummary(events, 7);
+    expect(summary.autoCompactCount).toBe(2);
+  });
+
+  test("compact events do not affect totalRequests", () => {
+    const compact: TelemetryEvent = {
+      type: "compact",
+      ts: "2026-05-21T10:00:00.000Z",
+      sessionId: "sess-abc",
+      priorCacheReadTokens: 350_000,
+    };
+    const events: TelemetryEvent[] = [makeDecision({ outputTokens: 100 }), compact];
+    const summary = computeSummary(events, 7);
+    expect(summary.totalRequests).toBe(1);
+    expect(summary.autoCompactCount).toBe(1);
+  });
+
+  test("compact events do not affect totalCostUsd or cacheHitRate", () => {
+    const compact: TelemetryEvent = {
+      type: "compact",
+      ts: "2026-05-21T10:00:00.000Z",
+      sessionId: "sess-abc",
+      priorCacheReadTokens: 400_000,
+    };
+    const events: TelemetryEvent[] = [compact, compact, compact];
+    const summary = computeSummary(events, 7);
+    expect(summary.totalCostUsd).toBe(0);
+    expect(summary.cacheHitRate).toBe(0);
+    expect(summary.autoCompactCount).toBe(3);
+  });
+});
+
 describe("durationApiMsP90ByClass", () => {
   test("p90 of 10 values is at index 8", () => {
     // 10 standard decisions with durationApiMs: 100, 200, ..., 1000

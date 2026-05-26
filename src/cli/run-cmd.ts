@@ -9,7 +9,7 @@ import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
 import { turnTypeClassifier } from "../classifiers/turn-type.js";
-import type { Classifier, Class, Decision } from "../core/types.js";
+import type { Classifier, Class, Decision, CostBreakdown } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
 import { createPostHogClient } from "../core/posthog.js";
@@ -17,6 +17,34 @@ import { classifierCache } from "../core/classifier-cache.js";
 
 const truncate = (s: string, max: number): string =>
   s.length > max ? s.slice(0, max) : s;
+
+// T4: model upgrade ladder for auto-resume on max_tokens.
+// Maps current model alias → stronger model alias. Opus has no upgrade.
+const T4_UPGRADE: Readonly<Record<string, string>> = {
+  haiku: "sonnet",
+  sonnet: "opus",
+};
+
+/**
+ * T4: Build the --resume args for a retry on a stronger model.
+ * Pure function for easy testing.
+ */
+export function buildT4ResumeArgs(sessionId: string, upgradeModel: string): string[] {
+  return ["--print", "--output-format", "json", "--resume", sessionId, "--model", upgradeModel];
+}
+
+/** T4: resolve the upgrade model, or null if already at the top (opus). */
+export function resolveT4UpgradeModel(currentModel: string): string | null {
+  // Normalise — model may be full name like "claude-haiku-4-5"; check for aliases
+  const lower = currentModel.toLowerCase();
+  for (const [alias, upgrade] of Object.entries(T4_UPGRADE)) {
+    if (lower === alias || lower.includes(alias)) {
+      return upgrade;
+    }
+  }
+  return null; // already opus (or unrecognised — don't retry unknown models)
+}
+
 import { createPipeline } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { parseOutput } from "../wrapper/output.js";
@@ -41,7 +69,20 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export function registerRunCommand(program: Command): void {
+// T4 cycle-breaker: tracks session+prompt hashes that have already been
+// retried in this process execution. Scoped to the module so tests can
+// clear it between cases via the exported reset helper.
+const _t4RetriedHashes = new Set<string>();
+
+/** Exported only for tests — resets the T4 cycle-breaker between test cases. */
+export function _resetT4RetryState(): void {
+  _t4RetriedHashes.clear();
+}
+
+export type StreamFn = typeof streamClaude;
+
+export function registerRunCommand(program: Command, _streamFn?: StreamFn): void {
+  const doStream: StreamFn = _streamFn ?? streamClaude;
   program
     .command("run [prompt...]")
     .description(
@@ -286,13 +327,55 @@ export function registerRunCommand(program: Command): void {
         ? `${continuationHint}\n\n${stripped}`
         : stripped;
 
-      const result = await streamClaude({
+      let result = await doStream({
         args,
         prompt: promptWithHint,
         stdout: process.stdout,
         stderr: process.stderr,
         forwardSigint: true,
       });
+
+      // T4: auto-resume on max_tokens — parse the result early to check stop_reason.
+      // When the model is below opus and the completion was truncated, retry on
+      // a stronger model via --resume. Hard cap: one retry per turn.
+      let t4OriginalCost: CostBreakdown | null = null;
+      const autoResume = cli.userConfig.autoResumeOnMaxTokens !== false;
+      if (autoResume) {
+        const earlyParsed = parseOutput(result.capturedStdout, cli.userConfig);
+        if (earlyParsed?.cost?.stopReason === "max_tokens") {
+          const upgradeModel = resolveT4UpgradeModel(effectiveDecision.spec.model);
+          if (upgradeModel === null) {
+            // Already at opus — no retry possible; emit diagnostic to stderr
+            process.stderr.write(
+              `maestro: max_tokens on ${effectiveDecision.spec.model} (already top model) — no retry available\n`,
+            );
+          } else {
+            // Cycle-breaker: hash of session + prompt to detect double-retry in one execution
+            const retryHash = createHash("sha256")
+              .update(session.sessionId + "\x00" + promptWithHint)
+              .digest("hex");
+            if (_t4RetriedHashes.has(retryHash)) {
+              process.stderr.write(
+                `maestro: max_tokens on ${effectiveDecision.spec.model} — skipping retry (already retried this turn)\n`,
+              );
+            } else {
+              _t4RetriedHashes.add(retryHash);
+              process.stderr.write(
+                `maestro: max_tokens detected on ${effectiveDecision.spec.model} — auto-retrying on ${upgradeModel} via --resume\n`,
+              );
+              t4OriginalCost = earlyParsed.cost;
+              const retryArgs = buildT4ResumeArgs(session.sessionId, upgradeModel);
+              result = await doStream({
+                args: retryArgs,
+                prompt: promptWithHint,
+                stdout: process.stdout,
+                stderr: process.stderr,
+                forwardSigint: true,
+              });
+            }
+          }
+        }
+      }
 
       // Markov prior depends on a complete history — record the decided class
       // regardless of whether Claude returned parseable output (it may error,
@@ -305,6 +388,41 @@ export function registerRunCommand(program: Command): void {
       const turnIndex = await sessions.getTurnCount(session.sessionId);
 
       const parsed = parseOutput(result.capturedStdout, cli.userConfig);
+
+      // T4: when a retry happened, sum the original + retry costs so telemetry
+      // reflects true spend. The stop_reason on the summed cost reflects the
+      // retry's outcome (user-visible result).
+      let effectiveParsed = parsed;
+      if (t4OriginalCost !== null && parsed?.cost) {
+        const retryCost = parsed.cost;
+        const summedCost: CostBreakdown = {
+          ...retryCost,
+          totalCostUsd: t4OriginalCost.totalCostUsd + retryCost.totalCostUsd,
+          inputTokens: t4OriginalCost.inputTokens + retryCost.inputTokens,
+          outputTokens: t4OriginalCost.outputTokens + retryCost.outputTokens,
+          cacheCreationInputTokens:
+            t4OriginalCost.cacheCreationInputTokens + retryCost.cacheCreationInputTokens,
+          cacheReadInputTokens:
+            t4OriginalCost.cacheReadInputTokens + retryCost.cacheReadInputTokens,
+          durationMs: t4OriginalCost.durationMs + retryCost.durationMs,
+          durationApiMs: t4OriginalCost.durationApiMs + retryCost.durationApiMs,
+          // stopReason reflects the retry's outcome (the user-visible result)
+          stopReason: retryCost.stopReason,
+        };
+        effectiveParsed = {
+          ...parsed,
+          cost: summedCost,
+          diagnostics: [
+            ...parsed.diagnostics,
+            {
+              severity: "info" as const,
+              code: "t4.auto_resume",
+              message: `max_tokens on ${effectiveDecision.spec.model} → retry on ${retryCost.modelUsed ?? resolveT4UpgradeModel(effectiveDecision.spec.model) ?? "unknown"}`,
+            },
+          ],
+        };
+      }
+
       const telemetry = createTelemetry(
         cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
       );
@@ -314,38 +432,50 @@ export function registerRunCommand(program: Command): void {
       // is always undefined and oracle's cache-hit-rate-accuracy check fails.
       const decisionWithCacheHit: Decision = {
         ...effectiveDecision,
-        cacheHit: (parsed?.cost?.cacheReadInputTokens ?? 0) > 0,
+        cacheHit: (effectiveParsed?.cost?.cacheReadInputTokens ?? 0) > 0,
+        ...(t4OriginalCost !== null
+          ? {
+              diagnostics: [
+                ...effectiveDecision.diagnostics,
+                {
+                  severity: "info" as const,
+                  code: "t4.auto_resume",
+                  message: `max_tokens on ${effectiveDecision.spec.model} → retried on stronger model`,
+                },
+              ],
+            }
+          : {}),
       };
       await telemetry.log({
         type: "decision",
         ts: new Date().toISOString(),
         decision: decisionWithCacheHit,
-        ...(parsed?.cost ? { cost: parsed.cost } : {}),
+        ...(effectiveParsed?.cost ? { cost: effectiveParsed.cost } : {}),
         prompt: truncate(prompt, PROMPT_TRUNCATE_CHARS),
         sessionId: session.sessionId,
         turnIndex,
       });
 
-      if (parsed) {
+      if (effectiveParsed) {
         // Outcome event: stop_reason + output token ratio reveals over/under-routing.
-        if (parsed.cost) {
+        if (effectiveParsed.cost) {
           void telemetry.log({
             type: "outcome",
             ts: new Date().toISOString(),
             sessionId: session.sessionId,
             decidedClass: effectiveDecision.class,
-            stopReason: parsed.cost.stopReason,
-            outputTokens: parsed.cost.outputTokens,
-            cacheCreationTokens: parsed.cost.cacheCreationInputTokens,
-            totalCostUsd: parsed.cost.totalCostUsd,
-            durationApiMs: parsed.cost.durationApiMs,
+            stopReason: effectiveParsed.cost.stopReason,
+            outputTokens: effectiveParsed.cost.outputTokens,
+            cacheCreationTokens: effectiveParsed.cost.cacheCreationInputTokens,
+            totalCostUsd: effectiveParsed.cost.totalCostUsd,
+            durationApiMs: effectiveParsed.cost.durationApiMs,
           });
 
           // E1/E3: persist stop reason for next-turn escalation decisions
-          void sessions.updateStopReason(session.sessionId, parsed.cost.stopReason);
+          void sessions.updateStopReason(session.sessionId, effectiveParsed.cost.stopReason);
 
           // E1.escalate: flag session for effort upgrade on next standard turn
-          if (parsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {
+          if (effectiveParsed.cost.stopReason === "max_tokens" && effectiveDecision.class === "standard") {
             void sessions.setEffortEscalated(session.sessionId);
             // K1.invalidate: drop cached classification so next identical prompt re-routes
             classifierCache.invalidate(promptHash);
@@ -365,18 +495,18 @@ export function registerRunCommand(program: Command): void {
             classifier: effectiveDecision.classifier,
             latency_ms: effectiveDecision.latencyMs,
             prompt_length: prompt.length,
-            cost_usd: parsed.cost?.totalCostUsd ?? null,
+            cost_usd: effectiveParsed.cost?.totalCostUsd ?? null,
           });
 
-          if (parsed.cost) {
+          if (effectiveParsed.cost) {
             void ph.capture("maestro_outcome", {
               distinct_id: distinctId,
               class: effectiveDecision.class,
-              stop_reason: parsed.cost.stopReason,
-              output_tokens: parsed.cost.outputTokens,
-              cache_creation_tokens: parsed.cost.cacheCreationInputTokens,
-              total_cost_usd: parsed.cost.totalCostUsd,
-              duration_api_ms: parsed.cost.durationApiMs,
+              stop_reason: effectiveParsed.cost.stopReason,
+              output_tokens: effectiveParsed.cost.outputTokens,
+              cache_creation_tokens: effectiveParsed.cost.cacheCreationInputTokens,
+              total_cost_usd: effectiveParsed.cost.totalCostUsd,
+              duration_api_ms: effectiveParsed.cost.durationApiMs,
             });
           }
 
@@ -399,14 +529,14 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
-        for (const d of parsed.diagnostics) {
+        for (const d of effectiveParsed.diagnostics) {
           if (d.severity === "hint" || d.severity === "warning") {
             process.stderr.write(`\n[maestro] ${d.code}: ${d.message}\n`);
           }
         }
 
         if (globalOpts.json) {
-          process.stdout.write(format({ decision: effectiveDecision, cost: parsed.cost }, { json: true }) + "\n");
+          process.stdout.write(format({ decision: effectiveDecision, cost: effectiveParsed.cost }, { json: true }) + "\n");
         }
       }
 

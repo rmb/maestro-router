@@ -194,6 +194,13 @@ export type UserConfig = {
    * Cost: 3-10k cache_creation tokens per first-turn on machines with active MCP.
    */
   disableStandardMcpIsolation?: boolean;
+  /**
+   * T4: when a turn completes with stop_reason="max_tokens", automatically
+   * retry the same turn on a stronger model using --resume. Default true.
+   * Set false to disable retries entirely (faster but yields truncated output).
+   * Only applies to run-cmd mode; sdk-proxy/panel mode is unaffected.
+   */
+  autoResumeOnMaxTokens?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

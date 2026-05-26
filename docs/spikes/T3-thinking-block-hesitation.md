@@ -291,3 +291,70 @@ If the content is absent or stripped: close as "protocol limitation." Log to
 
 Estimated build cost if content is present: 4–6 hours. Two new files, one state
 variable, one new `UserConfig` flag. No new runtime deps.
+
+---
+
+## Protocol verification (2026-05-26)
+
+Tested against Claude Code CLI **2.1.112**.
+
+**Command:**
+
+```bash
+claude --print --output-format stream-json --verbose \
+  --model opus --effort high \
+  "Prove that the sum of two odd integers is even, then disprove
+   that the product of two primes is always prime. Show step-by-step reasoning."
+```
+
+**Capture:** 7 frames total — 3 `system`, 2 `assistant`, 1 `rate_limit_event`, 1
+`result`. The `result` frame confirms Opus was used (`claude-opus-4-7`), 22.7k
+cache_creation tokens, 603 output tokens — i.e. the model DID think; this was
+not a thinking-skipped path.
+
+**Thinking block found in the assistant frame:**
+
+```json
+{
+  "type": "thinking",
+  "thinking": "",
+  "signature": "EtECCmMIDhgCKkDuZBrn3ureOSfBn3xQw1c6CSm7nKJFoiyay...
+                (~456 base64 chars, encrypted blob)"
+}
+```
+
+The `thinking` field is an **empty string** (length 0). Only the encrypted
+`signature` (a 456-char base64 blob, semantically equivalent to Anthropic API's
+`redacted_thinking` block type) is present.
+
+No `content_block_start`, `content_block_delta`, or `content_block_stop` frames
+were emitted — the stream-json verbose mode delivers complete content blocks,
+not streaming deltas.
+
+**Definitive answer: thinking content does NOT flow through Claude Code's
+stream-json protocol.** It is stripped/encrypted before reaching the proxy. The
+hesitation-marker approach proposed above is impossible in the current
+architecture.
+
+### Updated verdict: SKIP
+
+T3 cannot be implemented through stream-json under CLI 2.1.112. The only paths
+forward (none low-effort):
+
+1. Wait for Anthropic to expose thinking content in stream-json (no public
+   commitment to do so).
+2. Move Maestro to call the Anthropic API directly (bypassing Claude Code's
+   subprocess entirely). That's a Maestro v1.0 architectural rewrite, not a T3
+   feature.
+3. Infer hesitation from indirect signals: stream pace (long pauses between
+   chunks), output token count vs. input complexity ratio, post-completion
+   stop_reason. These are weaker signals than hesitation markers but feasible.
+   Move this to `docs/future-ideas.md` as "T3-indirect: hesitation via stream
+   pace and post-completion signals."
+
+The empty-`thinking` + populated-`signature` shape mirrors Anthropic API's
+`redacted_thinking` block, suggesting Claude Code unconditionally redacts even
+when the upstream API would have returned plaintext. This is a deliberate
+product choice on Anthropic's side, not a CLI bug we could work around.
+
+Capture preserved at `/tmp/maestro-t3-capture.jsonl` for reference.

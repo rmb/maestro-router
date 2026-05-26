@@ -26,6 +26,10 @@ const OPUS_INPUT_PER_TOK = 15 / 1_000_000;
 const OPUS_OUTPUT_PER_TOK = 75 / 1_000_000;
 const OPUS_CACHE_WRITE_PER_TOK = 18.75 / 1_000_000;
 const OPUS_CACHE_READ_PER_TOK = 1.50 / 1_000_000;
+/** 1M-context Opus variant costs 2× standard on input/cache tokens. */
+const OPUS_1M_INPUT_PER_TOK = 30 / 1_000_000;
+const OPUS_1M_CACHE_WRITE_PER_TOK = 37.5 / 1_000_000;
+const OPUS_1M_CACHE_READ_PER_TOK = 3.0 / 1_000_000;
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 
@@ -39,6 +43,10 @@ type Summary = {
   cacheHitRate: number;
   cacheCreationCostUsd: number;
   cacheReadSavingsTokens: number;
+  /** True when ≥1 event used the claude-opus-4-7[1m] 1M-context variant (costs 2× standard). */
+  has1mVariant: boolean;
+  /** Count of events that used the 1M variant. */
+  count1mVariant: number;
   perClass: Record<
     Class,
     {
@@ -108,6 +116,11 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   let totalOutputTokens = 0;
   let totalCacheCreationTokens = 0;
   let totalCacheReadTokens = 0;
+  // Track 1M variant tokens separately for accurate baseline pricing.
+  let totalInputTokens1m = 0;
+  let totalCacheCreationTokens1m = 0;
+  let totalCacheReadTokens1m = 0;
+  let count1mVariant = 0;
 
   for (const e of events) {
     if (e.type === "decision") {
@@ -133,6 +146,12 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         totalOutputTokens += e.cost.outputTokens;
         totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
         totalCacheReadTokens += e.cost.cacheReadInputTokens;
+        if (e.cost.is1mVariant) {
+          count1mVariant++;
+          totalInputTokens1m += e.cost.inputTokens;
+          totalCacheCreationTokens1m += e.cost.cacheCreationInputTokens;
+          totalCacheReadTokens1m += e.cost.cacheReadInputTokens;
+        }
         durationApiMsByClass[cls].push(e.cost.durationApiMs);
       }
     } else if (e.type === "override") {
@@ -161,6 +180,9 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     totalOutputTokens,
     totalCacheCreationTokens,
     totalCacheReadTokens,
+    totalInputTokens1m,
+    totalCacheCreationTokens1m,
+    totalCacheReadTokens1m,
   );
 
   return {
@@ -173,6 +195,8 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     cacheHitRate: totalRequests > 0 ? round(cacheReadCount / totalRequests, 4) : 0,
     cacheCreationCostUsd: round(cacheCreationCost, 4),
     cacheReadSavingsTokens: cacheReadTokens,
+    has1mVariant: count1mVariant > 0,
+    count1mVariant,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
@@ -215,10 +239,10 @@ function round(n: number, digits: number): number {
 }
 
 /**
- * Reprice the observed token mix at Opus rates. More accurate than flat
- * per-class multipliers because Anthropic prices cache writes, cache reads,
- * and output tokens at consistent ratios across models, so the token counts
- * are the ground truth regardless of which model was actually used.
+ * Reprice the observed token mix at Opus rates. Splits 1M-context-variant
+ * tokens from standard tokens and prices each at the appropriate tier:
+ * 1M Opus costs 2× standard on input and cache_creation/read tokens.
+ * Output tokens are priced the same regardless of context window size.
  */
 function estimateBaselineOpusCost(
   actualCost: number,
@@ -226,12 +250,22 @@ function estimateBaselineOpusCost(
   outputTokens: number,
   cacheCreationTokens: number,
   cacheReadTokens: number,
+  inputTokens1m: number,
+  cacheCreationTokens1m: number,
+  cacheReadTokens1m: number,
 ): number {
+  const inputStd = inputTokens - inputTokens1m;
+  const cacheCreationStd = cacheCreationTokens - cacheCreationTokens1m;
+  const cacheReadStd = cacheReadTokens - cacheReadTokens1m;
+
   const tokenBased =
-    inputTokens * OPUS_INPUT_PER_TOK +
+    inputStd * OPUS_INPUT_PER_TOK +
+    inputTokens1m * OPUS_1M_INPUT_PER_TOK +
     outputTokens * OPUS_OUTPUT_PER_TOK +
-    cacheCreationTokens * OPUS_CACHE_WRITE_PER_TOK +
-    cacheReadTokens * OPUS_CACHE_READ_PER_TOK;
+    cacheCreationStd * OPUS_CACHE_WRITE_PER_TOK +
+    cacheCreationTokens1m * OPUS_1M_CACHE_WRITE_PER_TOK +
+    cacheReadStd * OPUS_CACHE_READ_PER_TOK +
+    cacheReadTokens1m * OPUS_1M_CACHE_READ_PER_TOK;
   // Fall back to a 5× multiplier only when no token data is available.
   return tokenBased > 0 ? tokenBased : actualCost * 5;
 }
@@ -252,7 +286,7 @@ function renderHuman(s: Summary): string {
   lines.push(`  ${bold("requests")}        ${cyan(s.totalRequests)}`);
   lines.push(`  ${bold("spent")}           ${yellow(usd(s.totalCostUsd))}`);
   lines.push(
-    `  ${bold("would-be opus")}   ${gray("~" + usd(s.baselineOpusEverywhereUsd))}`,
+    `  ${bold("would-be opus")}   ${gray("~" + usd(s.baselineOpusEverywhereUsd))}  ${s.has1mVariant ? dim(`(${s.count1mVariant} turns at 1M pricing)`) : ""}`,
   );
   lines.push(
     `  ${bold("saved")}           ${savColor(usd(s.estimatedSavings))}  ${savColor(`(${pct(s.savingsRatio, 1)})`)}  ${dim(bar(s.savingsRatio, 20))}`,
@@ -285,6 +319,14 @@ function renderHuman(s: Summary): string {
     }
     lines.push("");
     lines.push(green("  → run `maestro tune --learn` to fold these into heuristics"));
+  }
+
+  // 1M variant cost warning
+  if (s.has1mVariant) {
+    lines.push("");
+    lines.push(yellow(`  ⚠ claude-opus-4-7[1m] detected on ${s.count1mVariant} turn(s) — 1M context costs 2× standard Opus`));
+    lines.push(dim("  → baseline is repriced at 1M rates; savings vs standard 200k Opus would be higher"));
+    lines.push(dim("  → set ANTHROPIC_CONTEXT_WINDOW=200k (if supported) or avoid long-session VSCode panel mode"));
   }
 
   // Cache locality warning — the dominant cost vector

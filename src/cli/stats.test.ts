@@ -144,6 +144,109 @@ describe("outputTokensP90ByClass", () => {
   });
 });
 
+describe("1M variant baseline pricing", () => {
+  test("has1mVariant is false when no events have is1mVariant", () => {
+    const events: TelemetryEvent[] = [makeDecision({ outputTokens: 100 })];
+    const summary = computeSummary(events, 7);
+    expect(summary.has1mVariant).toBe(false);
+    expect(summary.count1mVariant).toBe(0);
+  });
+
+  test("has1mVariant is true when any event has is1mVariant=true", () => {
+    const event: TelemetryEvent = {
+      type: "decision",
+      ts: "2026-05-21T10:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model: "opus", effort: "medium", maxBudgetUsd: 0.5 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.05,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheCreationInputTokens: 40000,
+        cacheReadInputTokens: 0,
+        durationMs: 5000,
+        durationApiMs: 4800,
+        stopReason: "end_turn",
+        modelUsed: "claude-opus-4-7",
+        serviceTier: "default",
+        is1mVariant: true,
+      },
+    };
+    const summary = computeSummary([event], 7);
+    expect(summary.has1mVariant).toBe(true);
+    expect(summary.count1mVariant).toBe(1);
+  });
+
+  test("1M variant baseline uses 2× cache_creation rate, so baseline >= actual when all turns are 1M", () => {
+    // 1M variant: actual spend = real cost; baseline = 1M Opus repriced.
+    // When Claude uses claude-opus-4-7[1m], actual ≈ baseline (same pricing tier).
+    // Savings > 0 means Maestro routed some turns cheaper (haiku/sonnet) than 1M Opus.
+    const opusTurn: TelemetryEvent = {
+      type: "decision",
+      ts: "2026-05-21T10:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model: "opus", effort: "medium", maxBudgetUsd: 0.5 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 1.5,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 40000,
+        cacheReadInputTokens: 0,
+        durationMs: 5000,
+        durationApiMs: 4800,
+        stopReason: "end_turn",
+        modelUsed: "claude-opus-4-7",
+        serviceTier: "default",
+        is1mVariant: true,
+      },
+    };
+    const haikuTurn: TelemetryEvent = {
+      type: "decision",
+      ts: "2026-05-21T10:01:00.000Z",
+      decision: {
+        class: "trivial",
+        classifier: "heuristic",
+        confidence: 0.95,
+        spec: { model: "haiku", effort: "low", maxBudgetUsd: 0.05 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 40000,
+        durationMs: 500,
+        durationApiMs: 400,
+        stopReason: "end_turn",
+        modelUsed: "claude-haiku-4-5",
+        serviceTier: "default",
+        is1mVariant: true,
+      },
+    };
+    const summary = computeSummary([opusTurn, haikuTurn], 7);
+    // Baseline should account for 1M pricing on both turns.
+    // cacheCreationTokens1m=40000 → baseline cacheCreate = 40000 * 37.5/1M = 1.5
+    // cacheReadTokens1m=40000 → baseline cacheRead = 40000 * 3.0/1M = 0.12
+    // Total baseline ≈ 1.62, actual = 1.5 → savings ≈ 7.4%
+    expect(summary.baselineOpusEverywhereUsd).toBeGreaterThan(summary.totalCostUsd);
+    expect(summary.savingsRatio).toBeGreaterThan(0);
+  });
+});
+
 describe("durationApiMsP90ByClass", () => {
   test("p90 of 10 values is at index 8", () => {
     // 10 standard decisions with durationApiMs: 100, 200, ..., 1000

@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.2.3 — 2026-05-26 · Classifier accuracy + compaction advisory
+
+**Problem:** Savings were still negative (-6%) after v0.2.2. Three remaining leaks: bare affirmations short-circuiting the pipeline at 0.8 confidence (preventing Markov from routing "yes/ok/sure" to the prior session's class); common low-context prompts hitting the LLM classifier at <0.2 confidence instead of heuristics; no signal when session cached context grew large enough to dominate per-turn cost.
+
+### What changed
+
+**`heuristic`: lower affirmation confidence 0.8 → 0.5** (`src/classifiers/heuristic.ts`)
+
+Bare affirmations ("yes", "ok", "sure", "correct", etc.) previously short-circuited at 0.8 — above the 0.6 pipeline threshold — so Markov had no chance to overrule. A "yes" approving a complex plan would land in `simple` and kick off a full agentic loop on Sonnet (observed: one such turn produced 35,969 output tokens, $2.88). At 0.5 the affirmation still votes `simple` but Markov wins when recent session classes were `standard`/`hard`.
+
+**`session`: compaction advisory when cache_read exceeds 300k tokens** (`src/wrapper/session.ts`, `src/cli/run-cmd.ts`)
+
+Adds `lastCacheReadTokens` to `SessionRecord`, persisted after every turn. When the prior session's cached context exceeds 300,000 tokens, emits a one-line stderr advisory suggesting `/compact`. Observed: two turns with 5M and 6.2M cached tokens costing $5.63 and $2.88 respectively — dominated by cache_read charges. At 300k the advisory would have fired ~15 turns before sessions reached that scale.
+
+**User heuristics: 5 new rules for common fallback patterns** (`~/.maestro/heuristics.json`)
+
+| Pattern | Class | Confidence |
+|---------|-------|-----------|
+| `fix`, `improve`, `implement` (bare verb) | standard | 0.5 |
+| `fix what you can/found` | hard | 0.75 |
+| `no, same issue` / `no, still broken` | hard | 0.75 |
+| `and inside ... as well` / `also in ...` | standard | 0.4 |
+| Single digit (`1`, `2.`) | standard | 0.4 |
+
+### Upgrade
+
+```sh
+npm install -g maestro-router@0.2.3
+# or
+pnpm add -g maestro-router@0.2.3
+```
+
+No configuration changes required.
+
+---
+
 ## v0.2.2 — 2026-05-26 · Session boot fix
 
 **Problem:** `maestro stats` reported 100% of spend as "session boot" and cost was dominated by `cache_creation_input_tokens`, not actual model work. Root causes were fingerprint fragmentation (separate Claude sessions per routing class) and a broken cross-model prewarm that spent money on sessions with wrong fingerprints.

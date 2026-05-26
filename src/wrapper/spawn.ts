@@ -79,10 +79,12 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
 }
 
 /**
- * X.soft brevity hints by class. Source of truth — exported so the fingerprint
- * compute in run-cmd.ts and oracle/tool-correctness.ts can replicate exactly
- * what spawn.ts sends in --append-system-prompt. Empty string means "suppress
+ * X.soft brevity hints by class (legacy). Used only when
+ * userConfig.restorePerClassBrevity === true. Empty string means "suppress
  * the flag entirely" (hard/reasoning/max never want a brevity hint).
+ *
+ * @deprecated Use the stable DEFAULT_APPEND_SYSTEM_PROMPT path instead.
+ * Only active when userConfig.restorePerClassBrevity === true.
  */
 export const CLASS_BREVITY: Partial<Record<string, string>> = {
   trivial: "Output only the answer. No explanation. No formatting.",
@@ -106,23 +108,41 @@ export const DEFAULT_APPEND_SYSTEM_PROMPT =
  * (for the --append-system-prompt flag) and run-cmd.ts (for fingerprint
  * computation). Must produce identical output in both call sites or the
  * fingerprint will diverge from the actual flag and Track Z will miss.
+ *
+ * Default path (restorePerClassBrevity=false): all classes share
+ * DEFAULT_APPEND_SYSTEM_PROMPT, so the fingerprint is stable across class
+ * swaps within the same model. One cache boot per (cwd, model) pair.
+ *
+ * Legacy path (restorePerClassBrevity=true): per-class hints from CLASS_BREVITY
+ * plus the G2 token-cap append. Fingerprint differs per class; each class swap
+ * pays a fresh cache_creation boot. Opt in only when stronger per-class output
+ * pressure matters more than cache reuse.
  */
 export function resolveAppendSystemPrompt(
   decision: Decision,
   userConfig: UserConfig,
 ): string {
   const spec = decision.spec;
+
+  // Explicit per-class override always wins (escape hatch, both paths).
   if (spec.appendSystemPrompt !== undefined) return spec.appendSystemPrompt;
-  const classHint = CLASS_BREVITY[decision.class];
-  if (classHint !== undefined) {
-    // G2: when CLASS_BREVITY is empty (hard/reasoning) but maxOutputTokens is set,
-    // emit a cap hint to guide token output gating (excluded: max class never caps)
-    if (classHint === "" && spec.maxOutputTokens !== undefined && spec.maxOutputTokens > 0 && decision.class !== "max") {
-      const capHint = `Keep response under ${spec.maxOutputTokens} tokens.`;
-      return capHint;
+
+  // Legacy path: restore v0.2.x per-class brevity + G2 token-cap append.
+  if (userConfig.restorePerClassBrevity === true) {
+    const classHint = CLASS_BREVITY[decision.class];
+    if (classHint !== undefined) {
+      // G2: when CLASS_BREVITY is empty (hard/reasoning) but maxOutputTokens is set,
+      // emit a cap hint to guide token output gating (excluded: max class never caps)
+      if (classHint === "" && spec.maxOutputTokens !== undefined && spec.maxOutputTokens > 0 && decision.class !== "max") {
+        return `Keep response under ${spec.maxOutputTokens} tokens.`;
+      }
+      return classHint;
     }
-    return classHint;
+    if (userConfig.appendSystemPrompt !== undefined) return userConfig.appendSystemPrompt;
+    return DEFAULT_APPEND_SYSTEM_PROMPT;
   }
+
+  // Default (stable) path: user override → shared default.
   if (userConfig.appendSystemPrompt !== undefined) return userConfig.appendSystemPrompt;
   return DEFAULT_APPEND_SYSTEM_PROMPT;
 }

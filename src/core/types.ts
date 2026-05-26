@@ -202,6 +202,14 @@ export type UserConfig = {
    */
   autoResumeOnMaxTokens?: boolean;
   /**
+   * Restore per-class brevity hints in --append-system-prompt (run-cmd mode).
+   * Default false. When false (default), all classes within a model share a
+   * stable appendSystemPrompt to enable cache reuse on class swaps. Set true
+   * to restore the v0.2.x per-class behavior (trades cache stability for
+   * stronger per-class output pressure).
+   */
+  restorePerClassBrevity?: boolean;
+  /**
    * Disable the first-turn Opus guard. Default false (guard ON).
    * When enabled (default), the first turn of a new session that routes to Opus
    * is downgraded to Sonnet to avoid a $3-12 cache_creation boot. Set true to

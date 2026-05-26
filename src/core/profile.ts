@@ -40,6 +40,7 @@ export const balancedProfile: Profile = {
       bare: true,
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.05,
+      noPersist: true,
     },
     simple: {
       model: "sonnet",
@@ -53,7 +54,7 @@ export const balancedProfile: Profile = {
     // isolation is the cheaper win without restricting tool access.
     standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 1.0, maxOutputTokens: 16000 },
     hard: { model: "sonnet", effort: "high", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
-    reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
+    reasoning: { model: "opus", effort: "xhigh", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
     max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };
@@ -69,6 +70,7 @@ export const cheapProfile: Profile = {
       bare: true,
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.03,
+      noPersist: true,
     },
     simple: {
       model: "haiku",
@@ -80,7 +82,7 @@ export const cheapProfile: Profile = {
     // P8: cheap profile also gets MCP isolation on standard/hard
     standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
     hard: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 2.0 },
-    reasoning: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 3.0 },
+    reasoning: { model: "sonnet", effort: "xhigh", tools: "default", maxBudgetUsd: 3.0 },
     max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };
@@ -96,11 +98,12 @@ export const qualityProfile: Profile = {
       bare: true,
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.1,
+      noPersist: true,
     },
     simple: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
     standard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 2.0 },
     hard: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
-    reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 10.0 },
+    reasoning: { model: "opus", effort: "xhigh", tools: "default", maxBudgetUsd: 10.0 },
     max: { model: "opus", effort: "max", tools: "default", maxBudgetUsd: 20.0 },
   },
 };

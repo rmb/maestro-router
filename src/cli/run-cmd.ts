@@ -53,6 +53,7 @@ import { createSessionStore } from "../wrapper/session.js";
 import { buildClaudeArgs, resolveAppendSystemPrompt } from "../wrapper/spawn.js";
 import { streamClaude } from "../wrapper/stream.js";
 import { computeFingerprint } from "../wrapper/prewarm.js";
+import { condensePaste } from "../wrapper/paste.js";
 import { detectContinuation } from "../wrapper/continuation.js";
 import { applyFirstTurnGuard } from "../wrapper/first-turn-guard.js";
 import { format, loadCliConfig, readState } from "./utils.js";
@@ -109,6 +110,20 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       log(`preflight ok (claude ${pre.version})`, quiet);
 
       const cli = await loadCliConfig(globalOpts.config);
+
+      // Paste condenser: detect large structured-data dumps and truncate the
+      // middle before classification and Claude invocation. Reduces cache_creation
+      // tokens on first-turn paste-heavy prompts. Off by default; opt in via
+      // enablePasteCondenser: true in ~/.maestro/config.json.
+      let effectivePrompt = prompt;
+      if (cli.userConfig.enablePasteCondenser) {
+        const condensed = condensePaste(prompt);
+        if (condensed) {
+          effectivePrompt = condensed.condensed;
+          log(`paste condenser: ${prompt.length}→${effectivePrompt.length} chars (saved ${condensed.savedChars})`, quiet);
+        }
+      }
+
       const { profile } = loadProfile({
         userConfig: cli.userConfig,
         overrides: cli.profileOverrides,
@@ -150,11 +165,11 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
           : null;
 
       // K1: classifier cache — bypass for overrides and short continuation phrases
-      const stripped = stripOverride(prompt);
-      const promptHash = classifierCache.promptHash(prompt);
+      const stripped = stripOverride(effectivePrompt);
+      const promptHash = classifierCache.promptHash(effectivePrompt);
       const shouldBypassCache =
-        prompt.trim().startsWith("@") ||
-        /^(continue|keep going|go on|and[?]?)\b/i.test(prompt.trim());
+        effectivePrompt.trim().startsWith("@") ||
+        /^(continue|keep going|go on|and[?]?)\b/i.test(effectivePrompt.trim());
 
       // Read lastStopReason from prior session for E1/E3 signals
       const priorStopReason = priorSession?.lastStopReason ?? null;

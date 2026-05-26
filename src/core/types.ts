@@ -217,6 +217,13 @@ export type UserConfig = {
    * planning queries that won't have follow-ups).
    */
   disableFirstTurnGuard?: boolean;
+  /**
+   * When true, detect paste-heavy prompts (long structured data dumps with low
+   * code density) and truncate the middle before sending to Claude. Preserves
+   * the first 350 and last 150 chars; replaces the middle with a token count.
+   * Reduces cache_creation tokens on first-turn data-paste turns. Default false.
+   */
+  enablePasteCondenser?: boolean;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

@@ -55,7 +55,7 @@
       "prompt": "do a thorough refactor of this 3-line function",
       "expected": "simple",
       "predicted": "standard",
-      "classifier": "default",
+      "classifier": "forced.standard",
       "source": "adversarial"
     },
     {
@@ -69,7 +69,7 @@
       "prompt": "update the env variable",
       "expected": "trivial",
       "predicted": "standard",
-      "classifier": "default",
+      "classifier": "forced.standard",
       "source": "adversarial"
     },
     {

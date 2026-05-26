@@ -38,11 +38,10 @@ const CACHE_WRITE_RATE: Record<string, number> = {
   opus: OPUS_CACHE_WRITE_PER_TOK,
 };
 
-/** Cache read rates per model alias (USD per token). */
+/** Cache read rates per model alias (USD per token). Opus uses OPUS_CACHE_READ_PER_TOK directly. */
 const CACHE_READ_RATE: Record<string, number> = {
   haiku: 0.10 / 1_000_000,
   sonnet: 0.30 / 1_000_000,
-  opus: OPUS_CACHE_READ_PER_TOK,
 };
 
 /**

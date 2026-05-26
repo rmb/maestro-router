@@ -44,6 +44,16 @@ tail -1 ~/.maestro/decisions.jsonl | python3 -c "import json,sys; e=json.loads(s
 
 To remove: `bash scripts/install.sh --uninstall`.
 
+**Optional: embedding classifier (~400 MB, recommended for heavy users)**
+
+Maestro ships a semantic embedding stage that catches prompts heuristics miss without burning an LLM call. It's an optional peer to avoid forcing 400 MB on every install. If you use Maestro heavily (50+ prompts/day), install it:
+
+```bash
+npm install -g @xenova/transformers
+```
+
+Without it, the pipeline falls through to the LLM classifier for uncertain prompts (~$0.001/call instead of local inference). You'll see `info.fallback.embedding_unavailable` in the routing log. With it, that warning disappears and the embedding stage runs instead.
+
 ---
 
 ## How it works — step by step

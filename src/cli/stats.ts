@@ -31,6 +31,25 @@ const OPUS_1M_INPUT_PER_TOK = 30 / 1_000_000;
 const OPUS_1M_CACHE_WRITE_PER_TOK = 37.5 / 1_000_000;
 const OPUS_1M_CACHE_READ_PER_TOK = 3.0 / 1_000_000;
 
+/** Cache write rates per model alias (USD per token). */
+const CACHE_WRITE_RATE: Record<string, number> = {
+  haiku: 1.25 / 1_000_000,
+  sonnet: 3.75 / 1_000_000,
+  opus: OPUS_CACHE_WRITE_PER_TOK,
+};
+
+/**
+ * Estimate the cache_creation cost from token count + model alias.
+ * Used to report actual write cost rather than full-turn cost.
+ */
+function estimateCacheWriteCost(model: string, tokens: number, is1m: boolean): number {
+  if (tokens <= 0) return 0;
+  const lower = model.toLowerCase();
+  if (lower.includes("haiku")) return tokens * CACHE_WRITE_RATE.haiku!;
+  if (lower.includes("opus")) return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
+  return tokens * CACHE_WRITE_RATE.sonnet!; // sonnet default
+}
+
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 
 type Summary = {
@@ -139,7 +158,11 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         perClass[cls].cacheCreations.push(e.cost.cacheCreationInputTokens);
         cacheReadTokens += e.cost.cacheReadInputTokens;
         if (e.cost.cacheCreationInputTokens > 0) {
-          cacheCreationCost += cost; // attribute full cost when cache was bootstrapped that turn
+          cacheCreationCost += estimateCacheWriteCost(
+            e.decision.spec.model,
+            e.cost.cacheCreationInputTokens,
+            e.cost.is1mVariant ?? false,
+          );
         }
         if (e.cost.cacheReadInputTokens > 0) cacheReadCount++;
         totalInputTokens += e.cost.inputTokens;
@@ -329,13 +352,14 @@ function renderHuman(s: Summary): string {
     lines.push(dim("  → set ANTHROPIC_CONTEXT_WINDOW=200k (if supported) or avoid long-session VSCode panel mode"));
   }
 
-  // Cache locality warning — the dominant cost vector
+  // Cache write cost warning — fires when cache_creation exceeds cache_read savings
   if (s.cacheCreationCostUsd > 0 && s.totalCostUsd > 0) {
     const bootRatio = s.cacheCreationCostUsd / s.totalCostUsd;
-    if (bootRatio > 0.9) {
+    if (bootRatio > 0.5) {
       lines.push("");
-      lines.push(yellow("  ⚠ session boot dominates: " + (bootRatio * 100).toFixed(0) + "% of spend is cache_creation"));
-      lines.push(dim("  → Track Z (fingerprint sessions) should fix this — run `maestro health`"));
+      lines.push(yellow("  ⚠ cache_creation is " + (bootRatio * 100).toFixed(0) + "% of spend — fingerprint fragmentation likely"));
+      lines.push(dim("  → different classes are booting separate sessions instead of sharing one per model tier"));
+      lines.push(dim("  → check that profile classes share tools='default' and mcpConfig to unify fingerprints"));
     }
   }
 

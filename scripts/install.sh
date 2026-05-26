@@ -48,14 +48,25 @@ echo "→ Installing dev dependencies (pnpm)…"
 pnpm install --ignore-scripts
 
 echo "→ Building…"
-# The embedding classifier (S2) is an optional peer (@xenova/transformers).
-# By default it isn't installed, so exemplars.json hasn't been generated yet
-# and the prebuild checksum gate would fail. The runtime classifier degrades
-# gracefully without exemplars (returns null + diagnostic, pipeline continues).
-# Users who want embedding can opt in later:
-#   npm install -g @xenova/transformers && pnpm embed
 export MAESTRO_SKIP_EMBED_CHECK=1
 pnpm build
+
+# Offer embedding classifier (~400 MB optional peer).
+# Skip prompt in non-interactive environments (CI, piped stdin).
+if [[ -t 0 ]]; then
+  echo ""
+  echo "→ Embedding classifier (optional, ~400 MB)"
+  echo "  Catches ambiguous prompts locally instead of burning an LLM call."
+  echo "  Recommended for heavy users (50+ prompts/day)."
+  read -r -p "  Install @xenova/transformers? [y/N] " _embed_reply
+  if [[ "${_embed_reply,,}" == "y" ]]; then
+    npm install -g @xenova/transformers
+    echo "  Embedding classifier enabled."
+  else
+    echo "  Skipped. Install later with: npm install -g @xenova/transformers"
+  fi
+  echo ""
+fi
 
 echo "→ Packing tarball…"
 rm -f maestro-router-*.tgz

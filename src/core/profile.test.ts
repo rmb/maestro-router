@@ -46,8 +46,8 @@ describe("builtin profiles", () => {
     expect(t.mcpConfig).toBe('{"mcpServers":{}}');
   });
 
-  test("balanced standard+ uses full tools and no --bare", () => {
-    for (const cls of ["standard", "hard", "reasoning", "max"] as Class[]) {
+  test("balanced simple/standard+ uses full tools and no --bare", () => {
+    for (const cls of ["simple", "standard", "hard", "reasoning", "max"] as Class[]) {
       const spec = balancedProfile.classes[cls];
       expect(spec.tools).toBe("default");
       expect(spec.bare).toBeUndefined();

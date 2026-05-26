@@ -29,7 +29,7 @@ export const UPGRADE: Record<Class, Class> = {
   max: "max",
 };
 
-/** Default `balanced` profile per plan. Trivial uses --bare; simple/trivial restrict tools and MCP. */
+/** Default `balanced` profile per plan. Trivial uses --bare; all classes share tools="default" to unify sonnet fingerprints. */
 export const balancedProfile: Profile = {
   name: "balanced",
   classes: {
@@ -44,7 +44,7 @@ export const balancedProfile: Profile = {
     simple: {
       model: "sonnet",
       effort: "low",
-      tools: "Read,Edit",
+      tools: "default",
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.3,
     },
@@ -73,7 +73,7 @@ export const cheapProfile: Profile = {
     simple: {
       model: "haiku",
       effort: "low",
-      tools: "Read,Edit",
+      tools: "default",
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.1,
     },
@@ -97,7 +97,7 @@ export const qualityProfile: Profile = {
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.1,
     },
-    simple: { model: "sonnet", effort: "medium", tools: "default", maxBudgetUsd: 0.5 },
+    simple: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
     standard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 2.0 },
     hard: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
     reasoning: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 10.0 },

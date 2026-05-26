@@ -150,7 +150,10 @@ export function isToolResultMessage(frame: Frame): boolean {
 
 /**
  * Extract content info from tool_result blocks in a user frame.
- * Returns null if the frame has no tool_result blocks with string content.
+ * Returns null if the frame has no tool_result blocks.
+ * Returns {contentLength: 0, content: ""} when a tool_result block exists but
+ * its content is non-string (e.g. null or array without text sub-blocks) — this
+ * correctly routes the turn to trivial rather than erroring.
  */
 export function extractToolResultInfo(
   frame: Frame,

@@ -12,6 +12,7 @@ import {
   isToolResultMessage,
   extractToolUseIds,
   extractToolUseBlocks,
+  extractToolResultInfo,
 } from "./stream-json-frames.js";
 
 describe("parseFrame", () => {
@@ -216,5 +217,106 @@ describe("extractToolUseBlocks", () => {
       '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01"},{"type":"tool_use","name":"Read"},{"type":"tool_use","id":"toolu_03","name":"Glob","input":{}}]}}',
     )!;
     expect(extractToolUseBlocks(f)).toEqual([{ id: "toolu_03", name: "Glob" }]);
+  });
+});
+
+describe("extractToolResultInfo", () => {
+  test("returns null for a frame with no tool_result blocks", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}',
+    )!;
+    expect(extractToolResultInfo(f)).toBeNull();
+  });
+
+  test("returns null for a frame with no message content array", () => {
+    const f = parseFrame('{"type":"user","message":{}}')!;
+    expect(extractToolResultInfo(f)).toBeNull();
+  });
+
+  test("returns correct length and truncated content for string content", () => {
+    const longContent = "a".repeat(1000);
+    const f = parseFrame(
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_01", content: longContent }],
+        },
+      }),
+    )!;
+    const info = extractToolResultInfo(f);
+    expect(info).not.toBeNull();
+    expect(info!.contentLength).toBe(1000);
+    expect(info!.content).toBe("a".repeat(500));
+  });
+
+  test("does not truncate content shorter than 500 chars", () => {
+    const f = parseFrame(
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"short"}]}}',
+    )!;
+    const info = extractToolResultInfo(f);
+    expect(info).not.toBeNull();
+    expect(info!.contentLength).toBe(5);
+    expect(info!.content).toBe("short");
+  });
+
+  test("extracts content from array-of-text-blocks content", () => {
+    const f = parseFrame(
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_01",
+              content: [
+                { type: "text", text: "hello " },
+                { type: "text", text: "world" },
+              ],
+            },
+          ],
+        },
+      }),
+    )!;
+    const info = extractToolResultInfo(f);
+    expect(info).not.toBeNull();
+    expect(info!.contentLength).toBe(11); // "hello " (6) + "world" (5)
+    expect(info!.content).toBe("hello "); // first sub-block sample
+  });
+
+  test("accumulates contentLength across multiple tool_result blocks", () => {
+    const f = parseFrame(
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_01", content: "aaa" },
+            { type: "tool_result", tool_use_id: "toolu_02", content: "bb" },
+          ],
+        },
+      }),
+    )!;
+    const info = extractToolResultInfo(f);
+    expect(info).not.toBeNull();
+    expect(info!.contentLength).toBe(5); // 3 + 2
+    expect(info!.content).toBe("aaa"); // first block's sample
+  });
+
+  test("returns {contentLength:0, content:''} for tool_result block with null content", () => {
+    const f = parseFrame(
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_01", content: null }],
+        },
+      }),
+    )!;
+    const info = extractToolResultInfo(f);
+    expect(info).not.toBeNull();
+    expect(info!.contentLength).toBe(0);
+    expect(info!.content).toBe("");
   });
 });

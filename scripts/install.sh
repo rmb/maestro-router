@@ -59,7 +59,7 @@ if [[ -t 0 ]]; then
   echo "  Catches ambiguous prompts locally instead of burning an LLM call."
   echo "  Recommended for heavy users (50+ prompts/day)."
   read -r -p "  Install @xenova/transformers? [y/N] " _embed_reply
-  if [[ "${_embed_reply,,}" == "y" ]]; then
+  if [[ "$_embed_reply" == "y" || "$_embed_reply" == "Y" ]]; then
     npm install -g @xenova/transformers
     echo "  Embedding classifier enabled."
   else

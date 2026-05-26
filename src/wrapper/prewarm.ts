@@ -27,6 +27,11 @@ export type FingerprintSpec = {
  * collided into the same fingerprint bucket. Now hashes 6 dimensions with
  * normalization so user-supplied variants don't accidentally invalidate.
  *
+ * S12: trivialMinimalContext when true adds --setting-sources user
+ * --disable-slash-commands to trivial turns, stripping skills/settings surface.
+ * Cache fingerprint differs when enabled to ensure minimal/full contexts use
+ * separate session buckets.
+ *
  * Pure function — no I/O.
  * budget: 0ms (no I/O, pure hash)
  */
@@ -37,6 +42,7 @@ export function computeFingerprint(spec: {
   tools?: string;
   mcpConfig?: string;
   appendSystemPrompt?: string;
+  trivialMinimalContext?: boolean;
 }): string {
   return createHash("sha256")
     .update(
@@ -47,6 +53,7 @@ export function computeFingerprint(spec: {
         normalizeTools(spec.tools),
         normalizeMcpConfig(spec.mcpConfig),
         normalizeAppendPrompt(spec.appendSystemPrompt),
+        spec.trivialMinimalContext ? "minimal" : "full",
       ]),
     )
     .digest("hex")

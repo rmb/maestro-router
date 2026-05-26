@@ -272,6 +272,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         ...(decision.spec.tools ? { tools: decision.spec.tools } : {}),
         ...(decision.spec.mcpConfig ? { mcpConfig: decision.spec.mcpConfig } : {}),
         appendSystemPrompt: resolvedAppendPrompt,
+        ...(cli.userConfig.trivialMinimalContext ? { trivialMinimalContext: true } : {}),
       });
 
       // Track Z kill switch: fall back to legacy getOrCreate when MAESTRO_DISABLE_TRACK_Z is set

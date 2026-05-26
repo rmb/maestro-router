@@ -131,4 +131,43 @@ describe("computeFingerprint", () => {
 
     expect(trivialFp).not.toBe(standardFp);
   });
+
+  test("fingerprint differs when trivialMinimalContext=true vs false (S12)", () => {
+    // With trivialMinimalContext enabled, the fingerprint must differ from the
+    // full-context version to ensure they use different session buckets
+    const fullCtxFp = computeFingerprint({
+      model: "haiku",
+      bare: false,
+      excludeDynamicSections: true,
+    });
+
+    const minimalCtxFp = computeFingerprint({
+      model: "haiku",
+      bare: false,
+      excludeDynamicSections: true,
+      trivialMinimalContext: true,
+    });
+
+    expect(minimalCtxFp).not.toBe(fullCtxFp);
+  });
+
+  test("fingerprint omits trivialMinimalContext when false (default)", () => {
+    // When trivialMinimalContext is false or undefined, the field should not be
+    // included in the fingerprint computation
+    const fpWithoutField = computeFingerprint({
+      model: "haiku",
+      bare: false,
+      excludeDynamicSections: true,
+    });
+
+    const fpWithFalse = computeFingerprint({
+      model: "haiku",
+      bare: false,
+      excludeDynamicSections: true,
+      trivialMinimalContext: false,
+    });
+
+    // Both should produce the same fingerprint when the field is absent or false
+    expect(fpWithoutField).toBe(fpWithFalse);
+  });
 });

@@ -572,11 +572,11 @@ export async function runEval(
   return {
     total,
     correct,
-    accuracy: Number((correct / total).toFixed(4)),
+    accuracy: total > 0 ? Number((correct / total).toFixed(4)) : 0,
     perClass: Object.fromEntries(
       ALL_CLASSES.filter((c) => perClass.has(c)).map((c) => {
         const b = perClass.get(c)!;
-        return [c, { total: b.total, correct: b.correct, accuracy: Number((b.correct / b.total).toFixed(4)) }];
+        return [c, { total: b.total, correct: b.correct, accuracy: b.total > 0 ? Number((b.correct / b.total).toFixed(4)) : 0 }];
       }),
     ),
     confusion: Object.fromEntries(confusion),

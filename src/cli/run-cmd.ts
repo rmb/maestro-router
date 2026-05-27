@@ -173,7 +173,6 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
 
       // Read lastStopReason from prior session for E1/E3 signals
       const priorStopReason = priorSession?.lastStopReason ?? null;
-      const priorCacheReadTokens = priorSession?.lastCacheReadTokens ?? 0;
 
       // Detect M1 continuation before routing
       const continuationResult = detectContinuation(stripped, priorStopReason);
@@ -285,13 +284,18 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
           });
 
       // Compaction: when cached context exceeds threshold, either warn or auto-compact.
+      // Use the current session's lastCacheReadTokens (not priorSession's) — they diverge
+      // when model/fingerprint changes between turns, causing the wrong session's value to
+      // be checked against the threshold.
       const COMPACT_THRESHOLD = cli.userConfig.autoCompactThresholdTokens ?? 300_000;
-      const needsCompact = !session.isNew && priorCacheReadTokens > COMPACT_THRESHOLD;
+      const currentSessionCacheRead =
+        allSessions.find((s) => s.sessionId === session.sessionId)?.lastCacheReadTokens ?? 0;
+      const needsCompact = !session.isNew && currentSessionCacheRead > COMPACT_THRESHOLD;
       if (needsCompact) {
         if (cli.userConfig.autoCompact) {
           // Auto-compact: spawn /compact silently, then continue with the real prompt.
           process.stderr.write(
-            `maestro: auto-compacting session (~${Math.round(priorCacheReadTokens / 1000)}k cached tokens)\n`,
+            `maestro: auto-compacting session (~${Math.round(currentSessionCacheRead / 1000)}k cached tokens)\n`,
           );
           const compactArgs = buildClaudeArgs({
             decision: { ...decision, spec: { ...decision.spec, appendSystemPrompt: resolvedAppendPrompt } },
@@ -309,12 +313,12 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             type: "compact",
             ts: new Date().toISOString(),
             sessionId: session.sessionId,
-            priorCacheReadTokens,
+            priorCacheReadTokens: currentSessionCacheRead,
           });
           process.stderr.write(`maestro: compacted — continuing with your prompt\n`);
         } else {
           process.stderr.write(
-            `maestro: session at ~${Math.round(priorCacheReadTokens / 1000)}k cached context — /compact will reset it and reduce per-turn cache_read cost\n`,
+            `maestro: session at ~${Math.round(currentSessionCacheRead / 1000)}k cached context — /compact will reset it and reduce per-turn cache_read cost\n`,
           );
         }
       }

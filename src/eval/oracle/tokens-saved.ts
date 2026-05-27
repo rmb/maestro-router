@@ -2,6 +2,7 @@
 
 import type { TelemetryEvent } from "../../core/types.js";
 import type { CheckResult, DimensionResult } from "./telemetry-correctness.js";
+import { costFromEvent } from "../../core/pricing.js";
 
 // ---------------------------------------------------------------------------
 // Pricing
@@ -89,7 +90,10 @@ export function computeSavings(
 ): TokenSavingsResult {
   const costEvents = decisionEventsWithCost(events);
 
-  const actualCost = costEvents.reduce((sum, e) => sum + e.cost.totalCostUsd, 0);
+  const actualCost = costEvents.reduce(
+    (sum, e) => sum + costFromEvent(e.cost, e.decision.spec.model),
+    0,
+  );
   const hypotheticalOpusCost = costEvents.reduce(
     (sum, e) => sum + hypotheticalCostForEvent(e, pricing),
     0,
@@ -177,9 +181,9 @@ export function isolateE1Savings(
   }
 
   const beforeAvg =
-    before.reduce((sum, e) => sum + e.cost.totalCostUsd, 0) / before.length;
+    before.reduce((sum, e) => sum + costFromEvent(e.cost, e.decision.spec.model), 0) / before.length;
   const afterAvg =
-    after.reduce((sum, e) => sum + e.cost.totalCostUsd, 0) / after.length;
+    after.reduce((sum, e) => sum + costFromEvent(e.cost, e.decision.spec.model), 0) / after.length;
 
   const savingsPct = beforeAvg === 0 ? 0 : (beforeAvg - afterAvg) / beforeAvg;
   const pass = savingsPct >= 0.5;

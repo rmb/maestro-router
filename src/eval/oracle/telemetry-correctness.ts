@@ -1,6 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import type { TelemetryEvent } from "../../core/types.js";
+import { costFromEvent } from "../../core/pricing.js";
 
 // ---------------------------------------------------------------------------
 // Shared result types (will be extracted to oracle/types.ts later)
@@ -41,8 +42,9 @@ type DecisionEvent = Extract<TelemetryEvent, { type: "decision" }>;
 // ---------------------------------------------------------------------------
 
 /**
- * Verifies that the sum of cost.totalCostUsd across all "decision" events
+ * Verifies that the token-derived cost sum across all "decision" events
  * matches statsSummary.totalCostUsd within 1%.
+ * Uses token volumes instead of total_cost_usd (unreliable on Pro/Team plans).
  */
 export function checkCostReconciliation(
   events: TelemetryEvent[],
@@ -53,7 +55,7 @@ export function checkCostReconciliation(
   );
 
   const computedSum = decisionEvents.reduce(
-    (sum, e) => sum + (e.cost?.totalCostUsd ?? 0),
+    (sum, e) => sum + (e.cost ? costFromEvent(e.cost, e.decision.spec.model) : 0),
     0,
   );
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { extractJSON } from "../core/extract.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, ClassSpec, Effort, HeuristicRule } from "../core/types.js";
+import { computeTurnCost } from "../core/pricing.js";
 
 /**
  * One-tier-cheaper map. trivial has no cheaper tier — those inputs are
@@ -224,8 +225,23 @@ type ClaudeEnvelope = {
    * --json-schema; A/B response calls don't.
    */
   structured_output?: unknown;
+  /** Unreliable on Pro/Team subscriptions — use token volumes instead. */
   total_cost_usd?: number;
   is_error?: boolean;
+  /** Token breakdown for cost derivation. Reliable on all plans. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Per-model token breakdown (Claude CLI ≥ 2.x). */
+  model_usage?: Record<string, {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  }>;
 };
 
 type JudgePayload = {
@@ -350,7 +366,26 @@ type ResponseExtraction = {
 };
 
 /**
- * Pull `result` and `total_cost_usd` from a Claude `--output-format json`
+ * Derive turn cost from a Claude envelope's token fields.
+ * total_cost_usd is fabricated on Pro/Team subscriptions — use tokens instead.
+ */
+function costFromEnvelope(env: ClaudeEnvelope): number {
+  // Prefer model_usage (richer, includes model name for correct pricing).
+  const modelEntry = env.model_usage ? Object.entries(env.model_usage)[0] : undefined;
+  const modelName = modelEntry?.[0] ?? "sonnet";
+  const tokens = modelEntry?.[1] ?? env.usage ?? {};
+  return computeTurnCost(
+    modelName,
+    tokens.input_tokens ?? 0,
+    tokens.output_tokens ?? 0,
+    tokens.cache_creation_input_tokens ?? 0,
+    tokens.cache_read_input_tokens ?? 0,
+    modelName.includes("[1m]"),
+  );
+}
+
+/**
+ * Pull `result` and token-derived cost from a Claude `--output-format json`
  * envelope. Returns null on parse failure or `is_error: true`.
  */
 function extractResponse(stdout: string): ResponseExtraction | null {
@@ -364,8 +399,7 @@ function extractResponse(stdout: string): ResponseExtraction | null {
       : env.result != null
         ? JSON.stringify(env.result)
         : "";
-  const cost = typeof env.total_cost_usd === "number" ? env.total_cost_usd : 0;
-  return { text, costUsd: cost };
+  return { text, costUsd: costFromEnvelope(env) };
 }
 
 type JudgeExtraction = {
@@ -391,8 +425,8 @@ function extractJudgeVerdict(stdout: string): JudgeExtraction | null {
         : null;
   if (!inner) return null;
 
-  const cost = typeof env.total_cost_usd === "number" ? env.total_cost_usd : 0;
   const reason = typeof inner.reason === "string" ? inner.reason : "";
+  const cost = costFromEnvelope(env);
   if (inner.winner === "A") return { verdict: "A_wins", reason, costUsd: cost };
   if (inner.winner === "B") return { verdict: "B_wins", reason, costUsd: cost };
   if (inner.winner === "tie") return { verdict: "tie", reason, costUsd: cost };

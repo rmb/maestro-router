@@ -21,6 +21,7 @@ function makeDecision(
     cls?: "trivial" | "simple" | "standard" | "hard" | "reasoning" | "max";
     effort?: "low" | "medium" | "high" | "xhigh" | "max";
     totalCostUsd?: number;
+    modelUsed?: string;
     inputTokens?: number;
     outputTokens?: number;
     cacheCreationInputTokens?: number;
@@ -51,7 +52,7 @@ function makeDecision(
       durationMs: 100,
       durationApiMs: 90,
       stopReason: "end_turn",
-      modelUsed: "claude-haiku",
+      modelUsed: opts.modelUsed ?? "claude-haiku",
       serviceTier: "standard",
     },
   } as TelemetryEvent;
@@ -87,12 +88,10 @@ describe("computeSavings", () => {
   });
 
   it("fails when savings < 60%", () => {
-    // If actual cost is nearly equal to Opus cost, savings are low
+    // Use opus model so actual cost ≈ hypothetical Opus baseline → savings ≈ 0%
     const events: TelemetryEvent[] = [
       makeDecision("2026-01-01T10:00:00Z", {
-        // actual cost = 0.05, hypothetical at Opus ≈ 0.0525
-        // savings = (0.0525 - 0.05) / 0.0525 ≈ 0.047 (4.7%)
-        totalCostUsd: 0.05,
+        modelUsed: "claude-opus",
         inputTokens: 1000,
         outputTokens: 500,
         cacheCreationInputTokens: 0,
@@ -143,34 +142,34 @@ describe("isolateE1Savings", () => {
 
   it("passes when before avg > after avg and ≥50% reduction", () => {
     const events: TelemetryEvent[] = [
-      // before: standard, effort=medium (not low), expensive
+      // before: standard, effort=medium, routed to opus (expensive)
       makeDecision("2026-02-01T10:00:00Z", {
         cls: "standard",
         effort: "medium",
-        totalCostUsd: 0.04,
+        modelUsed: "claude-opus",
       }),
       makeDecision("2026-02-10T10:00:00Z", {
         cls: "standard",
         effort: "medium",
-        totalCostUsd: 0.04,
+        modelUsed: "claude-opus",
       }),
-      // after: standard, effort=low (E1 firing), cheap
+      // after: standard, effort=low (E1), routed to haiku (cheap)
       makeDecision("2026-03-05T10:00:00Z", {
         cls: "standard",
         effort: "low",
-        totalCostUsd: 0.005,
+        modelUsed: "claude-haiku",
       }),
       makeDecision("2026-03-06T10:00:00Z", {
         cls: "standard",
         effort: "low",
-        totalCostUsd: 0.005,
+        modelUsed: "claude-haiku",
       }),
     ];
 
     const result = isolateE1Savings(events, baseline);
 
-    // beforeAvg = 0.04, afterAvg = 0.005
-    // savings = (0.04 - 0.005) / 0.04 = 0.875 ≥ 0.5
+    // beforeAvg = opus 1k in + 500 out = $0.0525; afterAvg = haiku = $0.0035
+    // savings = ($0.0525 - $0.0035) / $0.0525 ≈ 93% ≥ 50%
     expect(result.check.pass).toBe(true);
     expect(result.savingsPct).toBeGreaterThanOrEqual(0.5);
   });
@@ -384,10 +383,10 @@ describe("runTokensSaved", () => {
   });
 
   it("returns dimension fail when at least one check fails", () => {
-    // computeSavings will fail: actual ≈ Opus cost, savings < 60%
+    // computeSavings will fail: opus model → actual ≈ hypothetical Opus cost → savings ≈ 0%
     const events: TelemetryEvent[] = [
       makeDecision("2026-02-01T10:00:00Z", {
-        totalCostUsd: 0.05, // nearly equal to hypothetical Opus cost
+        modelUsed: "claude-opus",
         inputTokens: 1000,
         outputTokens: 500,
         cacheCreationInputTokens: 0,

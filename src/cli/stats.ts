@@ -18,102 +18,30 @@ import {
   yellow,
 } from "./render.js";
 import { DEFAULT_TELEMETRY_PATH, format, loadCliConfig } from "./utils.js";
+import {
+  computeTurnCost,
+  computeOpusBaseline,
+  modelAlias,
+  OPUS_1M_CACHE_WRITE_PER_TOK,
+  OPUS_1M_CACHE_READ_PER_TOK,
+  OPUS_CACHE_WRITE_PER_TOK,
+  OPUS_CACHE_READ_PER_TOK,
+} from "../core/pricing.js";
 
 const DEFAULT_WINDOW_DAYS = 7;
 
-/** Opus token prices (USD per token). Source: Anthropic pricing page. */
-const OPUS_INPUT_PER_TOK = 15 / 1_000_000;
-const OPUS_OUTPUT_PER_TOK = 75 / 1_000_000;
-const OPUS_CACHE_WRITE_PER_TOK = 18.75 / 1_000_000;
-const OPUS_CACHE_READ_PER_TOK = 1.50 / 1_000_000;
-/** 1M-context Opus variant costs 2× standard on input/cache tokens. */
-const OPUS_1M_INPUT_PER_TOK = 30 / 1_000_000;
-const OPUS_1M_CACHE_WRITE_PER_TOK = 37.5 / 1_000_000;
-const OPUS_1M_CACHE_READ_PER_TOK = 3.0 / 1_000_000;
-
-/** Cache write rates per model alias (USD per token). */
-const CACHE_WRITE_RATE: Record<string, number> = {
-  haiku: 1.25 / 1_000_000,
-  sonnet: 3.75 / 1_000_000,
-  opus: OPUS_CACHE_WRITE_PER_TOK,
-};
-
-/** Cache read rates per model alias (USD per token). Opus uses OPUS_CACHE_READ_PER_TOK directly. */
-const CACHE_READ_RATE: Record<string, number> = {
-  haiku: 0.10 / 1_000_000,
-  sonnet: 0.30 / 1_000_000,
-};
-
-/** Input token rates per model alias (USD per token). */
-const INPUT_RATE: Record<string, number> = {
-  haiku: 1.00 / 1_000_000,
-  sonnet: 3.00 / 1_000_000,
-  opus: OPUS_INPUT_PER_TOK,
-};
-
-/** Output token rates per model alias (USD per token). */
-const OUTPUT_RATE: Record<string, number> = {
-  haiku: 5.00 / 1_000_000,
-  sonnet: 15.00 / 1_000_000,
-  opus: OPUS_OUTPUT_PER_TOK,
-};
-
-/**
- * Normalize a modelUsed string (e.g. "claude-haiku-4-5-20251001") to
- * a pricing alias. Falls back to "sonnet" when unrecognized.
- */
-function modelAlias(modelUsed: string): "haiku" | "sonnet" | "opus" {
-  const lower = modelUsed.toLowerCase();
-  if (lower.includes("haiku")) return "haiku";
-  if (lower.includes("opus")) return "opus";
-  return "sonnet";
-}
-
-/**
- * Derive the real per-turn cost from token volumes × the actually-used
- * model's rates. Claude Code's total_cost_usd is unreliable on Pro/Team
- * subscriptions (it fabricates non-zero values that don't reflect real billing).
- * Computing from tokens gives a consistent number for both sides of the
- * savings ratio and is accurate for API users too.
- */
-function computeTurnCost(
-  modelUsed: string,
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationTokens: number,
-  cacheReadTokens: number,
-  is1m: boolean,
-): number {
-  const alias = modelAlias(modelUsed);
-  const ir = alias === "opus" && is1m ? OPUS_1M_INPUT_PER_TOK : (INPUT_RATE[alias] ?? INPUT_RATE.sonnet!);
-  const or = OUTPUT_RATE[alias] ?? OUTPUT_RATE.sonnet!;
-  const cwr = alias === "opus"
-    ? (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK)
-    : (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!);
-  const crr = alias === "opus"
-    ? (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK)
-    : (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!);
-  return inputTokens * ir + outputTokens * or + cacheCreationTokens * cwr + cacheReadTokens * crr;
-}
-
-/**
- * Estimate the cache_creation cost from token count + modelUsed string.
- */
 function estimateCacheWriteCost(modelUsed: string, tokens: number, is1m: boolean): number {
   if (tokens <= 0) return 0;
   const alias = modelAlias(modelUsed);
   if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
-  return tokens * (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!);
+  return computeTurnCost(modelUsed, 0, 0, tokens, 0, is1m);
 }
 
-/**
- * Estimate the cache_read cost from token count + modelUsed string.
- */
 function estimateCacheReadCost(modelUsed: string, tokens: number, is1m: boolean): number {
   if (tokens <= 0) return 0;
   const alias = modelAlias(modelUsed);
   if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK);
-  return tokens * (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!);
+  return computeTurnCost(modelUsed, 0, 0, 0, tokens, is1m);
 }
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -287,8 +215,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     };
   }
 
-  const baselineOpus = estimateBaselineOpusCost(
-    totalCost,
+  const baselineOpus = computeOpusBaseline(
     totalInputTokens,
     totalOutputTokens,
     totalCacheCreationTokens,
@@ -355,37 +282,6 @@ function round(n: number, digits: number): number {
   return Math.round(n * f) / f;
 }
 
-/**
- * Reprice the observed token mix at Opus rates. Splits 1M-context-variant
- * tokens from standard tokens and prices each at the appropriate tier:
- * 1M Opus costs 2× standard on input and cache_creation/read tokens.
- * Output tokens are priced the same regardless of context window size.
- */
-function estimateBaselineOpusCost(
-  actualCost: number,
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationTokens: number,
-  cacheReadTokens: number,
-  inputTokens1m: number,
-  cacheCreationTokens1m: number,
-  cacheReadTokens1m: number,
-): number {
-  const inputStd = inputTokens - inputTokens1m;
-  const cacheCreationStd = cacheCreationTokens - cacheCreationTokens1m;
-  const cacheReadStd = cacheReadTokens - cacheReadTokens1m;
-
-  const tokenBased =
-    inputStd * OPUS_INPUT_PER_TOK +
-    inputTokens1m * OPUS_1M_INPUT_PER_TOK +
-    outputTokens * OPUS_OUTPUT_PER_TOK +
-    cacheCreationStd * OPUS_CACHE_WRITE_PER_TOK +
-    cacheCreationTokens1m * OPUS_1M_CACHE_WRITE_PER_TOK +
-    cacheReadStd * OPUS_CACHE_READ_PER_TOK +
-    cacheReadTokens1m * OPUS_1M_CACHE_READ_PER_TOK;
-  // Fall back to a 5× multiplier only when no token data is available.
-  return tokenBased > 0 ? tokenBased : actualCost * 5;
-}
 
 function renderHuman(s: Summary): string {
   const lines: string[] = [];

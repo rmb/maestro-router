@@ -33,11 +33,14 @@ type Call = {
 type MockSpawn = TournamentSpawn & { calls: Call[] };
 
 function envelope(result: unknown, costUsd = 0.05): string {
+  // haiku output rate = $5/Mtok; use pure output tokens to produce token-derived cost.
+  const outputTokens = Math.round(costUsd / (5 / 1_000_000));
   return JSON.stringify({
     type: "result",
     subtype: "success",
     total_cost_usd: costUsd,
     result: typeof result === "string" ? result : JSON.stringify(result),
+    model_usage: { "claude-haiku-4-5": { output_tokens: outputTokens } },
   });
 }
 
@@ -55,12 +58,14 @@ function judgeEnvelopeStructuredOutput(
   reason = "ok",
   costUsd = 0.02,
 ): string {
+  const outputTokens = Math.round(costUsd / (5 / 1_000_000));
   return JSON.stringify({
     type: "result",
     subtype: "success",
     total_cost_usd: costUsd,
     result: "",
     structured_output: { winner, reason },
+    model_usage: { "claude-haiku-4-5": { output_tokens: outputTokens } },
   });
 }
 
@@ -263,7 +268,7 @@ describe("runTournament — failure modes", () => {
     const row = report.rows[0]!;
     expect(row.skipped).toBe(true);
     expect(row.skipReason).toBe("b_failed");
-    expect(row.costAUsd).toBe(0.05);
+    expect(row.costAUsd).toBeCloseTo(0.05, 8);
     expect(spawn.calls).toHaveLength(2); // A + B; no judge
   });
 

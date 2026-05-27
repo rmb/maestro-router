@@ -44,28 +44,76 @@ const CACHE_READ_RATE: Record<string, number> = {
   sonnet: 0.30 / 1_000_000,
 };
 
+/** Input token rates per model alias (USD per token). */
+const INPUT_RATE: Record<string, number> = {
+  haiku: 1.00 / 1_000_000,
+  sonnet: 3.00 / 1_000_000,
+  opus: OPUS_INPUT_PER_TOK,
+};
+
+/** Output token rates per model alias (USD per token). */
+const OUTPUT_RATE: Record<string, number> = {
+  haiku: 5.00 / 1_000_000,
+  sonnet: 15.00 / 1_000_000,
+  opus: OPUS_OUTPUT_PER_TOK,
+};
+
 /**
- * Estimate the cache_creation cost from token count + model alias.
- * Used to report actual write cost rather than full-turn cost.
+ * Normalize a modelUsed string (e.g. "claude-haiku-4-5-20251001") to
+ * a pricing alias. Falls back to "sonnet" when unrecognized.
  */
-function estimateCacheWriteCost(model: string, tokens: number, is1m: boolean): number {
-  if (tokens <= 0) return 0;
-  const lower = model.toLowerCase();
-  if (lower.includes("haiku")) return tokens * CACHE_WRITE_RATE.haiku!;
-  if (lower.includes("opus")) return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
-  return tokens * CACHE_WRITE_RATE.sonnet!; // sonnet default
+function modelAlias(modelUsed: string): "haiku" | "sonnet" | "opus" {
+  const lower = modelUsed.toLowerCase();
+  if (lower.includes("haiku")) return "haiku";
+  if (lower.includes("opus")) return "opus";
+  return "sonnet";
 }
 
 /**
- * Estimate the cache_read cost from token count + model alias.
- * Used to report how much of the session spend is pure re-read tax.
+ * Derive the real per-turn cost from token volumes × the actually-used
+ * model's rates. Claude Code's total_cost_usd is unreliable on Pro/Team
+ * subscriptions (it fabricates non-zero values that don't reflect real billing).
+ * Computing from tokens gives a consistent number for both sides of the
+ * savings ratio and is accurate for API users too.
  */
-function estimateCacheReadCost(model: string, tokens: number, is1m: boolean): number {
+function computeTurnCost(
+  modelUsed: string,
+  inputTokens: number,
+  outputTokens: number,
+  cacheCreationTokens: number,
+  cacheReadTokens: number,
+  is1m: boolean,
+): number {
+  const alias = modelAlias(modelUsed);
+  const ir = alias === "opus" && is1m ? OPUS_1M_INPUT_PER_TOK : (INPUT_RATE[alias] ?? INPUT_RATE.sonnet!);
+  const or = OUTPUT_RATE[alias] ?? OUTPUT_RATE.sonnet!;
+  const cwr = alias === "opus"
+    ? (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK)
+    : (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!);
+  const crr = alias === "opus"
+    ? (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK)
+    : (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!);
+  return inputTokens * ir + outputTokens * or + cacheCreationTokens * cwr + cacheReadTokens * crr;
+}
+
+/**
+ * Estimate the cache_creation cost from token count + modelUsed string.
+ */
+function estimateCacheWriteCost(modelUsed: string, tokens: number, is1m: boolean): number {
   if (tokens <= 0) return 0;
-  const lower = model.toLowerCase();
-  if (lower.includes("haiku")) return tokens * CACHE_READ_RATE.haiku!;
-  if (lower.includes("opus")) return tokens * (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK);
-  return tokens * CACHE_READ_RATE.sonnet!; // sonnet default
+  const alias = modelAlias(modelUsed);
+  if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
+  return tokens * (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!);
+}
+
+/**
+ * Estimate the cache_read cost from token count + modelUsed string.
+ */
+function estimateCacheReadCost(modelUsed: string, tokens: number, is1m: boolean): number {
+  if (tokens <= 0) return 0;
+  const alias = modelAlias(modelUsed);
+  if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK);
+  return tokens * (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!);
 }
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
@@ -174,7 +222,18 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     if (e.type === "decision") {
       totalRequests++;
       const cls = e.decision.class;
-      const cost = e.cost?.totalCostUsd ?? 0;
+      // Derive cost from token volumes × actually-used model rates.
+      // total_cost_usd from Claude Code is unreliable on Pro/Team subscriptions.
+      const cost = e.cost
+        ? computeTurnCost(
+            e.cost.modelUsed ?? e.decision.spec.model,
+            e.cost.inputTokens,
+            e.cost.outputTokens,
+            e.cost.cacheCreationInputTokens,
+            e.cost.cacheReadInputTokens,
+            e.cost.is1mVariant ?? false,
+          )
+        : 0;
       totalCost += cost;
       perClass[cls].count++;
       perClass[cls].totalCost += cost;
@@ -184,26 +243,20 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         outputTokensByClass[cls].push(e.cost.outputTokens);
       }
       if (e.cost) {
+        const modelUsed = e.cost.modelUsed ?? e.decision.spec.model;
+        const is1m = e.cost.is1mVariant ?? false;
         perClass[cls].cacheCreations.push(e.cost.cacheCreationInputTokens);
         cacheReadTokens += e.cost.cacheReadInputTokens;
         if (e.cost.cacheCreationInputTokens > 0) {
-          cacheCreationCost += estimateCacheWriteCost(
-            e.decision.spec.model,
-            e.cost.cacheCreationInputTokens,
-            e.cost.is1mVariant ?? false,
-          );
+          cacheCreationCost += estimateCacheWriteCost(modelUsed, e.cost.cacheCreationInputTokens, is1m);
         }
         if (e.cost.cacheReadInputTokens > 0) cacheReadCount++;
         totalInputTokens += e.cost.inputTokens;
         totalOutputTokens += e.cost.outputTokens;
         totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
         totalCacheReadTokens += e.cost.cacheReadInputTokens;
-        cacheReadCostUsd += estimateCacheReadCost(
-          e.decision.spec.model,
-          e.cost.cacheReadInputTokens,
-          e.cost.is1mVariant ?? false,
-        );
-        if (e.cost.is1mVariant) {
+        cacheReadCostUsd += estimateCacheReadCost(modelUsed, e.cost.cacheReadInputTokens, is1m);
+        if (is1m) {
           count1mVariant++;
           totalInputTokens1m += e.cost.inputTokens;
           totalCacheCreationTokens1m += e.cost.cacheCreationInputTokens;

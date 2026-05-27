@@ -84,7 +84,8 @@ describe("C1: decision events without cost are counted in totalRequests", () => 
     ];
     const summary = computeSummary(events, 7);
     expect(summary.totalRequests).toBe(2);
-    expect(summary.totalCostUsd).toBe(0.001); // only the second event has cost
+    // Token-derived cost for sonnet: 100 input × $3/Mtok + 200 output × $15/Mtok = $0.0033
+    expect(summary.totalCostUsd).toBeCloseTo(0.0033, 4);
   });
 
   test("totalRequests === 1, totalCostUsd === 0 for single decision without cost", () => {

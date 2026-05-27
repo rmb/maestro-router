@@ -31,6 +31,8 @@ export type SessionRecord = {
   lastDecisionAt?: string;
   /** Stop reason from the last turn (for E1.escalate and E4 in run-cmd.ts). */
   lastStopReason?: string;
+  /** Last ≤5 turn types (oldest-first). Used by the self-correction sub-detector. */
+  recentTurnTypes?: string[];
   /** cache_read_input_tokens from the last turn — used for compaction advisory. */
   lastCacheReadTokens?: number;
   /** True if this session has been effort-escalated (for E1.escalate). */
@@ -71,6 +73,8 @@ export type SessionStore = {
   getByFingerprint(cwd: string, fingerprint: string, opts?: GetOrCreateOptions): Promise<GetOrCreateResult>;
   touch(sessionId: string): Promise<void>;
   appendClass(sessionId: string, cls: string): Promise<void>;
+  /** Append a turn type to recentTurnTypes (capped at 5). Used by self-correction sub-detector. */
+  appendTurnType(sessionId: string, turnType: string): Promise<void>;
   /** Buffer the last prompt + decided class so the next turn can emit a correction event. */
   updateLastDecision(sessionId: string, prompt: string, cls: string): Promise<void>;
   /** Read the last decision for the given session without side effects. */
@@ -185,6 +189,17 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
         const prev = r.recentClasses ?? [];
         const next = [...prev, cls].slice(-5); // keep last 5
         return { ...r, recentClasses: next, turnCount: (r.turnCount ?? 0) + 1 };
+      });
+      await write(updated);
+    },
+
+    async appendTurnType(sessionId, turnType) {
+      const records = await read();
+      const updated = records.map((r) => {
+        if (r.sessionId !== sessionId) return r;
+        const prev = r.recentTurnTypes ?? [];
+        const next = [...prev, turnType].slice(-5); // keep last 5
+        return { ...r, recentTurnTypes: next };
       });
       await write(updated);
     },

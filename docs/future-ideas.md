@@ -38,12 +38,13 @@ tool output. Idempotent regex-based stripping with <1ms budget. See
 
 ## Deferred to v0.3 (specified, will revisit)
 
-### ~~Remote PostHog telemetry (S1)~~ — Core shipped; consent UX deferred
+### ~~Remote PostHog telemetry (S1)~~ — Fully shipped
 `posthogApiKey` in `~/.maestro/config.json` opts in; `run-cmd.ts` emits
-`maestro_decision` + `maestro_override` events on every spawn. `tune --posthog`
-mines cross-user correction patterns via `core/posthog.ts`. Opt-out: remove
-the key. Formal `telemetry off`/`forget` CLI subcommands and a PostHog-specific
-ADR remain deferred to v0.3.
+`maestro_decision` + `maestro_outcome` + `maestro_correction` events on every spawn.
+`tune --posthog` mines cross-user correction patterns via `core/posthog.ts`.
+`maestro telemetry off` removes the key; `maestro telemetry forget --confirm` wipes
+local history. ADR-0008 documents the consent model, PII policy, and distinct_id
+derivation.
 
 ### ~~Embedding classifier (S2)~~ — Shipped in v0.2.2
 `@xenova/transformers` peer, ONNX local embedding via
@@ -104,6 +105,16 @@ manual ratings by `source: "auto"`. Install with `maestro install-hook`
 idempotently with per-step status. `maestro doctor` runs non-destructive
 environment checks (Node version, claude binary, VSCode wiring, config files,
 telemetry dir). See `src/cli/init.ts` and `src/cli/doctor.ts`.
+
+### ~~`maestro shell` Phase 2~~ — Shipped
+Interactive tool permission prompts replace Phase-1 auto-decline: `can_use_tool`
+requests pause the spinner and prompt `[y/n/always]`; "always" adds the tool to a
+per-session allow-list so subsequent requests are silently approved. New slash
+commands: `/why` shows the last routing decision (class · classifier · confidence ·
+model), `/pin [haiku|sonnet|opus|off]` locks or unlocks routing class, `/status`
+prints session cost/savings/turns. Pipeline wrapper in `runShellHost` captures
+`lastDecision` and enforces `pinnedClass` without touching `sdk-proxy.ts`.
+See `src/wrapper/sdk-host.ts`.
 
 ### `--fast-mode` cost profile (S13) — blocked on Anthropic
 Spiked 2026-05-25: `--fast-mode` CLI flag not yet available. JSON output

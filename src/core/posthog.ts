@@ -27,12 +27,14 @@ export function createPostHogClient(apiKey: string, opts: PostHogClientOptions =
     async capture(event: string, properties: Record<string, unknown>): Promise<void> {
       if (!apiKey) return;
       try {
+        // distinct_id must be top-level on the batch item for PostHog person association.
+        const { distinct_id, ...rest } = properties;
         await fetchFn(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             api_key: apiKey,
-            batch: [{ event, properties, timestamp: new Date().toISOString() }],
+            batch: [{ event, distinct_id: distinct_id ?? "maestro-unknown", properties: rest, timestamp: new Date().toISOString() }],
           }),
         });
       } catch {

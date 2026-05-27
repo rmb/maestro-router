@@ -4,7 +4,7 @@
 
 Claude Code uses the same model for every prompt regardless of complexity. A simple rename and a system design question both hit Opus, even though Haiku handles the first just as well at 50× lower cost. Over a month of daily use, this wastes a significant fraction of your subscription budget.
 
-Maestro solves this by classifying each prompt and forwarding it to the cheapest model that will produce the right answer. It wraps the Claude CLI — every prompt gets routed, priced, and logged before Claude sees it. The user interface is unchanged.
+Maestro solves this by classifying each prompt and forwarding it to the cheapest model that will produce the right answer. It wraps the Claude CLI — every prompt gets routed, priced, and logged before Claude sees it. Your VSCode panel, `maestro run`, and `maestro shell` work the same.
 
 ## Why a wrapper, not a proxy
 
@@ -24,11 +24,11 @@ This traces a single prompt from keypress to response to illustrate how every co
 
 ---
 
-**1. Interception (`wrapper/stream-json-proxy.ts`)**
+**1. Interception (`wrapper/sdk-proxy.ts`)**
 
-The VSCode extension sends the message to Maestro's `--input-format stream-json` stdin channel instead of directly to Claude. Maestro receives the raw JSON turn object and extracts the user text.
+The VSCode extension sends the message to Maestro's `--input-format stream-json` stdin channel instead of directly to Claude. (`maestro shell` feeds the same channel over a PassThrough stream pair via `wrapper/sdk-host.ts`.) Maestro receives the raw JSON turn object and extracts the user text.
 
-**2. Passthrough check (`classifiers/passthrough.ts`)**
+**2. Passthrough check (`wrapper/passthrough.ts`)**
 
 The text doesn't start with `/`, so it's not a slash command. Passthrough returns null. The turn proceeds to classification.
 
@@ -78,10 +78,9 @@ Tokens stream to your terminal in real time. SIGINT is forwarded so Ctrl-C works
 
 **11. Output parsing (`wrapper/output.ts`)**
 
-JSON envelope from Claude:
+Token fields from Claude's JSON envelope (`total_cost_usd` is fabricated on Pro/Team and is not used):
 ```json
 {
-  "total_cost_usd": 0.0083,
   "cache_read_input_tokens": 36840,
   "input_tokens": 142,
   "output_tokens": 287,
@@ -104,7 +103,7 @@ Decision record appended to `~/.maestro/decisions.jsonl`:
 }
 ```
 
-**Net cost for this turn: $0.0083. Without routing (Opus everywhere): $0.048. Savings: 83%.**
+**Net cost for this turn: $0.0083 (derived from token volumes via `computeTurnCost`). Without routing (Opus everywhere): $0.048. Savings: 83%.**
 
 ---
 
@@ -113,22 +112,25 @@ Decision record appended to `~/.maestro/decisions.jsonl`:
 ```
        ┌──────────────────────────────────────────────────────────────┐
        │                       User prompt                            │
-       │  (VSCode panel via claudeProcessWrapper, or maestro run)     │
+       │  (VSCode panel via claudeProcessWrapper, maestro run/shell)  │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
-       │ classifiers/passthrough.ts                                   │
+       │ wrapper/passthrough.ts                                       │
        │   /clear, /model, /help, /cost → bypass classification       │
        └─────────────────────────────┬────────────────────────────────┘
                                      ▼
        ┌──────────────────────────────────────────────────────────────┐
        │ core/pipeline.ts — cheap-first, short-circuit at conf ≥ 0.55 │
        │                                                              │
-       │  1. override.ts      @fast / @deep / @think — conf 1.0       │
-       │  2. turn-type.ts     tool_result / error_recovery / cont.    │
-       │  3. heuristic.ts     built-in regex + user rules             │
-       │  4. embedding.ts     ONNX cosine sim (optional peer)         │
-       │  5. llm.ts           Haiku --json-schema (opt-in)            │
+       │  1. override.ts             @fast / @deep / @think           │
+       │  2. turn-type.ts            tool_result / continuation       │
+       │  3. tool-result-content.ts  content of tool outputs          │
+       │  4. tool-override.ts        model hints in tool names        │
+       │  5. markov.ts               recent session class history     │
+       │  6. heuristic.ts            built-in regex + user rules      │
+       │  7. embedding.ts            ONNX cosine sim (optional peer)  │
+       │  8. llm.ts                  Haiku --json-schema (opt-in)     │
        │                                                              │
        │  Sub-threshold results → weighted vote. No match → standard. │
        └─────────────────────────────┬────────────────────────────────┘
@@ -176,6 +178,12 @@ Decision record appended to `~/.maestro/decisions.jsonl`:
 **Override** reads the first word of the prompt. `@fast`/`@haiku` → trivial, `@think` → reasoning, `@deep`/`@opus` → max. Confidence 1.0. The hint is stripped before the prompt reaches Claude.
 
 **Turn-type** detects structural prompt patterns rather than content. Tool results route to simple or trivial depending on the tool name and output. Error recovery routes to hard. Continuation turns ("ok continue", "go on") stay at simple. This stage fires before the heuristic so tool scaffolding overhead doesn't leak into routing decisions.
+
+**Tool-result-content** inspects the text content of tool outputs for patterns that signal complexity — compiler errors, stack traces, large file reads. Routes upward when the content suggests the user is debugging or navigating non-trivial output.
+
+**Tool-override** reads tool names and result metadata for explicit model hints. Returns null if no hint is found.
+
+**Markov** biases the current turn toward the dominant class of the last five turns in this session. Prevents isolated cheap turns from disrupting a consistently complex session. Disabled when K2 escape conditions fire.
 
 **Heuristic** applies 45+ compiled regexes in priority order. The highest-confidence match wins. Built-in rules cover git operations, version bumps, docstring edits, rename/format tasks, debug and production-incident language, architecture and design vocabulary, and more. User-defined rules from `~/.maestro/heuristics.json` are appended after built-in rules and can override via higher confidence.
 
@@ -239,12 +247,14 @@ src/
     continuation.ts     Two-signal continuation detection (M1); CONTINUATION_HINT injection
     spawn.ts            buildClaudeArgs (pure) + spawnClaude; X.soft class-specific brevity hints
     stream.ts           Live pipe + capture + signal forwarding
-    stream-json-proxy.ts  Per-turn VSCode panel proxy
+    sdk-proxy.ts        Per-turn routing proxy (VSCode panel + maestro shell)
+    sdk-host.ts         Human SDK host for maestro shell (stream-json REPL)
     passthrough.ts      Slash-command bypass
     output.ts           Parse --output-format json → CostBreakdown
 
   cli/              Commander shell.
     run-cmd.ts      maestro run — K1 cache; M1 continuation; Track Z fingerprint; E1.escalate post-turn
+    shell-cmd.ts    maestro shell — interactive REPL entry point; seeds Markov from prior session
     tune.ts         Telemetry analysis, community fetch, auto-tune
     stats.ts        Cost vs Opus-everywhere baseline; session boot dominance warning
     health.ts       Baseline snapshot comparison; regression detection >10%

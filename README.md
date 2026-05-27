@@ -22,7 +22,7 @@ Maestro sits between you and Claude Code and fixes that. Every prompt is classif
 | Debug a production incident | hard | Opus | ~$0.05 |
 | Architect a system | max | Opus max | ~$0.10 |
 
-You don't change anything. Same Claude Code interface, same commands, same VSCode panel. Maestro handles the routing invisibly.
+Your VSCode panel, `maestro run`, and `maestro shell` work the same. Maestro routes every turn before Claude sees it.
 
 **No API key needed.** Works on Claude Pro/Team subscriptions via the standard CLI OAuth flow.
 
@@ -61,18 +61,21 @@ Without it, the pipeline falls through to the LLM classifier for uncertain promp
 Here's exactly what happens between you pressing Enter and Claude responding.
 
 **Step 1 — Your prompt is intercepted.**
-You type a message in the VSCode Claude panel or run `maestro run "…"`. The `claudeCode.claudeProcessWrapper` setting points the official Claude Code extension at Maestro instead of `claude` directly. Every prompt lands in Maestro first; Claude never sees it until Maestro decides what to do with it.
+You type a message in the VSCode Claude panel, run `maestro run "…"`, or start `maestro shell`. In all three modes, every prompt lands in Maestro first; Claude never sees it until Maestro decides what to do with it.
 
 **Step 2 — Slash commands are passed through unchanged.**
-`/clear`, `/model`, `/help`, `/cost`, `/compact` are detected by `classifiers/passthrough.ts` and forwarded to Claude as-is. No classification, no routing decision, no cost.
+`/clear`, `/model`, `/help`, `/cost`, `/compact` are detected by `wrapper/passthrough.ts` and forwarded to Claude as-is. No classification, no routing decision, no cost.
 
 **Step 3 — The classifier pipeline runs.**
-For all other prompts, Maestro runs up to 5 classifiers in cheapest-first order. Each returns a class (trivial / simple / standard / hard / reasoning / max) and a confidence score, or null if it has no signal. The pipeline short-circuits the moment any stage returns confidence ≥ 0.55:
+For all other prompts, Maestro runs up to 8 classifiers in cheapest-first order. Each returns a class (trivial / simple / standard / hard / reasoning / max) and a confidence score, or null if it has no signal. The pipeline short-circuits the moment any stage returns confidence ≥ 0.55:
 
 | Stage | What it checks | Cost per call |
 |---|---|---|
 | Override | `@fast`, `@deep`, `@think`, etc. at start of prompt | $0 |
 | Turn-type | Is this a tool result? Error recovery? Continuation? | $0 |
+| Tool-result-content | Content patterns inside tool outputs (errors, large reads) | $0 |
+| Tool-override | Model hints embedded in tool names or outputs | $0 |
+| Markov | Recent session class history (prior 5 turns) | $0 |
 | Heuristic | 45+ compiled regexes (git ops, renames, incidents, design vocab) | $0 |
 | Embedding | ONNX cosine similarity vs. ~60 labeled examples (optional) | ~$0 CPU |
 | LLM | Haiku via `--json-schema` for genuinely ambiguous prompts | ~$0.001 |
@@ -105,7 +108,7 @@ claude --print --output-format json
 stdout is piped live to your terminal so you see tokens stream in real time.
 
 **Step 7 — Cost and routing are logged.**
-After the response completes, `wrapper/output.ts` parses the JSON envelope from Claude (exact token counts and `total_cost_usd`). The decision is appended to `~/.maestro/decisions.jsonl`. `maestro stats` reads this log at any time to show you how much you've saved vs. the Opus-everywhere baseline.
+After the response completes, `wrapper/output.ts` parses the JSON envelope from Claude for exact token counts. Cost is derived from those volumes via the same rate table that backs `maestro stats` — `total_cost_usd` is fabricated on Pro/Team subscriptions and is not used. The decision is appended to `~/.maestro/decisions.jsonl`.
 
 ---
 
@@ -119,13 +122,16 @@ The other big lever is session reuse. Before Track Z (fingerprint-based session 
 
 ## How it works — technical pipeline
 
-For every prompt, Maestro runs a 5-stage classifier pipeline — cheapest stages first, short-circuiting as soon as any stage reaches 55% confidence:
+For every prompt, Maestro runs an 8-stage classifier pipeline — cheapest stages first, short-circuiting as soon as any stage reaches 55% confidence:
 
 1. **Override** — explicit hints like `@fast` or `@deep` in the prompt (confidence 1.0)
 2. **Turn-type** — detects tool results, error recovery, and continuation turns
-3. **Heuristic** — 45+ regex rules for common patterns (git ops, refactors, debug questions) plus your own learned rules
-4. **Embedding** — ONNX cosine similarity against ~60 labeled examples (optional)
-5. **LLM** — Haiku via `--json-schema` for genuinely ambiguous prompts (~$0.001/call, off by default)
+3. **Tool-result-content** — patterns in the content of tool outputs (errors, large reads)
+4. **Tool-override** — model hints embedded in tool names or outputs
+5. **Markov** — recent session class history biases toward the session's dominant class
+6. **Heuristic** — 45+ regex rules for common patterns (git ops, refactors, debug questions) plus your own learned rules
+7. **Embedding** — ONNX cosine similarity against ~60 labeled examples (optional)
+8. **LLM** — Haiku via `--json-schema` for genuinely ambiguous prompts (~$0.001/call, off by default)
 
 The winner maps to one of six classes: **trivial → simple → standard → hard → reasoning → max**, each with a configured model, effort level, and cost ceiling. No match defaults to `standard`.
 
@@ -151,6 +157,8 @@ This is the single largest cost lever. A session boot (`cache_creation`) typical
 # Routing
 maestro run "rename foo to bar"           # classify and route a single prompt
 maestro run --new-session "fresh start"   # force a new session
+maestro shell                             # interactive REPL with per-turn routing (terminal)
+maestro shell --new                       # fresh session, skip Markov seeding from prior history
 
 # Cost and savings
 maestro stats                             # savings vs Opus-everywhere baseline

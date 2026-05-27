@@ -18,6 +18,7 @@ import { registerInstallHookCommand } from "./install-hook.js";
 import { registerInstallVscodeCommand } from "./install-vscode.js";
 import { registerReplayCommand } from "./replay.js";
 import { registerRunCommand } from "./run-cmd.js";
+import { registerShellCommand } from "./shell-cmd.js";
 import { registerStatsCommand } from "./stats.js";
 import { registerTelemetryCommand } from "./telemetry-cmd.js";
 import { registerTuneCommand } from "./tune.js";
@@ -65,6 +66,7 @@ export async function buildProgram(): Promise<Command> {
     .helpOption("-h, --help", "display help");
 
   registerRunCommand(program);
+  registerShellCommand(program);
   registerTelemetryCommand(program);
   registerStatsCommand(program);
   registerTuneCommand(program);

@@ -23,32 +23,35 @@ const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_PATH = join(__dirname, "..", "src", "classifiers", "exemplars.json");
 
-type XenovaPipeline = (
+type HFPipeline = (
   task: "feature-extraction",
   model: string,
+  options?: { dtype?: string },
 ) => Promise<
   (input: string, options?: { pooling?: "mean"; normalize?: boolean }) => Promise<{
     data: Float32Array;
   }>
 >;
 
-async function loadPipeline(): Promise<XenovaPipeline> {
-  const moduleName = "@xenova/transformers";
+async function loadPipeline(): Promise<HFPipeline> {
+  const moduleName = "@huggingface/transformers";
   try {
-    const mod = (await import(/* @vite-ignore */ moduleName)) as { pipeline: XenovaPipeline };
+    const mod = (await import(/* @vite-ignore */ moduleName)) as { pipeline: HFPipeline };
     return mod.pipeline;
   } catch (err) {
     process.stderr.write(
-      `\nFAIL: @xenova/transformers is not installed.\n  Install it (peer dep):\n    pnpm add -D @xenova/transformers\n  or globally:\n    npm install -g @xenova/transformers\n\n  Original error: ${(err as Error).message}\n`,
+      `\nFAIL: @huggingface/transformers is not installed.\n  Install it (peer dep):\n    pnpm add -D @huggingface/transformers\n  or globally:\n    npm install -g @huggingface/transformers\n\n  Original error: ${(err as Error).message}\n`,
     );
     process.exit(1);
   }
 }
 
 async function main(): Promise<void> {
-  process.stderr.write(`[embed] loading ${MODEL_ID}...\n`);
+  process.stderr.write(`[embed] loading ${MODEL_ID} (dtype=q8)...\n`);
   const pipeline = await loadPipeline();
-  const extractor = await pipeline("feature-extraction", MODEL_ID);
+  // Use q8 here to match what the runtime loads — vectors must be generated
+  // with the same model variant or cosine similarities will be misaligned.
+  const extractor = await pipeline("feature-extraction", MODEL_ID, { dtype: "q8" });
 
   const vectors: ExemplarVector[] = [];
   let i = 0;

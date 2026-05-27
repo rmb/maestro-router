@@ -190,6 +190,42 @@ describe("turnTypeClassifier", () => {
     expect(result).toMatchObject({ class: "hard", confidence: 0.7 });
   });
 
+  test("error_recovery streak=2 → reasoning confidence 0.8", async () => {
+    const result = await turnTypeClassifier.classify(
+      { prompt: "got error: TypeError" },
+      { sessionContext: { consecutiveErrorRecoveryCount: 2 } },
+    );
+    expect(result).toMatchObject({ class: "reasoning", confidence: 0.8 });
+    const codes = (result?.diagnostics ?? []).map((d) => d.code);
+    expect(codes).toContain("turn_type.error_streak_2");
+  });
+
+  test("error_recovery streak=3 → max confidence 0.85", async () => {
+    const result = await turnTypeClassifier.classify(
+      { prompt: "got error: TypeError" },
+      { sessionContext: { consecutiveErrorRecoveryCount: 3 } },
+    );
+    expect(result).toMatchObject({ class: "max", confidence: 0.85 });
+    const codes = (result?.diagnostics ?? []).map((d) => d.code);
+    expect(codes).toContain("turn_type.error_streak_3");
+  });
+
+  test("error_recovery streak=5 → max confidence 0.85 (streak ≥ 3 all go to max)", async () => {
+    const result = await turnTypeClassifier.classify(
+      { prompt: "build failed: missing module" },
+      { sessionContext: { consecutiveErrorRecoveryCount: 5 } },
+    );
+    expect(result).toMatchObject({ class: "max", confidence: 0.85 });
+  });
+
+  test("non-error prompt with high streak count → null (not error_recovery)", async () => {
+    const result = await turnTypeClassifier.classify(
+      { prompt: "rename foo to bar" },
+      { sessionContext: { consecutiveErrorRecoveryCount: 5 } },
+    );
+    expect(result).toBeNull();
+  });
+
   test("emits turn_type diagnostic", async () => {
     const result = await call(toolResultReq());
     const codes = (result!.diagnostics ?? []).map((d) => d.code);

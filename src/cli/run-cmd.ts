@@ -8,7 +8,7 @@ import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/h
 import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
 import { overrideClassifier, stripOverride } from "../classifiers/override.js";
-import { turnTypeClassifier } from "../classifiers/turn-type.js";
+import { turnTypeClassifier, detectTurnType } from "../classifiers/turn-type.js";
 import type { Classifier, Class, Decision, CostBreakdown } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
@@ -174,6 +174,20 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       // Read lastStopReason from prior session for E1/E3 signals
       const priorStopReason = priorSession?.lastStopReason ?? null;
 
+      // Self-correction sub-detector: count consecutive trailing error_recovery turns.
+      // Detect current turn type first; if it's error_recovery, add prior streak + 1.
+      const currentTurnType = detectTurnType({ prompt: stripped });
+      const priorTurnTypes = priorSession?.recentTurnTypes ?? [];
+      let consecutiveErrorRecoveryCount = 0;
+      if (currentTurnType === "error_recovery") {
+        let trailing = 0;
+        for (let i = priorTurnTypes.length - 1; i >= 0; i--) {
+          if (priorTurnTypes[i] === "error_recovery") trailing++;
+          else break;
+        }
+        consecutiveErrorRecoveryCount = trailing + 1;
+      }
+
       // Detect M1 continuation before routing
       const continuationResult = detectContinuation(stripped, priorStopReason);
 
@@ -197,6 +211,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             sessionContext: {
               recentClasses,
               ...(priorStopReason ? { lastStopReason: priorStopReason } : {}),
+              ...(consecutiveErrorRecoveryCount > 0 ? { consecutiveErrorRecoveryCount } : {}),
             },
           },
         );
@@ -439,6 +454,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       // regardless of whether Claude returned parseable output (it may error,
       // hit a budget cap, or be interrupted — the routing decision still happened).
       await sessions.appendClass(session.sessionId, effectiveDecision.class);
+      void sessions.appendTurnType(session.sessionId, currentTurnType);
       // Buffer this turn's prompt + class so the next turn can emit a correction event.
       void sessions.updateLastDecision(session.sessionId, truncate(prompt, PROMPT_TRUNCATE_CHARS), effectiveDecision.class);
 

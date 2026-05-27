@@ -54,6 +54,7 @@ const ROUTING_FLAGS_WITH_VALUE = new Set([
 
 const KNOWN_SUBCOMMANDS = new Set([
   "run",
+  "shell",
   "telemetry",
   "stats",
   "health",
@@ -165,7 +166,7 @@ async function readStdin(timeoutMs = 100): Promise<string> {
   });
 }
 
-function resolveRealClaude(): string | null {
+export function resolveRealClaude(): string | null {
   const selfPath = (() => {
     try {
       return realpathSync(process.argv[1] ?? "");

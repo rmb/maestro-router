@@ -51,19 +51,19 @@ echo "→ Building…"
 export MAESTRO_SKIP_EMBED_CHECK=1
 pnpm build
 
-# Offer embedding classifier (~400 MB optional peer).
+# Offer embedding classifier (~25 MB optional peer, int8-quantized).
 # Skip prompt in non-interactive environments (CI, piped stdin).
 if [[ -t 0 ]]; then
   echo ""
-  echo "→ Embedding classifier (optional, ~400 MB)"
+  echo "→ Embedding classifier (optional, ~25 MB)"
   echo "  Catches ambiguous prompts locally instead of burning an LLM call."
   echo "  Recommended for heavy users (50+ prompts/day)."
-  read -r -p "  Install @xenova/transformers? [y/N] " _embed_reply
+  read -r -p "  Install @huggingface/transformers? [y/N] " _embed_reply
   if [[ "$_embed_reply" == "y" || "$_embed_reply" == "Y" ]]; then
-    npm install -g @xenova/transformers
+    npm install -g @huggingface/transformers
     echo "  Embedding classifier enabled."
   else
-    echo "  Skipped. Install later with: npm install -g @xenova/transformers"
+    echo "  Skipped. Install later with: npm install -g @huggingface/transformers"
   fi
   echo ""
 fi

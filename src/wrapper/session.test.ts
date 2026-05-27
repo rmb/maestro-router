@@ -170,6 +170,29 @@ describe("appendClass", () => {
   });
 });
 
+describe("appendTurnType", () => {
+  test("appends turn type, caps at 5 entries (oldest dropped)", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "sonnet");
+    for (const t of ["user_prompt", "error_recovery", "error_recovery", "error_recovery", "user_prompt", "error_recovery"]) {
+      await store.appendTurnType(sessionId, t);
+    }
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.recentTurnTypes).toHaveLength(5);
+    expect(rec?.recentTurnTypes?.at(-1)).toBe("error_recovery");
+    expect(rec?.recentTurnTypes?.[0]).toBe("error_recovery");
+  });
+
+  test("new session starts with no recentTurnTypes", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "sonnet");
+    const records = await store.list();
+    const rec = records.find((r) => r.sessionId === sessionId);
+    expect(rec?.recentTurnTypes ?? []).toHaveLength(0);
+  });
+});
+
 describe("getByFingerprint", () => {
   test("creates new session for a new fingerprint", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });

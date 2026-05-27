@@ -125,6 +125,7 @@ vi.mock("../wrapper/session.js", () => ({
     getOrCreate: vi.fn().mockResolvedValue({ sessionId: "test-session-id", isNew: true }),
     getByFingerprint: vi.fn().mockResolvedValue({ sessionId: "test-session-id", isNew: true }),
     appendClass: vi.fn().mockResolvedValue(undefined),
+    appendTurnType: vi.fn().mockResolvedValue(undefined),
     updateLastDecision: vi.fn().mockResolvedValue(undefined),
     getTurnCount: vi.fn().mockResolvedValue(1),
     getEffortEscalated: vi.fn().mockResolvedValue(false),

@@ -6,6 +6,7 @@ import type {
   Class,
   Classification,
   ClassifyFn,
+  ClassifyOptions,
   Diagnostic,
   Message,
   Request,
@@ -86,7 +87,7 @@ function priorToolName(msgs: ReadonlyArray<Message>): string | null {
   return null;
 }
 
-const classify: ClassifyFn = (req: Request) => {
+const classify: ClassifyFn = (req: Request, opts?: ClassifyOptions) => {
   // Empty or whitespace-only prompt (tool_result routing)
   // Yield if resolvedToolName is present — toolOverrideClassifier is authoritative there.
   if (req.prompt.trim() === "" && !req.metadata?.resolvedToolName) {
@@ -121,6 +122,21 @@ const classify: ClassifyFn = (req: Request) => {
   }
 
   if (type === "error_recovery") {
+    const streak = opts?.sessionContext?.consecutiveErrorRecoveryCount ?? 1;
+    if (streak >= 3) {
+      return {
+        class: "max",
+        confidence: 0.85,
+        diagnostics: [...diagnostics, { severity: "info", code: `turn_type.error_streak_${streak}`, message: `error recovery streak ${streak} → max` }],
+      } satisfies Classification;
+    }
+    if (streak >= 2) {
+      return {
+        class: "reasoning",
+        confidence: 0.8,
+        diagnostics: [...diagnostics, { severity: "info", code: `turn_type.error_streak_${streak}`, message: `error recovery streak ${streak} → reasoning` }],
+      } satisfies Classification;
+    }
     return { class: "hard", confidence: 0.7, diagnostics } satisfies Classification;
   }
 

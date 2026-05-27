@@ -271,6 +271,12 @@ export type SessionContext = {
   recentClasses?: ReadonlyArray<string>;
   /** Stop reason from the previous turn's Claude invocation. E3 escalation. */
   lastStopReason?: string;
+  /**
+   * How many consecutive turns (including the current one) have been
+   * classified as error_recovery. Used by the turn-type classifier to escalate
+   * repeated failures to reasoning (2 streak) or max (3+ streak).
+   */
+  consecutiveErrorRecoveryCount?: number;
 };
 
 /** Options threaded through classifier invocations. */

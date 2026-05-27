@@ -8,7 +8,7 @@
 // before paying the LLM cost ($0.001/uncertain prompt).
 //
 // Dependencies:
-// - `@xenova/transformers` is an OPTIONAL peer. If not installed, every
+// - `@huggingface/transformers` is an OPTIONAL peer. If not installed, every
 //   classify() call returns null + diagnostic `fallback.embedding_unavailable`
 //   and the pipeline continues with whatever signals remain.
 // - The on-disk `exemplars.json` (produced by `pnpm embed`) is loaded eagerly
@@ -149,38 +149,39 @@ async function loadExemplars(path: string): Promise<ExemplarsFile> {
 }
 
 /**
- * Lazy-imported `@xenova/transformers` feature-extraction pipeline. The
+ * Lazy-imported `@huggingface/transformers` feature-extraction pipeline. The
  * import error is converted into a structured signal callers can interpret
  * (peer-not-installed vs. some other runtime failure).
  */
-type XenovaPipelineFn = (
+type HFPipelineFn = (
   task: "feature-extraction",
   model: string,
+  options?: { dtype?: string },
 ) => Promise<
   (input: string, options?: { pooling?: "mean"; normalize?: boolean }) => Promise<{
     data: Float32Array;
   }>
 >;
 
-let xenovaPipelineCache: Promise<XenovaPipelineFn> | null = null;
+let pipelineCache: Promise<HFPipelineFn> | null = null;
 
-async function getXenovaPipeline(): Promise<XenovaPipelineFn> {
-  if (xenovaPipelineCache) return xenovaPipelineCache;
-  xenovaPipelineCache = (async () => {
+async function getHFPipeline(): Promise<HFPipelineFn> {
+  if (pipelineCache) return pipelineCache;
+  pipelineCache = (async () => {
     // Indirect dynamic import keeps TypeScript from requiring types for the
     // optional peer and prevents bundlers from eagerly resolving it.
-    const moduleName = "@xenova/transformers";
+    const moduleName = "@huggingface/transformers";
     const mod = (await import(/* @vite-ignore */ moduleName)) as {
-      pipeline: XenovaPipelineFn;
+      pipeline: HFPipelineFn;
     };
     return mod.pipeline;
   })();
-  return xenovaPipelineCache;
+  return pipelineCache;
 }
 
 /** Reset module-level caches; tests only. */
 export function __resetEmbeddingCachesForTest(): void {
-  xenovaPipelineCache = null;
+  pipelineCache = null;
 }
 
 /** Sentinel thrown by the default embed function when the peer isn't there. */
@@ -195,15 +196,17 @@ function makeDefaultEmbed(modelId: string): EmbedFn {
   return async (text: string): Promise<Float32Array> => {
     if (!extractorPromise) {
       extractorPromise = (async () => {
-        let pipelineFn: XenovaPipelineFn;
+        let pipelineFn: HFPipelineFn;
         try {
-          pipelineFn = await getXenovaPipeline();
+          pipelineFn = await getHFPipeline();
         } catch (err) {
           throw new EmbeddingPeerMissingError(
-            `@xenova/transformers is not installed (${(err as Error).message})`,
+            `@huggingface/transformers is not installed (${(err as Error).message})`,
           );
         }
-        return pipelineFn("feature-extraction", modelId);
+        // dtype: "q8" uses int8-quantized ONNX weights — ~4x smaller download,
+        // ~2-3x faster inference, negligible quality loss for sentence similarity.
+        return pipelineFn("feature-extraction", modelId, { dtype: "q8" });
       })();
     }
     const extractor = await extractorPromise;
@@ -267,7 +270,7 @@ export function createEmbeddingClassifier(
         return emit(
           "info",
           "fallback.embedding_unavailable",
-          `@xenova/transformers peer not installed; install it to enable embedding classifier`,
+          `@huggingface/transformers peer not installed; install it to enable embedding classifier`,
         );
       }
       return emit(

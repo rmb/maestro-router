@@ -1,7 +1,7 @@
 {
   "total": 378,
-  "correct": 373,
-  "accuracy": 0.9868,
+  "correct": 371,
+  "accuracy": 0.9815,
   "perClass": {
     "trivial": {
       "total": 73,
@@ -15,8 +15,8 @@
     },
     "standard": {
       "total": 69,
-      "correct": 69,
-      "accuracy": 1
+      "correct": 67,
+      "accuracy": 0.971
     },
     "hard": {
       "total": 78,
@@ -37,10 +37,11 @@
   "confusion": {
     "trivial>trivial": 71,
     "simple>simple": 58,
-    "standard>standard": 69,
+    "standard>standard": 67,
     "hard>hard": 78,
     "reasoning>reasoning": 56,
     "max>max": 41,
+    "standard>simple": 2,
     "simple>standard": 1,
     "max>hard": 2,
     "trivial>standard": 1,
@@ -51,6 +52,20 @@
     "p95": 0
   },
   "failures": [
+    {
+      "prompt": "go on",
+      "expected": "standard",
+      "predicted": "simple",
+      "classifier": "heuristic",
+      "source": "multi-turn"
+    },
+    {
+      "prompt": "keep going",
+      "expected": "standard",
+      "predicted": "simple",
+      "classifier": "heuristic",
+      "source": "multi-turn"
+    },
     {
       "prompt": "do a thorough refactor of this 3-line function",
       "expected": "simple",

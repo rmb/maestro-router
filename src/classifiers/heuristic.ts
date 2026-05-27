@@ -51,6 +51,34 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.85,
     source: "builtin",
   },
+  // Natural-language git actions — "commit and push", "push to remote", etc.
+  // Users often phrase these without the leading "git" keyword.
+  {
+    pattern: "^\\s*(commit\\s+and\\s+push|commit\\s+then\\s+push|push\\s+to\\s+(remote|origin|main|master))\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.85,
+    source: "builtin",
+  },
+  // Bare continuation signals — "continue", "keep going", "proceed", etc.
+  // Confidence 0.55 (below short-circuit threshold): allows Markov/LLM to upgrade
+  // to standard or higher when session context shows a harder ongoing task.
+  {
+    pattern: "^\\s*(continue|keep going|go on|proceed|carry on|resume)(\\.+|!+)?\\s*$",
+    flags: "i",
+    class: "simple",
+    confidence: 0.55,
+    source: "builtin",
+  },
+  // Single-value config swap — "change X to Y" where X and Y are short tokens.
+  // e.g. "change git to ruimbarreira", "change port to 3001"
+  {
+    pattern: "^\\s*change\\s+\\S{1,30}\\s+to\\s+\\S{1,30}\\s*$",
+    flags: "i",
+    class: "trivial",
+    confidence: 0.75,
+    source: "builtin",
+  },
   {
     pattern: "^\\s*(rename|format|lint)\\s+\\S+(?:\\s+\\S+)?\\s*$",
     flags: "i",

@@ -141,6 +141,60 @@ export function registerTelemetryCommand(program: Command): void {
     });
 
   telemetry
+    .command("langfuse")
+    .description("Configure Langfuse integration (store keys in ~/.maestro/config.json)")
+    .option("--public-key <key>", "Langfuse public key (starts with pk-lf-)")
+    .option("--secret-key <key>", "Langfuse secret key (starts with sk-lf-)")
+    .option("--host <url>", "Langfuse host (default: https://cloud.langfuse.com)")
+    .option("--remove", "remove all Langfuse keys from config")
+    .action(
+      async (cmdOpts: {
+        publicKey?: string;
+        secretKey?: string;
+        host?: string;
+        remove?: boolean;
+      }) => {
+        const parent = program.opts<ParentOptions>();
+        const cli = await loadCliConfig(parent.config);
+
+        if (cmdOpts.remove) {
+          delete cli.userConfig.langfusePublicKey;
+          delete cli.userConfig.langfuseSecretKey;
+          delete cli.userConfig.langfuseHost;
+          await writeUserConfig(cli.userConfig, cli.configPath);
+          if (!parent.quiet) {
+            process.stdout.write("Langfuse keys removed from config.\n");
+          }
+          return;
+        }
+
+        if (!cmdOpts.publicKey || !cmdOpts.secretKey) {
+          process.stderr.write(
+            "maestro telemetry langfuse: --public-key and --secret-key are required (or use --remove)\n",
+          );
+          process.exit(2);
+        }
+
+        cli.userConfig.langfusePublicKey = cmdOpts.publicKey;
+        cli.userConfig.langfuseSecretKey = cmdOpts.secretKey;
+        if (cmdOpts.host) {
+          cli.userConfig.langfuseHost = cmdOpts.host;
+        } else {
+          delete cli.userConfig.langfuseHost;
+        }
+        await writeUserConfig(cli.userConfig, cli.configPath);
+
+        if (!parent.quiet) {
+          const hostInfo = cmdOpts.host ?? "https://cloud.langfuse.com";
+          process.stdout.write(
+            `Langfuse configured: publicKey=${cmdOpts.publicKey.slice(0, 8)}… host=${hostInfo}\n`,
+          );
+          process.stdout.write("Maestro will stream decision/outcome/correction events to Langfuse on each spawn.\n");
+        }
+      },
+    );
+
+  telemetry
     .command("forget")
     .description("Delete all local telemetry events (requires --confirm)")
     .option("--confirm", "confirm deletion of all local telemetry events")

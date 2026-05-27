@@ -12,6 +12,7 @@ import { turnTypeClassifier, detectTurnType } from "../classifiers/turn-type.js"
 import type { Classifier, Class, Decision, CostBreakdown } from "../core/types.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import { createTelemetry } from "../core/telemetry.js";
+import { createLangfuseClient } from "../core/langfuse.js";
 import { createPostHogClient } from "../core/posthog.js";
 import { classifierCache } from "../core/classifier-cache.js";
 
@@ -489,9 +490,18 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         };
       }
 
-      const telemetry = createTelemetry(
-        cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {},
-      );
+      const langfuseClient =
+        cli.userConfig.langfusePublicKey && cli.userConfig.langfuseSecretKey
+          ? createLangfuseClient({
+              publicKey: cli.userConfig.langfusePublicKey,
+              secretKey: cli.userConfig.langfuseSecretKey,
+              ...(cli.userConfig.langfuseHost ? { host: cli.userConfig.langfuseHost } : {}),
+            })
+          : undefined;
+      const telemetry = createTelemetry({
+        ...(cli.userConfig.telemetryPath ? { path: cli.userConfig.telemetryPath } : {}),
+        ...(langfuseClient ? { langfuse: langfuseClient } : {}),
+      });
       // C1: Always log the routing decision — cost is optional (absent on error/interrupt/budget-cap).
       // Set cacheHit when Anthropic returned cached prefix tokens — this is the
       // ground truth for telemetry's cacheHitRate. Without this, decision.cacheHit

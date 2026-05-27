@@ -59,10 +59,14 @@
     "commander": "^14.0.3"
   },
   "peerDependencies": {
-    "@huggingface/transformers": "^3.0.0"
+    "@huggingface/transformers": "^3.0.0",
+    "langfuse": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@huggingface/transformers": {
+      "optional": true
+    },
+    "langfuse": {
       "optional": true
     }
   }

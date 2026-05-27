@@ -4,6 +4,7 @@
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { LangfuseClient } from "./langfuse.js";
 import type { TelemetryEvent } from "./types.js";
 
 const DEFAULT_PATH = join(homedir(), ".maestro", "decisions.jsonl");
@@ -16,6 +17,8 @@ export type TelemetryOptions = {
   configPath?: string;
   fallbackPath?: string;
   maxFileBytes?: number;
+  /** Optional Langfuse client — when provided, each logged event is also flushed there. */
+  langfuse?: LangfuseClient;
 };
 
 /**
@@ -49,6 +52,7 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
   const configPath = opts.configPath ?? DEFAULT_CONFIG_PATH;
   const fallbackPath = opts.fallbackPath ?? DEFAULT_FALLBACK_PATH;
   const maxFileBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const langfuse = opts.langfuse;
 
   return {
     async log(event: TelemetryEvent): Promise<void> {
@@ -60,6 +64,8 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
       } catch (err) {
         process.stderr.write(`maestro telemetry: ${(err as Error).message}\n`);
       }
+      // Fire-and-forget Langfuse flush — must not affect the JSONL write above.
+      langfuse?.flush(event);
     },
 
     async logFallback(entry: FallbackLogEntry): Promise<void> {

@@ -233,6 +233,12 @@ export type UserConfig = {
    * when enabled, so trivial/full context are tracked separately.
    */
   trivialMinimalContext?: boolean;
+  /** Langfuse integration: public key from your Langfuse project settings. */
+  langfusePublicKey?: string;
+  /** Langfuse integration: secret key from your Langfuse project settings. */
+  langfuseSecretKey?: string;
+  /** Langfuse host (default: https://cloud.langfuse.com). */
+  langfuseHost?: string;
 };
 
 /** One message in a conversation; minimal shape used by classifiers. */

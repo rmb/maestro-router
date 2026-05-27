@@ -63,7 +63,7 @@ export function registerBenchCommand(program: Command): void {
   program
     .command("bench")
     .description("Run the eval suite against the current pipeline")
-    .option("--eval <path>", "labeled JSONL file (default: bundled evals/labeled.jsonl)")
+    .option("--eval [path]", "labeled JSONL file (default: bundled evals/labeled.jsonl)")
     .option("--baseline <path>", "baseline JSON for regression check (default: bundled evals/baseline.json)")
     .option("--gate <pct>", "regression gate (0-1)", "0.02")
     .option("--propose <path>", "validate a proposed profile-overrides.json before applying")

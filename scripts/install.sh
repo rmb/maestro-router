@@ -85,6 +85,24 @@ elif [[ -t 0 ]]; then
   echo ""
 fi
 
+# Offer Langfuse integration (optional peer).
+if npm list -g langfuse --depth=0 >/dev/null 2>&1; then
+  echo "→ Langfuse integration already installed."
+elif [[ -t 0 ]]; then
+  echo ""
+  echo "→ Langfuse integration (optional)"
+  echo "  Streams decision/outcome/correction events to your Langfuse project."
+  echo "  Self-hosted or cloud.langfuse.com. Configure with: maestro telemetry langfuse --public-key … --secret-key …"
+  read -r -p "  Install langfuse? [y/N] " _langfuse_reply
+  if [[ "$_langfuse_reply" == "y" || "$_langfuse_reply" == "Y" ]]; then
+    npm install -g langfuse
+    echo "  Langfuse installed. Configure: maestro telemetry langfuse --public-key … --secret-key …"
+  else
+    echo "  Skipped. Install later: npm install -g langfuse"
+  fi
+  echo ""
+fi
+
 echo "→ Packing tarball…"
 rm -f maestro-router-*.tgz
 pnpm pack >/dev/null

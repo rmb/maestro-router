@@ -25,6 +25,16 @@ const SHORT_CIRCUIT_THRESHOLD = 0.55;
 const HIGH_CONFIDENCE_THRESHOLD = 0.85;
 const DEFAULT_CLASS: Class = "standard";
 
+/**
+ * True when a decision was forced to standard because no classifier produced a
+ * signal — i.e. the "fallback" path. "default" is the pre-v4 label; current
+ * code emits "forced.standard". The markov-break variant keeps the same
+ * classifier field and only differs in its diagnostic code.
+ */
+export function isFallbackDecision(classifier: string): boolean {
+  return classifier === "forced.standard" || classifier === "default";
+}
+
 export type PipelineOptions = {
   classifiers: ReadonlyArray<Classifier>;
   profile: Profile;

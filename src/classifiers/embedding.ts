@@ -30,7 +30,7 @@ import type {
 } from "../core/types.js";
 import { EXEMPLAR_SEEDS, serializeSeedsForChecksum } from "./exemplars-seeds.js";
 
-const DEFAULT_MIN_SIMILARITY = 0.5;
+const DEFAULT_MIN_SIMILARITY = 0.4;
 const DEFAULT_WEIGHT = 0.6;
 const DEFAULT_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 

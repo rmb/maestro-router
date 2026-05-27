@@ -47,13 +47,30 @@ fi
 echo "→ Installing dev dependencies (pnpm)…"
 pnpm install --ignore-scripts
 
+echo "→ Checking exemplar embeddings…"
+if pnpm tsx scripts/check-exemplars-checksum.ts >/dev/null 2>&1; then
+  echo "  Exemplars up to date."
+else
+  echo "  Exemplars stale — regenerating (first run ~9 MB download)…"
+  pnpm embed
+fi
+
 echo "→ Building…"
-export MAESTRO_SKIP_EMBED_CHECK=1
 pnpm build
 
+# Migrate @xenova/transformers → @huggingface/transformers if the old package is present.
+if npm list -g @xenova/transformers --depth=0 >/dev/null 2>&1; then
+  echo "→ Migrating @xenova/transformers → @huggingface/transformers…"
+  npm uninstall -g @xenova/transformers
+  npm install -g @huggingface/transformers
+  echo "  Migration complete."
+fi
+
 # Offer embedding classifier (~25 MB optional peer, int8-quantized).
-# Skip prompt in non-interactive environments (CI, piped stdin).
-if [[ -t 0 ]]; then
+# Skip prompt in non-interactive environments (CI, piped stdin) or if already installed.
+if npm list -g @huggingface/transformers --depth=0 >/dev/null 2>&1; then
+  echo "→ Embedding classifier already installed (@huggingface/transformers)."
+elif [[ -t 0 ]]; then
   echo ""
   echo "→ Embedding classifier (optional, ~25 MB)"
   echo "  Catches ambiguous prompts locally instead of burning an LLM call."

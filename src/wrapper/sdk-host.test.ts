@@ -39,7 +39,7 @@ const mockPipeline = (cls: "trivial" | "standard" = "trivial"): Pipeline => ({
 });
 const mockTelemetry = (): { writer: TelemetryWriter; events: TelemetryEvent[] } => {
   const events: TelemetryEvent[] = [];
-  return { events, writer: { log: async (e) => { events.push(e); }, readAll: async () => events } };
+  return { events, writer: { log: async (e) => { events.push(e); }, logFallback: async () => {}, readAll: async () => events } };
 };
 
 type FakeClaudeOpts = {

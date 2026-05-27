@@ -10,7 +10,7 @@
 
 import type { Class } from "../core/types.js";
 
-export const EXEMPLAR_SEEDS_VERSION = "1.0.0";
+export const EXEMPLAR_SEEDS_VERSION = "1.1.0";
 
 export type ExemplarSeed = {
   readonly class: Class;
@@ -29,6 +29,11 @@ export const EXEMPLAR_SEEDS: ReadonlyArray<ExemplarSeed> = [
   { class: "trivial", prompt: "add a copyright header" },
   { class: "trivial", prompt: "rename camelCase to snake_case" },
   { class: "trivial", prompt: "run the linter" },
+  { class: "trivial", prompt: "commit these changes" },
+  { class: "trivial", prompt: "push to origin" },
+  { class: "trivial", prompt: "commit and push" },
+  { class: "trivial", prompt: "stage the changes and commit" },
+  { class: "trivial", prompt: "change git username to alice" },
 
   // ── simple ────────────────────────────────────────────────────────────
   { class: "simple", prompt: "add a parameter to this function" },
@@ -41,6 +46,12 @@ export const EXEMPLAR_SEEDS: ReadonlyArray<ExemplarSeed> = [
   { class: "simple", prompt: "change http to https in the config" },
   { class: "simple", prompt: "add a new entry to the enum" },
   { class: "simple", prompt: "change the success message wording" },
+  { class: "simple", prompt: "add more detail to the header section" },
+  { class: "simple", prompt: "update the banner text" },
+  { class: "simple", prompt: "add more info to the footer" },
+  { class: "simple", prompt: "why is this section empty?" },
+  { class: "simple", prompt: "what does this error mean?" },
+  { class: "simple", prompt: "why is this field missing?" },
 
   // ── standard ──────────────────────────────────────────────────────────
   { class: "standard", prompt: "implement a debounce utility" },
@@ -53,6 +64,11 @@ export const EXEMPLAR_SEEDS: ReadonlyArray<ExemplarSeed> = [
   { class: "standard", prompt: "add error handling to the API client" },
   { class: "standard", prompt: "implement retry logic with exponential backoff" },
   { class: "standard", prompt: "write tests for the auth module" },
+  { class: "standard", prompt: "add existing records to the database and read them back" },
+  { class: "standard", prompt: "implement a feature to display user activity feed" },
+  { class: "standard", prompt: "add the ability to call external tools and plugins" },
+  { class: "standard", prompt: "build a working example of the reporting dashboard" },
+  { class: "standard", prompt: "any other improvements you can think of to optimize this?" },
 
   // ── hard ──────────────────────────────────────────────────────────────
   { class: "hard", prompt: "this test is flaky, find out why" },

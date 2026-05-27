@@ -45,6 +45,7 @@ const mockTelemetry = (): { writer: TelemetryWriter; events: TelemetryEvent[] } 
     events,
     writer: {
       log: async (e) => { events.push(e); },
+      logFallback: async () => {},
       readAll: async () => events,
     },
   };

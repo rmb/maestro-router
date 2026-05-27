@@ -90,7 +90,7 @@ process.stdin.on("end", () => {
         pipeline,
         profile: balancedProfile,
         userConfig: {},
-        telemetry: { log: async (e) => { events.push(e); }, readAll: async () => events },
+        telemetry: { log: async (e) => { events.push(e); }, logFallback: async () => {}, readAll: async () => events },
         stdin,
         stdout: out.stream,
         stderr: stderr.stream,

@@ -45,7 +45,7 @@ export function resolveT4UpgradeModel(currentModel: string): string | null {
   return null; // already opus (or unrecognised — don't retry unknown models)
 }
 
-import { createPipeline } from "../core/pipeline.js";
+import { createPipeline, isFallbackDecision } from "../core/pipeline.js";
 import { loadProfile } from "../core/profile.js";
 import { parseOutput } from "../wrapper/output.js";
 import { preflight } from "../wrapper/preflight.js";
@@ -522,6 +522,20 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         turnIndex,
         isNewSession: session.isNew,
       });
+
+      // Fallback corpus: a turn that escaped every classifier. Log the FULL
+      // prompt to a dedicated file for later mining into new heuristic rules.
+      if (isFallbackDecision(effectiveDecision.classifier)) {
+        void telemetry.logFallback({
+          ts: new Date().toISOString(),
+          prompt,
+          classifier: effectiveDecision.classifier,
+          cwd: process.cwd(),
+          sessionId: session.sessionId,
+          turnIndex,
+          diagnostics: effectiveDecision.diagnostics.map((d) => d.code),
+        });
+      }
 
       if (effectiveParsed) {
         // Outcome event: stop_reason + output token ratio reveals over/under-routing.

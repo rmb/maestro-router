@@ -128,6 +128,65 @@ describe("createTelemetry", () => {
     expect(newContent.length).toBeLessThan(500);
   });
 
+  test("logFallback appends full prompt to a dedicated file", async () => {
+    const fallbackPath = join(dir, "fallbacks.jsonl");
+    const tel = createTelemetry({
+      path: join(dir, "decisions.jsonl"),
+      configPath: join(dir, "config.json"),
+      fallbackPath,
+    });
+
+    const longPrompt = "x".repeat(2000);
+    await tel.logFallback({
+      ts: "2026-05-27T10:00:00.000Z",
+      prompt: longPrompt,
+      classifier: "forced.standard",
+      cwd: "/tmp/proj",
+      sessionId: "s1",
+      turnIndex: 3,
+      diagnostics: ["fallback.forced_standard"],
+    });
+
+    const content = await readFile(fallbackPath, "utf8");
+    const parsed = JSON.parse(content.trim()) as { prompt: string; classifier: string };
+    expect(parsed.prompt).toHaveLength(2000);
+    expect(parsed.classifier).toBe("forced.standard");
+  });
+
+  test("logFallback does not touch the decisions file or counters", async () => {
+    const path = join(dir, "decisions.jsonl");
+    const configPath = join(dir, "config.json");
+    const tel = createTelemetry({ path, configPath, fallbackPath: join(dir, "fallbacks.jsonl") });
+
+    await tel.logFallback({
+      ts: "2026-05-27T10:00:00.000Z",
+      prompt: "p",
+      classifier: "forced.standard",
+      cwd: "/tmp",
+      diagnostics: [],
+    });
+
+    expect(await tel.readAll()).toEqual([]);
+    await expect(readFile(configPath, "utf8")).rejects.toThrow();
+  });
+
+  test("logFallback swallows errors and never throws", async () => {
+    const tel = createTelemetry({
+      path: join(dir, "decisions.jsonl"),
+      configPath: join(dir, "config.json"),
+      fallbackPath: join(dir, "fall\0back.jsonl"),
+    });
+    await expect(
+      tel.logFallback({
+        ts: "2026-05-27T10:00:00.000Z",
+        prompt: "p",
+        classifier: "forced.standard",
+        cwd: "/tmp",
+        diagnostics: [],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   test("swallows errors and never throws from log()", async () => {
     // Path with a non-existent component that mkdir can fix; force a real error path
     // by passing an invalid configPath that has a null byte (POSIX rejects).

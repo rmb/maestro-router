@@ -18,6 +18,7 @@ import type { ChildProcess } from "node:child_process";
 import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { Pipeline } from "../core/pipeline.js";
+import { isFallbackDecision } from "../core/pipeline.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
 import { PROMPT_TRUNCATE_CHARS } from "../core/types.js";
 import type { Decision, Profile, Request, UserConfig } from "../core/types.js";
@@ -469,6 +470,20 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
         prompt: truncate(promptText, PROMPT_TRUNCATE_CHARS),
         turnIndex: panelTurnCount,
       });
+
+      // Fallback corpus: a turn that escaped every classifier. Log the FULL
+      // prompt to a dedicated file for later mining into new heuristic rules.
+      if (isFallbackDecision(guardedDecision.classifier)) {
+        void opts.telemetry.logFallback({
+          ts: new Date().toISOString(),
+          prompt: promptText,
+          classifier: guardedDecision.classifier,
+          cwd: process.cwd(),
+          ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+          turnIndex: panelTurnCount,
+          diagnostics: guardedDecision.diagnostics.map((d) => d.code),
+        });
+      }
 
       continue;
     }

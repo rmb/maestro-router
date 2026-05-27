@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test, vi } from "vitest";
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { balancedProfile } from "../core/profile.js";
 import type { Pipeline } from "../core/pipeline.js";
 import type { Decision, TelemetryEvent } from "../core/types.js";
@@ -710,5 +710,280 @@ describe("runSdkProxy — tool_result routing via toolUseMap", () => {
     expect(toolResultBlock!.content).toBe(
       "import foo from \"bar\";\nexport const x = 1;\nconst y = { a: 1 };",
     );
+  });
+});
+
+describe("runSdkProxy — auto-compact", () => {
+  const userLine = (text: string) =>
+    `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"${text}"}]}}`;
+
+  const resultFrame = (cacheRead: number) =>
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: 0,
+      },
+      stop_reason: "end_turn",
+      duration_ms: 1000,
+      duration_api_ms: 900,
+      is_api_error: false,
+      num_turns: 1,
+    });
+
+  test("injects /compact before next user message when threshold is exceeded", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    // Use PassThrough so we can control when the second message arrives.
+    // The result frame (setting needsAutoCompact) must arrive BEFORE the second
+    // user message, which is the natural production order (Claude responds first,
+    // then the user sends the next message).
+    const stdinPT = new PassThrough();
+    stdinPT.write(userLine("first message") + "\n");
+    setTimeout(() => {
+      // Emit result frame with high cache_read → sets needsAutoCompact = true.
+      fc.emit(resultFrame(350_000));
+      // Feed second user message on next tick (after stdout handler runs).
+      setImmediate(() => {
+        stdinPT.write(userLine("second message") + "\n");
+        stdinPT.end();
+        setTimeout(() => fc.close(0), 20);
+      });
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: { autoCompact: true, autoCompactThresholdTokens: 300_000 },
+      telemetry: tel.writer,
+      stdin: stdinPT,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    const writes = fc.stdinWrites.map((w) => {
+      try { return JSON.parse(w.trim()) as Record<string, unknown>; } catch { return null; }
+    });
+    const compactIdx = writes.findIndex(
+      (w) => w?.type === "user" &&
+        ((w.message as { content: Array<{ type: string; text: string }> }).content)?.[0]?.text === "/compact",
+    );
+    expect(compactIdx).toBeGreaterThan(-1);
+    const secondUserIdx = writes.findIndex(
+      (w, i) => i > compactIdx && w?.type === "user" &&
+        ((w.message as { content: Array<{ type: string; text: string }> }).content)?.[0]?.text === "second message",
+    );
+    expect(secondUserIdx).toBeGreaterThan(compactIdx);
+  });
+
+  test("emits a compact telemetry event when auto-compact fires", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const stdinPT = new PassThrough();
+    stdinPT.write(userLine("first") + "\n");
+    setTimeout(() => {
+      fc.emit(resultFrame(400_000));
+      setImmediate(() => {
+        stdinPT.write(userLine("second") + "\n");
+        stdinPT.end();
+        setTimeout(() => fc.close(0), 20);
+      });
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: { autoCompact: true },
+      telemetry: tel.writer,
+      stdin: stdinPT,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    const compactEvent = tel.events.find((e) => e.type === "compact");
+    expect(compactEvent).toBeDefined();
+    expect((compactEvent as { priorCacheReadTokens?: number }).priorCacheReadTokens).toBe(400_000);
+  });
+
+  test("does not inject /compact when autoCompact is not enabled", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const stdin = Readable.from([
+      userLine("first") + "\n",
+      userLine("second") + "\n",
+    ]);
+    setTimeout(() => {
+      fc.emit(resultFrame(400_000));
+      setTimeout(() => fc.close(0), 20);
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    const writes = fc.stdinWrites.map((w) => {
+      try { return JSON.parse(w.trim()) as Record<string, unknown>; } catch { return null; }
+    });
+    const compactIdx = writes.findIndex(
+      (w) => w?.type === "user" &&
+        ((w.message as { content: Array<{ type: string; text: string }> }).content)?.[0]?.text === "/compact",
+    );
+    expect(compactIdx).toBe(-1);
+  });
+
+  test("does not auto-compact when cache_read is below threshold", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const stdin = Readable.from([
+      userLine("first") + "\n",
+      userLine("second") + "\n",
+    ]);
+    setTimeout(() => {
+      fc.emit(resultFrame(100_000));
+      setTimeout(() => fc.close(0), 20);
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: { autoCompact: true },
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    const writes = fc.stdinWrites.map((w) => {
+      try { return JSON.parse(w.trim()) as Record<string, unknown>; } catch { return null; }
+    });
+    const compactIdx = writes.findIndex(
+      (w) => w?.type === "user" &&
+        ((w.message as { content: Array<{ type: string; text: string }> }).content)?.[0]?.text === "/compact",
+    );
+    expect(compactIdx).toBe(-1);
+  });
+
+  test("resets auto-compact flag when user manually sends /compact", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const stdin = Readable.from([
+      userLine("first") + "\n",
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"/compact"}]}}\n',
+      userLine("third") + "\n",
+    ]);
+    setTimeout(() => {
+      fc.emit(resultFrame(400_000));
+      setTimeout(() => fc.close(0), 30);
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: { autoCompact: true },
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+    });
+
+    const writes = fc.stdinWrites.map((w) => {
+      try { return JSON.parse(w.trim()) as Record<string, unknown>; } catch { return null; }
+    });
+    const compactFrames = writes.filter(
+      (w) => w?.type === "user" &&
+        ((w.message as { content: Array<{ type: string; text: string }> }).content)?.[0]?.text === "/compact",
+    );
+    // Only the user's own /compact — no Maestro-injected one (flag was cleared).
+    expect(compactFrames.length).toBe(1);
+    expect(tel.events.find((e) => e.type === "compact")).toBeUndefined();
+  });
+
+  test("persists lastCacheReadTokens to session store after each turn", async () => {
+    const tel = mockTelemetry();
+    const out = collectorStream();
+    const stderr = collectorStream();
+    const fc = fakeChild([]);
+
+    const updateCalls: Array<{ sessionId: string; data: { stopReason: string; lastCacheReadTokens: number } }> = [];
+    const mockSessions = {
+      updatePostTurnData: async (sessionId: string, data: { stopReason: string; lastCacheReadTokens: number }) => {
+        updateCalls.push({ sessionId, data });
+      },
+      appendClass: async () => {},
+      getByFingerprint: async () => ({ sessionId: "test-session", isNew: false }),
+      getOrCreate: async () => ({ sessionId: "test-session", isNew: false }),
+      touch: async () => {},
+      updateLastDecision: async () => {},
+      getLastDecision: async () => null,
+      setEffortEscalated: async () => {},
+      getEffortEscalated: async () => false,
+      getTurnCount: async () => 0,
+      list: async () => [],
+    };
+
+    const stdin = Readable.from([userLine("hello") + "\n"]);
+    setTimeout(() => {
+      fc.emit(resultFrame(250_000));
+      fc.close(0);
+    }, 10);
+
+    await runSdkProxy({
+      realClaude: "node",
+      claudeArgs: [],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      stdin,
+      stdout: out.stream,
+      stderr: stderr.stream,
+      spawn: fc.spawn,
+      sessions: mockSessions as Parameters<typeof runSdkProxy>[0]["sessions"],
+      sessionId: "test-session",
+    });
+
+    expect(updateCalls.length).toBe(1);
+    expect(updateCalls[0]!.data.lastCacheReadTokens).toBe(250_000);
+    expect(updateCalls[0]!.data.stopReason).toBe("end_turn");
   });
 });

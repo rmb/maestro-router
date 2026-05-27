@@ -160,13 +160,16 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
   let rateLimitPressure = false;
   let rateLimitWarned = false;
 
-  // P10: track cumulative cache_read tokens for session-bloat warnings.
+  // P10: track cache_read tokens per turn for auto-compact and session-bloat warnings.
   // Empirical thresholds from real telemetry analysis:
   //   500k → ~5-10× boot cost; soft warning (suggest /compact)
   //   2M   → 30-100× boot cost; hard warning (suggest restart)
   let maxCacheReadSeen = 0;
+  let lastCacheReadSeen = 0; // most recent turn's value — used for auto-compact trigger
+  let needsAutoCompact = false; // set on result, consumed on next user-text turn
   let compactSuggested = false;
   let restartSuggested = false;
+  const COMPACT_THRESHOLD = opts.userConfig.autoCompactThresholdTokens ?? 300_000;
 
   // T2: track tool_use volume per turn; escalate model on high-volume turns.
   const toolVolumeState = createToolVolumeState();
@@ -227,10 +230,22 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
               const parsed = parseOutput(JSON.stringify(frame), opts.userConfig);
               const cacheHit = (parsed?.cost?.cacheReadInputTokens ?? 0) > 0;
 
-              // P10: session-bloat warnings keyed on cache_read tokens.
+              // P10: session-bloat warnings / auto-compact keyed on cache_read tokens.
               const cacheRead = parsed?.cost?.cacheReadInputTokens ?? 0;
               if (cacheRead > maxCacheReadSeen) maxCacheReadSeen = cacheRead;
-              if (!compactSuggested && maxCacheReadSeen > 500_000) {
+              lastCacheReadSeen = cacheRead;
+
+              // Persist to session store so run-cmd and stats can read it.
+              if (opts.sessions && opts.sessionId && parsed?.cost?.stopReason) {
+                opts.sessions.updatePostTurnData(opts.sessionId, {
+                  stopReason: parsed.cost.stopReason,
+                  lastCacheReadTokens: cacheRead,
+                }).catch(() => {});
+              }
+
+              if (opts.userConfig.autoCompact && !needsAutoCompact && lastCacheReadSeen > COMPACT_THRESHOLD) {
+                needsAutoCompact = true;
+              } else if (!compactSuggested && !opts.userConfig.autoCompact && maxCacheReadSeen > 500_000) {
                 compactSuggested = true;
                 opts.stderr.write(
                   `maestro: session context now ${(maxCacheReadSeen / 1000).toFixed(0)}k cache_read tokens (~5-10× boot cost). Consider /compact.\n`,
@@ -368,10 +383,32 @@ export async function runSdkProxy(opts: SdkProxyOptions): Promise<number> {
       // Slash commands (/model, /clear, /compact, etc.) are interactive
       // directives handled by the SDK host. Don't classify them, and
       // don't inject set_model — they should reach the SDK host's command
-      // handler unmodified.
+      // handler unmodified. Manual /compact also resets auto-compact flag.
       if (promptText.startsWith("/")) {
+        if (promptText.startsWith("/compact")) needsAutoCompact = false;
         child.stdin?.write(line + "\n");
         continue;
+      }
+
+      // P10: auto-compact — inject /compact before the real prompt when cache_read
+      // exceeded the threshold on the previous turn. The child processes stdin
+      // sequentially so it will compact before seeing the user's actual message.
+      if (needsAutoCompact) {
+        needsAutoCompact = false;
+        opts.stderr.write(
+          `maestro: auto-compacting session (~${Math.round(lastCacheReadSeen / 1000)}k cached tokens)\n`,
+        );
+        const compactFrame = {
+          type: "user",
+          message: { role: "user", content: [{ type: "text", text: "/compact" }] },
+        };
+        child.stdin?.write(JSON.stringify(compactFrame) + "\n");
+        opts.telemetry.log({
+          type: "compact",
+          ts: new Date().toISOString(),
+          sessionId: opts.sessionId ?? "",
+          priorCacheReadTokens: lastCacheReadSeen,
+        }).catch(() => {});
       }
 
       const decision: Decision = await opts.pipeline.route(

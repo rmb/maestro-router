@@ -4,6 +4,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { loadUserHeuristics } from "../classifiers/heuristic.js";
+import { ConfigValidationError, parseUserConfig } from "../core/config-schema.js";
 import type {
   Class,
   ClassSpec,
@@ -128,7 +129,17 @@ export async function loadCliConfig(
   const overridesPath = join(configDir, "profile-overrides.json");
   const heuristicsPath = join(configDir, "heuristics.json");
 
-  const userGlobal = (await readJsonOrNull<UserConfig>(configPath)) ?? {};
+  const userGlobalRaw = await readJsonOrNull(configPath);
+  let userGlobal: UserConfig;
+  try {
+    userGlobal = parseUserConfig(userGlobalRaw ?? {});
+  } catch (err) {
+    if (err instanceof ConfigValidationError) {
+      process.stderr.write(`maestro: config error in ${configPath}:\n${formatConfigError(err.message)}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
   const overridesGlobal =
     (await readJsonOrNull<ProfileOverride>(overridesPath)) ?? {};
   const heuristicsGlobal = await loadUserHeuristics(heuristicsPath);
@@ -141,8 +152,17 @@ export async function loadCliConfig(
   if (!opts.noProject) {
     projectConfigDir = await findProjectConfigDir(opts.cwd ?? process.cwd());
     if (projectConfigDir) {
-      userProject =
-        (await readJsonOrNull<UserConfig>(join(projectConfigDir, "config.json"))) ?? {};
+      const userProjectRaw = await readJsonOrNull(join(projectConfigDir, "config.json"));
+      try {
+        userProject = parseUserConfig(userProjectRaw ?? {});
+      } catch (err) {
+        if (err instanceof ConfigValidationError) {
+          const projectConfigPath = join(projectConfigDir, "config.json");
+          process.stderr.write(`maestro: config error in ${projectConfigPath}:\n${formatConfigError(err.message)}\n`);
+          process.exit(1);
+        }
+        throw err;
+      }
       overridesProject =
         (await readJsonOrNull<ProfileOverride>(
           join(projectConfigDir, "profile-overrides.json"),
@@ -193,6 +213,14 @@ function mergeProfileOverrides(
     result[cls] = { ...result[cls], ...spec };
   }
   return result;
+}
+
+/**
+ * Strips the "config validation failed:\n" prefix from a ConfigValidationError
+ * message so it can be embedded into the stderr output directly.
+ */
+function formatConfigError(message: string): string {
+  return message.replace(/^config validation failed:\n/, "");
 }
 
 async function readJsonOrNull<T>(path: string): Promise<T | null> {

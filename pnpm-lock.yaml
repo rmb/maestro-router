@@ -14,6 +14,9 @@ importers:
       langfuse:
         specifier: ^3.0.0
         version: 3.38.20
+      zod:
+        specifier: ^3.0.0
+        version: 3.25.76
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: ^0.18.2
@@ -1618,6 +1621,9 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@andrewbranch/untar.js@1.0.3': {}
@@ -2992,3 +2998,5 @@ snapshots:
       yargs-parser: 20.2.9
 
   yocto-queue@0.1.0: {}
+
+  zod@3.25.76: {}

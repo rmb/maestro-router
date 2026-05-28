@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { _resetDbCache, isSqliteAvailable, openDb } from "./db.js";
 import { createTelemetry } from "./telemetry.js";
 import type { TelemetryEvent } from "./types.js";
 
@@ -11,9 +12,11 @@ let dir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "maestro-tel-"));
+  _resetDbCache();
 });
 
 afterEach(async () => {
+  _resetDbCache();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -185,6 +188,32 @@ describe("createTelemetry", () => {
         diagnostics: [],
       }),
     ).resolves.toBeUndefined();
+  });
+
+  test("log() also inserts into SQLite when dbPath is provided", async () => {
+    if (!isSqliteAvailable()) return;
+    const path = join(dir, "decisions.jsonl");
+    const configPath = join(dir, "config.json");
+    const dbPath = join(dir, "decisions.db");
+    const tel = createTelemetry({ path, configPath, dbPath });
+
+    await tel.log(decisionEvent("2026-05-21T10:00:00.000Z"));
+    await tel.log(decisionEvent("2026-05-21T10:01:00.000Z"));
+
+    const db = openDb(dbPath)!;
+    expect(db.count()).toBe(2);
+  });
+
+  test("dbPath=null disables SQLite mirror", async () => {
+    if (!isSqliteAvailable()) return;
+    const path = join(dir, "decisions.jsonl");
+    const configPath = join(dir, "config.json");
+    const tel = createTelemetry({ path, configPath, dbPath: null });
+
+    await tel.log(decisionEvent());
+    // JSONL still written.
+    const events = await tel.readAll();
+    expect(events).toHaveLength(1);
   });
 
   test("swallows errors and never throws from log()", async () => {

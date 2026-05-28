@@ -4,18 +4,27 @@
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { openDb } from "./db.js";
+import type { MaestroDb } from "./db.js";
 import type { LangfuseClient } from "./langfuse.js";
 import type { TelemetryEvent } from "./types.js";
 
 const DEFAULT_PATH = join(homedir(), ".maestro", "decisions.jsonl");
 const DEFAULT_CONFIG_PATH = join(homedir(), ".maestro", "config.json");
 const DEFAULT_FALLBACK_PATH = join(homedir(), ".maestro", "fallbacks.jsonl");
+const DEFAULT_DB_PATH = join(homedir(), ".maestro", "decisions.db");
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export type TelemetryOptions = {
   path?: string;
   configPath?: string;
   fallbackPath?: string;
+  /**
+   * Optional SQLite path. When unset, defaults to `~/.maestro/decisions.db`
+   * (sibling of the JSONL). Pass an explicit path in tests, or `null` to
+   * disable SQLite entirely for this writer.
+   */
+  dbPath?: string | null;
   maxFileBytes?: number;
   /** Optional Langfuse client — when provided, each logged event is also flushed there. */
   langfuse?: LangfuseClient;
@@ -53,6 +62,14 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
   const fallbackPath = opts.fallbackPath ?? DEFAULT_FALLBACK_PATH;
   const maxFileBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const langfuse = opts.langfuse;
+  // Resolve SQLite mirror. dbPath: undefined → derive from JSONL path so each
+  // writer has its own DB; explicit null → disable. Falls back to JSONL-only
+  // if node:sqlite is unavailable (openDb returns null).
+  const dbPath =
+    opts.dbPath === null
+      ? null
+      : opts.dbPath ?? (opts.path !== undefined ? deriveDbPath(opts.path) : DEFAULT_DB_PATH);
+  const db: MaestroDb | null = dbPath !== null ? openDb(dbPath) : null;
 
   return {
     async log(event: TelemetryEvent): Promise<void> {
@@ -64,6 +81,8 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
       } catch (err) {
         process.stderr.write(`maestro telemetry: ${(err as Error).message}\n`);
       }
+      // SQLite mirror — sync, <1ms, swallows its own errors.
+      db?.insert(event);
       // Fire-and-forget Langfuse flush — must not affect the JSONL write above.
       langfuse?.flush(event);
     },
@@ -78,6 +97,22 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
     },
 
     async readAll(): Promise<TelemetryEvent[]> {
+      // Prefer SQLite when available and populated. Falls back to JSONL on any
+      // failure or when the DB is empty (e.g. fresh install before migration).
+      if (db !== null && db.count() > 0) {
+        const rows = db.query("SELECT raw_json FROM events ORDER BY id") as Array<{
+          raw_json: string;
+        }>;
+        const out: TelemetryEvent[] = [];
+        for (const row of rows) {
+          try {
+            out.push(JSON.parse(row.raw_json) as TelemetryEvent);
+          } catch {
+            // Skip corrupted raw_json; JSONL remains source of truth.
+          }
+        }
+        if (out.length > 0) return out;
+      }
       try {
         const data = await readFile(path, "utf8");
         return data
@@ -90,6 +125,12 @@ export function createTelemetry(opts: TelemetryOptions = {}): TelemetryWriter {
       }
     },
   };
+}
+
+/** Derive `decisions.db` from a `decisions.jsonl` path (or any path). */
+function deriveDbPath(jsonlPath: string): string {
+  if (jsonlPath.endsWith(".jsonl")) return jsonlPath.slice(0, -6) + ".db";
+  return jsonlPath + ".db";
 }
 
 async function rotateIfNeeded(path: string, maxBytes: number): Promise<void> {

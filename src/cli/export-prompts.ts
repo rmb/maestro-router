@@ -4,6 +4,8 @@ import type { Command } from "commander";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import { openDb } from "../core/db.js";
+import type { MaestroDb } from "../core/db.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { FallbackLogEntry } from "../core/telemetry.js";
 import type { Class } from "../core/types.js";
@@ -88,10 +90,18 @@ export function registerExportPromptsCommand(program: Command): void {
       const path =
         cmdOpts.telemetry ?? cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
 
-      const { rows, skipped, totalEvents, decisionEvents } = await collectRows(path, {
+      // Prefer SQLite when it has rows — SQL filter is cheaper than a full
+      // JSONL scan once the DB has been populated by past `log()` calls.
+      const dbPath = path.endsWith(".jsonl") ? path.slice(0, -6) + ".db" : path + ".db";
+      const db = openDb(dbPath);
+      const opts = {
         dedupe: cmdOpts.keepDuplicates !== true,
         limit: parseLimit(cmdOpts.limit),
-      });
+      };
+      const { rows, skipped, totalEvents, decisionEvents } =
+        db !== null && db.count() > 0
+          ? collectRowsFromDb(db, opts)
+          : await collectRows(path, opts);
 
       const lines = rows.map((r) => JSON.stringify(r)).join("\n");
       const payload = lines.length > 0 ? lines + "\n" : "";
@@ -256,6 +266,49 @@ export async function collectRows(
   }
 
   return { rows, skipped, totalEvents, decisionEvents };
+}
+
+/**
+ * SQLite-backed variant of `collectRows`. Pushes the decision/prompt filter
+ * into SQL so we only parse rows that already passed type+prompt checks.
+ * Dedupe and limit are applied in TS to keep behavior identical to the JSONL
+ * path. `totalEvents` is total event count; `decisionEvents` is the filtered
+ * count of decision rows with a non-empty prompt.
+ */
+export function collectRowsFromDb(db: MaestroDb, opts: CollectOptions): CollectResult {
+  const totalEventsRow = db.query("SELECT COUNT(*) AS n FROM events") as Array<{ n: number }>;
+  const totalEvents = totalEventsRow[0]?.n ?? 0;
+
+  const rowsRaw = db.query(
+    `SELECT prompt, class, ts FROM events
+       WHERE type = 'decision'
+         AND prompt IS NOT NULL
+         AND prompt != ''
+         AND class IS NOT NULL
+       ORDER BY id`,
+  ) as Array<{ prompt: string; class: string; ts: string }>;
+
+  const rows: ExportRow[] = [];
+  const seen = new Set<string>();
+  let decisionEvents = 0;
+  for (const r of rowsRaw) {
+    if (!(ALL_CLASSES as ReadonlyArray<string>).includes(r.class)) continue;
+    decisionEvents++;
+    if (opts.dedupe) {
+      if (seen.has(r.prompt)) continue;
+      seen.add(r.prompt);
+    }
+    rows.push({
+      prompt: r.prompt,
+      expectedClass: r.class as Class,
+      source: "telemetry-export",
+      decidedClass: r.class as Class,
+      ts: r.ts,
+    });
+    if (opts.limit !== null && rows.length >= opts.limit) break;
+  }
+
+  return { rows, skipped: 0, totalEvents, decisionEvents };
 }
 
 type DecisionWithPrompt = {

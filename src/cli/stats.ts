@@ -2,6 +2,8 @@
 
 import type { Command } from "commander";
 import { createTelemetry } from "../core/telemetry.js";
+import { openDb } from "../core/db.js";
+import type { MaestroDb } from "../core/db.js";
 import { ALL_CLASSES } from "../core/profile.js";
 import type { Class, TelemetryEvent } from "../core/types.js";
 import {
@@ -99,11 +101,21 @@ export function registerStatsCommand(program: Command): void {
       const cutoff = Date.now() - since * 24 * 60 * 60 * 1000;
 
       const t = createTelemetry({ path });
-      const events = (await t.readAll()).filter(
-        (e) => Date.parse(e.ts) >= cutoff,
-      );
-
-      const summary = computeSummary(events, since);
+      // Prefer SQLite query path when available with data. The summary
+      // aggregator is shared — SQLite just narrows the row scan via SQL
+      // before parsing raw_json for cost/spec fields.
+      const dbPath = path.endsWith(".jsonl") ? path.slice(0, -6) + ".db" : path + ".db";
+      const db = openDb(dbPath);
+      let summary: Summary;
+      if (db !== null && db.count() > 0) {
+        const events = readEventsFromDbSince(db, cutoff);
+        summary = computeSummary(events, since);
+      } else {
+        const events = (await t.readAll()).filter(
+          (e) => Date.parse(e.ts) >= cutoff,
+        );
+        summary = computeSummary(events, since);
+      }
       if (parent.json) {
         process.stdout.write(format(summary, { json: true }) + "\n");
       } else if (!parent.quiet) {
@@ -388,4 +400,27 @@ function renderHuman(s: Summary): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Read events from SQLite filtered by ts cutoff. SQL prunes the row count;
+ * raw_json is parsed back into typed TelemetryEvents so the existing
+ * `computeSummary` aggregator works unchanged. The ISO-8601 ts strings sort
+ * lexicographically so `ts >= ?` is correct without numeric conversion.
+ */
+function readEventsFromDbSince(db: MaestroDb, cutoffMs: number): TelemetryEvent[] {
+  const cutoffIso = new Date(cutoffMs).toISOString();
+  const rows = db.query(
+    "SELECT raw_json FROM events WHERE ts >= ? ORDER BY id",
+    [cutoffIso],
+  ) as Array<{ raw_json: string }>;
+  const out: TelemetryEvent[] = [];
+  for (const r of rows) {
+    try {
+      out.push(JSON.parse(r.raw_json) as TelemetryEvent);
+    } catch {
+      // ignore corrupted row
+    }
+  }
+  return out;
 }

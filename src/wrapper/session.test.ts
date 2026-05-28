@@ -406,3 +406,40 @@ describe("model-tier affinity", () => {
     expect(last!.prompt.length).toBe(600);
   });
 });
+
+describe("write queue serialization", () => {
+  test("concurrent writes don't lose data (appendClass + appendTurnType + updateLastDecision)", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+    const { sessionId } = await store.getOrCreate("/foo", "haiku");
+
+    // Fire three R-M-W operations concurrently — without the write queue each read
+    // would see the same pre-write state and the last writer would clobber the rest.
+    await Promise.all([
+      store.appendClass(sessionId, "trivial"),
+      store.appendTurnType(sessionId, "user_prompt"),
+      store.updateLastDecision(sessionId, "fix the auth bug", "trivial"),
+    ]);
+
+    const records = await store.list();
+    const r = records.find((s) => s.sessionId === sessionId)!;
+    expect(r.recentClasses).toContain("trivial");
+    expect(r.recentTurnTypes).toContain("user_prompt");
+    expect(r.lastPrompt).toBe("fix the auth bug");
+  });
+
+  test("concurrent getOrCreate calls don't clobber each other (both sessions persist)", async () => {
+    const store = createSessionStore({ path: join(dir, "s.json") });
+
+    // Two concurrent creates for different cwd — without the queue, the second
+    // read() returns the same empty array and its write() drops the first session.
+    await Promise.all([
+      store.getOrCreate("/foo", "haiku"),
+      store.getOrCreate("/bar", "sonnet"),
+    ]);
+
+    const records = await store.list();
+    expect(records.length).toBe(2);
+    expect(records.some((r) => r.cwd === "/foo")).toBe(true);
+    expect(records.some((r) => r.cwd === "/bar")).toBe(true);
+  });
+});

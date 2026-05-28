@@ -242,8 +242,9 @@ function computeGhost(line: string, completions: string[]): string | null {
  * Patches rl._refreshLine to append a dim ghost-text suggestion after the
  * cursor whenever the current word is a unique-prefix match. The cursor is
  * moved back so the user types over the ghost. Only active when isTTY + color.
+ * Exported for testing the absent-_refreshLine guard.
  */
-function installGhostText(
+export function installGhostText(
   rl: readline.Interface,
   completions: string[],
   output: Writable,

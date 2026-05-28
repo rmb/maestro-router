@@ -1,13 +1,14 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test } from "vitest";
+import readline from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import { balancedProfile } from "../core/profile.js";
 import type { Pipeline } from "../core/pipeline.js";
 import type { Decision, TelemetryEvent } from "../core/types.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
 import type { SdkProxySpawn } from "./sdk-proxy.js";
-import { runShellHost } from "./sdk-host.js";
+import { runShellHost, installGhostText } from "./sdk-host.js";
 
 function collector(): { stream: Writable; lines: string[]; text: () => string } {
   const lines: string[] = [];
@@ -47,6 +48,8 @@ type FakeClaudeOpts = {
   toolRequest?: boolean;
   /** Emit a second can_use_tool for the same tool after the first approval. */
   twoToolRequests?: boolean;
+  /** Override the model reported in assistant frames. Defaults to claude-haiku-4-5-20251001. */
+  model?: string;
 };
 
 /**
@@ -72,7 +75,7 @@ function fakeClaude(opts: FakeClaudeOpts = {}): {
   };
 
   const replyToUser = (text: string): void => {
-    emit({ type: "assistant", message: { model: "claude-haiku-4-5-20251001", content: [{ type: "text", text: `echo: ${text}` }] } });
+    emit({ type: "assistant", message: { model: opts.model ?? "claude-haiku-4-5-20251001", content: [{ type: "text", text: `echo: ${text}` }] } });
     emit({
       type: "result",
       subtype: "success",
@@ -507,5 +510,55 @@ describe("runShellHost", () => {
 
     input.write("/exit\n");
     await hostPromise;
+  });
+});
+
+describe("installGhostText", () => {
+  test("does not throw when readline interface lacks _refreshLine (Node API guard)", () => {
+    const out = new PassThrough();
+    const rl = readline.createInterface({ input: new PassThrough(), output: out, terminal: false });
+    // Simulate a Node version that removed the private _refreshLine method.
+    delete (rl as unknown as Record<string, unknown>)["_refreshLine"];
+    expect(() => installGhostText(rl, ["/compact", "/help"], out)).not.toThrow();
+    rl.close();
+  });
+});
+
+describe("renderHud 1M variant", () => {
+  test("HUD renders without NaN or Infinity for [1m] model variant", async () => {
+    const fc = fakeClaude({ model: "claude-opus-4-7[1m]" });
+    const tel = mockTelemetry();
+    const out = collector();
+    const err = collector();
+    const input = new PassThrough();
+
+    const hostPromise = runShellHost({
+      realClaude: "fake",
+      claudeArgs: ["--print"],
+      pipeline: mockPipeline("standard"),
+      profile: balancedProfile,
+      userConfig: {},
+      telemetry: tel.writer,
+      input,
+      output: out.stream,
+      errput: err.stream,
+      spawn: fc.spawn,
+      color: false,
+    });
+
+    await waitFor(() => out.text().includes("routing: auto"));
+    input.write("explain this\n");
+    await waitFor(() => out.text().includes("saved"));
+    input.write("/exit\n");
+
+    await hostPromise;
+
+    // HUD must render a valid savings percentage — no NaN or Infinity from 1m pricing.
+    const m = out.text().match(/saved (-?\d+)%\]/);
+    expect(m).not.toBeNull();
+    const pct = Number(m?.[1]);
+    expect(Number.isFinite(pct)).toBe(true);
+    expect(out.text()).not.toContain("NaN");
+    expect(out.text()).not.toContain("Infinity");
   });
 });

@@ -469,3 +469,62 @@ describe("T4 auto-resume on max_tokens", () => {
     expect(stderrOutput).toMatch(/already retried/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stripped-prompt tests — verifies the @deep/@fast prefix is removed before
+// classification and before the prompt is forwarded to claude.
+// ---------------------------------------------------------------------------
+
+describe("override prefix stripping", () => {
+  beforeEach(() => {
+    _resetT4RetryState();
+    vi.clearAllMocks();
+    mockRoute.mockResolvedValue({
+      class: "hard",
+      classifier: "override",
+      confidence: 1.0,
+      spec: { model: "opus", effort: "max", maxBudgetUsd: 1.0, excludeDynamicSections: true },
+      latencyMs: 0,
+      diagnostics: [{ severity: "info" as const, code: "override.matched", message: "@deep" }],
+    });
+    telemetryLog.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    _resetT4RetryState();
+    process.exitCode = undefined;
+  });
+
+  test("pipeline.route receives stripped prompt — no @deep prefix in route call", async () => {
+    const streamFn = makeStreamFn([
+      { capturedStdout: makeCostJson("end_turn", "claude-opus-4-7") },
+    ]);
+
+    await runCmd("@deep explain this algorithm", streamFn);
+
+    const routeArg = mockRoute.mock.calls[0]?.[0] as { prompt?: string } | undefined;
+    expect(routeArg?.prompt).toBe("explain this algorithm");
+    expect(routeArg?.prompt).not.toContain("@deep");
+  });
+
+  test("prompt forwarded to claude (doStream) is stripped — no @fast prefix", async () => {
+    mockRoute.mockResolvedValue({
+      class: "trivial",
+      classifier: "override",
+      confidence: 1.0,
+      spec: { model: "haiku", effort: "low", maxBudgetUsd: 0.05, excludeDynamicSections: true },
+      latencyMs: 0,
+      diagnostics: [{ severity: "info" as const, code: "override.matched", message: "@fast" }],
+    });
+    const streamFn = makeStreamFn([
+      { capturedStdout: makeCostJson("end_turn", "claude-haiku-4-5") },
+    ]);
+
+    await runCmd("@fast format this file", streamFn);
+
+    const firstCallPrompt = (streamFn.mock.calls[0]?.[0] as { prompt?: string })?.prompt;
+    expect(firstCallPrompt).toBeDefined();
+    expect(firstCallPrompt).not.toContain("@fast");
+    expect(firstCallPrompt).toBe("format this file");
+  });
+});

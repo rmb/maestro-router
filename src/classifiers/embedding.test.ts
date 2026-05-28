@@ -479,6 +479,83 @@ describe("SetFit head", () => {
     expect(result.class).toBe("trivial");
     expect((result.diagnostics ?? []).some((d) => d.code === "embedding.matched")).toBe(true);
   });
+
+  test("tie → resolves to the LOWER class index, confidence ≈ 0.5", async () => {
+    const headPath = join(tmpDir, "head.json");
+    // Both rows identical → equal logits for any embedding. With embedding
+    // [1,0]: logits = [1, 1]; softmax → [0.5, 0.5]. Strict-`>` argmax keeps
+    // the first (lowest index) winner.
+    await writeHeadFile(headPath, {
+      coef: [
+        [1, 0],
+        [1, 0],
+      ],
+      intercept: [0, 0],
+      classes: { trivial: 0, hard: 1 },
+    });
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([1, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "tie" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("trivial"); // index 0, the lower of the two
+    expect(result.confidence).toBeCloseTo(0.5, 6);
+    expect(diagnostics.length).toBe(0);
+  });
+
+  test("single-class head → softmax bestProb 1.0, returns that class", async () => {
+    const headPath = join(tmpDir, "head.json");
+    // nClasses === 1: softmax over one logit is always 1.0 regardless of input.
+    await writeHeadFile(headPath, {
+      coef: [[1, 0, 0]],
+      intercept: [0],
+      classes: { standard: 0 },
+    });
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([0.3, 0.7, 0.1]), // any vector
+      minSimilarity: 0.95, // even a high floor passes since prob === 1.0
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "x" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("standard");
+    expect(result.confidence).toBeCloseTo(1.0, 6);
+    expect(diagnostics.length).toBe(0);
+  });
+
+  test("negative coefficients → sign-correct dot product picks the winner", async () => {
+    const headPath = join(tmpDir, "head.json");
+    // coef[0] is all-negative; coef[1] positive on dim 0. Embedding [2,0,0]:
+    //   logit[0] = -1*2 = -2; logit[1] = +1*2 = +2 → argmax index 1 = "hard".
+    // A sign error in the dot product would flip this.
+    await writeHeadFile(headPath, {
+      coef: [
+        [-1, 0, 0],
+        [1, 0, 0],
+      ],
+      intercept: [0, 0],
+      classes: { trivial: 0, hard: 1 },
+    });
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([2, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "neg" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("hard"); // positive-coef class wins, not the negative one
+    // logit gap is +2 − (−2) = 4 → p(hard) = 1 / (1 + exp(−4)).
+    expect(result.confidence).toBeCloseTo(1 / (1 + Math.exp(-4)), 6);
+    expect(diagnostics.length).toBe(0);
+  });
 });
 
 describe("EXEMPLAR_SEEDS structure", () => {

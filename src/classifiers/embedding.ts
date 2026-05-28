@@ -258,8 +258,11 @@ async function loadHead(path: string): Promise<SetFitHead> {
         `embedding classifier: ${path} unknown class name "${key}"; must be one of ${ALL_CLASSES.join(", ")}`,
       );
     }
-    const idx = parsed.classes[key];
-    if (!Number.isInteger(idx) || idx === undefined || idx < 0 || idx >= nClasses) {
+    // `classKeys` is derived from `parsed.classes`, so the lookup always
+    // resolves; the `?? -1` only satisfies noUncheckedIndexedAccess and is
+    // rejected by the range check below if it ever fired.
+    const idx = parsed.classes[key] ?? -1;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= nClasses) {
       throw new HeadLoadError(
         `embedding classifier: ${path} class "${key}" index ${String(idx)} is not an integer in [0, ${nClasses})`,
       );
@@ -434,6 +437,8 @@ export function createEmbeddingClassifier(
       const vec = await embedOrBail(req.prompt);
       if (vec === null) return null;
 
+      // loadHead already guarantees coef[0] exists with length === dim > 0, so
+      // the `?? 0` is belt-and-suspenders for the type checker, not a live path.
       const coefRowLength = head.coef[0]?.length ?? 0;
       if (vec.length !== coefRowLength) {
         return emit(
@@ -466,6 +471,8 @@ export function createEmbeddingClassifier(
         sumExp += e;
       }
 
+      // Argmax with strict `>`: ties resolve deterministically to the lowest
+      // class index (the first one seen wins).
       let bestIndex = 0;
       let bestExp = -Infinity;
       for (let i = 0; i < nClasses; i++) {

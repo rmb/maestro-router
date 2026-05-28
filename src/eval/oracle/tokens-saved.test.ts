@@ -168,8 +168,8 @@ describe("isolateE1Savings", () => {
 
     const result = isolateE1Savings(events, baseline);
 
-    // beforeAvg = opus 1k in + 500 out = $0.0525; afterAvg = haiku = $0.0035
-    // savings = ($0.0525 - $0.0035) / $0.0525 ≈ 93% ≥ 50%
+    // beforeAvg = opus 1k in + 500 out = $0.0525; afterAvg = haiku = $0.0028
+    // savings = ($0.0525 - $0.0028) / $0.0525 ≈ 94.7% ≥ 50%
     expect(result.check.pass).toBe(true);
     expect(result.savingsPct).toBeGreaterThanOrEqual(0.5);
   });

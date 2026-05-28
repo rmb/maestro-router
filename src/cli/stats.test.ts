@@ -249,7 +249,7 @@ describe("1M variant baseline pricing", () => {
 });
 
 describe("cacheReadCostUsd", () => {
-  test("computes cache_read cost for haiku model (0.10/1M tokens)", () => {
+  test("computes cache_read cost for haiku model (0.08/1M tokens)", () => {
     const event: TelemetryEvent = {
       type: "decision",
       ts: "2026-05-21T10:00:00.000Z",
@@ -275,8 +275,8 @@ describe("cacheReadCostUsd", () => {
       },
     };
     const summary = computeSummary([event], 7);
-    // 1_000_000 * (0.10 / 1_000_000) = 0.10
-    expect(summary.cacheReadCostUsd).toBeCloseTo(0.10, 4);
+    // 1_000_000 * (0.08 / 1_000_000) = 0.08
+    expect(summary.cacheReadCostUsd).toBeCloseTo(0.08, 4);
   });
 
   test("computes cache_read cost for sonnet model (0.30/1M tokens)", () => {
@@ -339,13 +339,13 @@ describe("cacheReadCostUsd", () => {
         serviceTier: "default",
       },
     });
-    // haiku: 1M * 0.10/1M = 0.10; sonnet: 1M * 0.30/1M = 0.30 → total 0.40
+    // haiku: 1M * 0.08/1M = 0.08; sonnet: 1M * 0.30/1M = 0.30 → total 0.38
     const events: TelemetryEvent[] = [
       makeCacheRead("haiku", 1_000_000),
       makeCacheRead("sonnet", 1_000_000),
     ];
     const summary = computeSummary(events, 7);
-    expect(summary.cacheReadCostUsd).toBeCloseTo(0.40, 4);
+    expect(summary.cacheReadCostUsd).toBeCloseTo(0.38, 4);
   });
 });
 

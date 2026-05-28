@@ -23,25 +23,25 @@ export const OPUS_1M_CACHE_WRITE_PER_TOK = 37.5 / 1_000_000;
 export const OPUS_1M_CACHE_READ_PER_TOK = 3.0 / 1_000_000;
 
 const INPUT_RATE: Record<string, number> = {
-  haiku: 1.00 / 1_000_000,
+  haiku: 0.80 / 1_000_000,
   sonnet: 3.00 / 1_000_000,
   opus: OPUS_INPUT_PER_TOK,
 };
 
 const OUTPUT_RATE: Record<string, number> = {
-  haiku: 5.00 / 1_000_000,
+  haiku: 4.00 / 1_000_000,
   sonnet: 15.00 / 1_000_000,
   opus: OPUS_OUTPUT_PER_TOK,
 };
 
 const CACHE_WRITE_RATE: Record<string, number> = {
-  haiku: 1.25 / 1_000_000,
+  haiku: 1.00 / 1_000_000,
   sonnet: 3.75 / 1_000_000,
   opus: OPUS_CACHE_WRITE_PER_TOK,
 };
 
 const CACHE_READ_RATE: Record<string, number> = {
-  haiku: 0.10 / 1_000_000,
+  haiku: 0.08 / 1_000_000,
   sonnet: 0.30 / 1_000_000,
   opus: OPUS_CACHE_READ_PER_TOK,
 };

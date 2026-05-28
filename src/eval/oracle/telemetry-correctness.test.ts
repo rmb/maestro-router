@@ -80,24 +80,24 @@ const emptySummary: StatsSummary = {
 
 describe("checkCostReconciliation", () => {
   test("passes when event sum matches stats exactly", () => {
-    // haiku input rate $1/Mtok; 1M tokens = $1.00, 500k tokens = $0.50
+    // haiku input rate $0.80/Mtok; 1M tokens = $0.80, 500k tokens = $0.40
     const events: TelemetryEvent[] = [
       makeDecision({ inputTokens: 1_000_000, outputTokens: 0 }),
       makeDecision({ inputTokens: 500_000, outputTokens: 0 }),
     ];
-    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 1.5 };
+    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 1.2 };
     const result = checkCostReconciliation(events, summary);
     expect(result.pass).toBe(true);
-    expect(result.value).toBe("$1.500");
+    expect(result.value).toBe("$1.200");
     expect(result.detail).toBeUndefined();
   });
 
   test("passes when event sum is within 1% of stats", () => {
-    // haiku 1M input = $1.00; threshold = $0.01; stats = $1.005 → diff = $0.005 < $0.01
+    // haiku 1M input = $0.80; threshold = $0.008; stats = $0.804 → diff = $0.004 < $0.008
     const events: TelemetryEvent[] = [
       makeDecision({ inputTokens: 1_000_000, outputTokens: 0 }),
     ];
-    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 1.005 };
+    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 0.804 };
     const result = checkCostReconciliation(events, summary);
     expect(result.pass).toBe(true);
   });
@@ -121,12 +121,12 @@ describe("checkCostReconciliation", () => {
   });
 
   test("non-decision events are not counted", () => {
-    // haiku 1M input = $1.00; outcome event should be ignored in cost sum
+    // haiku 1M input = $0.80; outcome event should be ignored in cost sum
     const events: TelemetryEvent[] = [
       makeDecision({ inputTokens: 1_000_000, outputTokens: 0 }),
       makeOutcome(Date.now(), "sid-1"),
     ];
-    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 1.0 };
+    const summary: StatsSummary = { ...emptySummary, totalCostUsd: 0.80 };
     const result = checkCostReconciliation(events, summary);
     expect(result.pass).toBe(true);
   });
@@ -421,8 +421,8 @@ describe("runTelemetryCorrectness", () => {
       },
     ];
     const summary: StatsSummary = {
-      // event1: haiku 100 in + 50 out + 300 cacheRead = $0.00038; event2: $0.00035; sum = $0.00073
-      totalCostUsd: 0.00073,
+      // event1: haiku 100 in + 50 out + 300 cacheRead = $0.000304; event2: $0.000280; sum = $0.000584
+      totalCostUsd: 0.000584,
       fallbackRate: 0,
       cacheHitRate: 0.5,
     };

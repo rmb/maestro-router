@@ -33,8 +33,8 @@ type Call = {
 type MockSpawn = TournamentSpawn & { calls: Call[] };
 
 function envelope(result: unknown, costUsd = 0.05): string {
-  // haiku output rate = $5/Mtok; use pure output tokens to produce token-derived cost.
-  const outputTokens = Math.round(costUsd / (5 / 1_000_000));
+  // haiku output rate = $4/Mtok; use pure output tokens to produce token-derived cost.
+  const outputTokens = Math.round(costUsd / (4 / 1_000_000));
   return JSON.stringify({
     type: "result",
     subtype: "success",
@@ -58,7 +58,7 @@ function judgeEnvelopeStructuredOutput(
   reason = "ok",
   costUsd = 0.02,
 ): string {
-  const outputTokens = Math.round(costUsd / (5 / 1_000_000));
+  const outputTokens = Math.round(costUsd / (4 / 1_000_000));
   return JSON.stringify({
     type: "result",
     subtype: "success",

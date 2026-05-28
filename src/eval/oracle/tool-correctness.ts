@@ -1,6 +1,15 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import type { TelemetryEvent } from "../../core/types.js";
+
+/** Normalize a model string to its family for cross-version matching. */
+function extractModelFamily(model: string): "haiku" | "sonnet" | "opus" | null {
+  const lower = model.toLowerCase();
+  if (lower.includes("haiku")) return "haiku";
+  if (lower.includes("sonnet")) return "sonnet";
+  if (lower.includes("opus")) return "opus";
+  return null;
+}
 import type { SessionRecord } from "../../wrapper/session.js";
 import { computeFingerprint } from "../../wrapper/prewarm.js";
 import { CONTINUATION_HINT, CONTINUATION_PATTERNS } from "../../wrapper/continuation.js";
@@ -150,7 +159,9 @@ export function checkFlagCoverage(events: TelemetryEvent[]): CheckResult {
   for (const event of decisionEvents) {
     const specModel = event.decision.spec.model;
     const modelUsed = event.cost!.modelUsed;
-    if (modelUsed.includes(specModel)) matched++;
+    const specFamily = extractModelFamily(specModel);
+    const usedFamily = extractModelFamily(modelUsed);
+    if (modelUsed.includes(specModel) || (specFamily !== null && specFamily === usedFamily)) matched++;
   }
 
   const total = decisionEvents.length;

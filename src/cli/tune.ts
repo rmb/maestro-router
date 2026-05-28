@@ -195,13 +195,21 @@ async function runAutoTune(): Promise<void> {
   try {
     const cli = await loadCliConfig();
     const url = cli.userConfig.communityHeuristicsUrl ?? COMMUNITY_HEURISTICS_URL;
-    if (!url) return;
+    if (!url) {
+      process.stderr.write("[maestro auto-tune] community heuristics URL is empty — skipping\n");
+      return;
+    }
 
+    process.stderr.write(`[maestro auto-tune] fetching community heuristics\n`);
     const res = await fetch(url);
-    if (!res.ok) return;
+    if (!res.ok) {
+      process.stderr.write(`[maestro auto-tune] fetch failed: ${res.status} ${res.statusText}\n`);
+      return;
+    }
 
     const community = (await res.json()) as HeuristicRule[];
     if (!Array.isArray(community) || community.length === 0) {
+      process.stderr.write("[maestro auto-tune] no community heuristics available\n");
       await patchState({ autoTuneLastRunAt: new Date().toISOString() });
       return;
     }
@@ -211,12 +219,15 @@ async function runAutoTune(): Promise<void> {
     const newRules = community.filter((r) => !existingPatterns.has(r.pattern));
 
     if (newRules.length > 0) {
+      process.stderr.write(`[maestro auto-tune] adding ${newRules.length} new heuristic(s)\n`);
       await writeUserHeuristics([...existing, ...newRules]);
+    } else {
+      process.stderr.write("[maestro auto-tune] already up to date\n");
     }
 
     await patchState({ autoTuneLastRunAt: new Date().toISOString() });
-  } catch {
-    // background process — never surface errors to the user
+  } catch (err) {
+    process.stderr.write(`[maestro auto-tune] error: ${String(err)}\n`);
   }
 }
 

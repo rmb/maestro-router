@@ -101,6 +101,14 @@ export function createPostHogQueryClient(opts: PostHogQueryOptions): PostHogQuer
       });
 
       if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error(
+            `PostHog query failed: 403 Forbidden\n` +
+              `  • posthogQueryKey must be a Personal API Key (starts with phx_), not a Project API Key (phc_)\n` +
+              `  • Personal API Key needs "Query → Read" scope (PostHog → Settings → Personal API Keys)\n` +
+              `  • posthogProjectId must be the numeric project ID (PostHog → Project Settings → Project ID)`,
+          );
+        }
         throw new Error(`PostHog query failed: ${res.status} ${res.statusText}`);
       }
 
@@ -137,6 +145,14 @@ export function createPostHogQueryClient(opts: PostHogQueryOptions): PostHogQuer
       });
 
       if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error(
+            `PostHog query failed: 403 Forbidden\n` +
+              `  • posthogQueryKey must be a Personal API Key (starts with phx_), not a Project API Key (phc_)\n` +
+              `  • Personal API Key needs "Query → Read" scope (PostHog → Settings → Personal API Keys)\n` +
+              `  • posthogProjectId must be the numeric project ID (PostHog → Project Settings → Project ID)`,
+          );
+        }
         throw new Error(`PostHog query failed: ${res.status} ${res.statusText}`);
       }
 

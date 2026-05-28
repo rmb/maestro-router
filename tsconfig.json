@@ -22,9 +22,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "verbatimModuleSyntax": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]

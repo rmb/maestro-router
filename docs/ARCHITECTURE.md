@@ -201,6 +201,35 @@ Model swaps within a fingerprint group are safe — verified by spike: Haiku →
 
 **E1.escalate.** When a `max_tokens` stop reason is recorded on a `standard` turn, the session is flagged as escalated. On the next turn, `effort: low` is promoted to `effort: medium` for that session, capping the regression at one turn's extra cost. The classifier cache entry for that prompt is also invalidated so the pipeline re-classifies upward.
 
+## SQLite telemetry backend
+
+On Node 22.5+, `core/db.ts` maintains a SQLite database (`~/.maestro/maestro.db`) alongside `decisions.jsonl`. The database is built on Node's built-in `node:sqlite` module — zero new runtime dependencies. `openDb()` returns a singleton; on first open it runs a one-time JSONL→SQLite migration and creates the schema:
+
+```sql
+CREATE TABLE events (
+  id       INTEGER PRIMARY KEY,
+  ts       TEXT NOT NULL,
+  type     TEXT NOT NULL,
+  session_id TEXT,
+  class    TEXT,
+  classifier TEXT,
+  raw_json TEXT NOT NULL   -- full event preserved for round-trip fidelity
+);
+-- indexes on: ts, type, session_id, class, classifier
+```
+
+`telemetry.ts` mirrors every `log()` call into SQLite when `dbPath` is configured. `readAll()` prefers SQLite when the database is populated. `stats.ts` uses `readEventsFromDbSince()` for date-filtered scans instead of reading the full JSONL. `export-prompts.ts` uses `collectRowsFromDb()` for SQL-backed queries. On Node < 22.5, all paths fall back to JSONL-only — no configuration required.
+
+## Auto-compact in sdk-proxy mode
+
+`wrapper/sdk-proxy.ts` implements proactive session compaction. After each turn, it records `lastCacheReadTokens` into the session store. Before forwarding the next user message, it checks whether `cache_read_input_tokens > userConfig.autoCompactThresholdTokens` (default 300k). When the threshold is crossed and `userConfig.autoCompact === true`, Maestro injects `/compact` into the conversation stream before the user message, then clears the flag to avoid double-compaction. If the user manually sends `/compact`, the flag is also cleared.
+
+The passive 500k-token warning is suppressed when `autoCompact` is enabled. A `compact` telemetry event is emitted on each injection so `maestro stats` can report a "compact hints" counter alongside the standard cost summary.
+
+## Proactive compaction advisory (run-cmd mode)
+
+`core/compaction.ts` exposes `classifyCompactionCandidate()`, called from `run-cmd.ts` before each spawn. It fires when the prompt exceeds 3k characters AND the current session has accumulated > 80k cached tokens. When both conditions hold it merges a `compaction.candidate` hint diagnostic into the `Decision` record written to `decisions.jsonl`. This gives `maestro stats` a signal for sessions that are compaction candidates even in non-proxy mode.
+
 ## Community tuning loop
 
 1. Users with `posthogApiKey` set emit `maestro_override` events when they use `@deep`/`@fast` to correct a routing decision.
@@ -227,7 +256,14 @@ src/
     types.ts            Domain types: Class, Profile, Decision, SessionContext, …
     cache.ts            LRU + TTL + sha256 keying (pipeline decision cache)
     classifier-cache.ts In-process LRU prompt→class cache; K1 self-invalidation on max_tokens
-    telemetry.ts        JSONL writer
+    config-schema.ts    Zod schema for UserConfig; parseUserConfig with human-readable errors
+    telemetry.ts        JSONL writer + SQLite mirror (Node 22.5+); readAll prefers SQLite when populated
+    db.ts               MaestroDb interface; openDb() singleton; JSONL→SQLite one-time migration;
+                        schema: events table indexed on ts/type/session_id/class/classifier
+    langfuse.ts         Optional Langfuse peer; streams decision/outcome/correction events as traces;
+                        dynamic import — silently no-ops when peer absent
+    compaction.ts       Proactive compaction advisory; classifyCompactionCandidate() fires when
+                        prompt >3k chars into a session with >80k cached tokens
     posthog.ts          Fire-and-forget capture + HogQL query client
     pipeline.ts         Short-circuit + weighted vote; Y.guarantee; K2 markov escape; E3 escalation
     profile.ts          Built-in profiles + layered loader (E1: standard effort=low, X: output caps)
@@ -236,31 +272,40 @@ src/
   classifiers/      Pipeline stages. Depend only on core/.
     override.ts     @fast / @deep / @think
     turn-type.ts    user_prompt / tool_result / error_recovery / continuation
-    heuristic.ts    Built-in regex + user rules
-    embedding.ts    ONNX cosine similarity (optional peer)
+    heuristic.ts    Built-in regex + user rules (includes "why is this X" heuristic)
+    embedding.ts    ONNX cosine similarity (optional peer; embeddingModel config overrides model)
     llm.ts          Haiku --json-schema fallback
 
   wrapper/          Subprocess concerns.
     preflight.ts        Verify Claude CLI version + required flags
-    session.ts          Fingerprint-keyed session store (Track Z); getByFingerprint; updateStopReason
+    session.ts          Fingerprint-keyed session store (Track Z); getByFingerprint; updateStopReason;
+                        persists lastCacheReadTokens per session for auto-compact + stats
     prewarm.ts          Background prewarm of adjacent fingerprint tiers (Z.bootstrap)
     continuation.ts     Two-signal continuation detection (M1); CONTINUATION_HINT injection
     spawn.ts            buildClaudeArgs (pure) + spawnClaude; X.soft class-specific brevity hints
     stream.ts           Live pipe + capture + signal forwarding
-    sdk-proxy.ts        Per-turn routing proxy (VSCode panel + maestro shell)
+    sdk-proxy.ts        Per-turn routing proxy (VSCode panel + maestro shell);
+                        auto-compact: injects /compact when cache_read > autoCompactThresholdTokens
     sdk-host.ts         Human SDK host for maestro shell (stream-json REPL)
     passthrough.ts      Slash-command bypass
     output.ts           Parse --output-format json → CostBreakdown
 
   cli/              Commander shell.
-    run-cmd.ts      maestro run — K1 cache; M1 continuation; Track Z fingerprint; E1.escalate post-turn
-    shell-cmd.ts    maestro shell — interactive REPL entry point; seeds Markov from prior session
-    tune.ts         Telemetry analysis, community fetch, auto-tune
-    stats.ts        Cost vs Opus-everywhere baseline; session boot dominance warning
-    health.ts       Baseline snapshot comparison; regression detection >10%
-    oracle.ts       maestro oracle — wires all four oracle dimensions; --confirm-cost for quality
-    bench.ts        Eval + tournament
-    replay.ts       JSONL replay against current pipeline
+    run-cmd.ts          maestro run — K1 cache; M1 continuation; Track Z fingerprint; E1.escalate post-turn;
+                        compaction advisory (classifyCompactionCandidate merges hint into Decision)
+    shell-cmd.ts        maestro shell — interactive REPL entry point; seeds Markov from prior session
+    export-prompts.ts   maestro export-prompts — relabel-ready JSONL; --fallbacks reads fallbacks.jsonl;
+                        --setfit outputs {text, label} for SetFit training; SQL-backed on Node 22.5+
+    export-corrections.ts maestro export-corrections — override correction signal for LLM tuning;
+                        output compatible with scripts/dspy-optimize.py
+    telemetry-cmd.ts    maestro telemetry {status,show,feedback,langfuse,off,forget}
+    tune.ts             Telemetry analysis, community fetch, auto-tune
+    stats.ts            Cost vs Opus-everywhere baseline; session boot dominance warning;
+                        compact hints counter; SQL-filtered scan when db available
+    health.ts           Baseline snapshot comparison; regression detection >10%
+    oracle.ts           maestro oracle — wires all four oracle dimensions; --confirm-cost for quality
+    bench.ts            Eval (defaults to bundled evals/labeled.jsonl) + tournament
+    replay.ts           JSONL replay against current pipeline
 
   eval/oracle/      Oracle evaluation layer — pure computation, no subprocess spawning.
     reader.ts               loadWindow, groupBySession, pairDecisionsWithOutcomes
@@ -283,6 +328,8 @@ Loaded in priority order (later layers override earlier):
 
 Fields that affect telemetry paths, billing caps, and hot-path latency are global-only. A committed `.maestro/config.json` in a shared repo cannot silently affect teammates on those dimensions.
 
+`core/config-schema.ts` validates user config through a Zod schema (`parseUserConfig`) on every load. Unknown keys are silently stripped (`.strip()`). Type errors and invalid enum values throw `ConfigValidationError` with a human-readable message listing every bad field. A compile-time drift guard (`SchemaCoversUserConfig`) causes a TypeScript error if a field is added to `UserConfig` but omitted from the schema.
+
 ## Pipeline hardening (Sprint 0/1)
 
 **Y.guarantee.** When no classifier fires above threshold and the weighted vote produces no clear winner, the pipeline previously fell back to `class: "standard", classifier: "default", confidence: 0`. This was indistinguishable from a genuine standard classification in telemetry, hiding the true fallback rate (measured at 67.9% in production). Y.guarantee renames the fallback to `classifier: "forced.standard"`, sets `confidence: 0.1`, and attaches a `fallback.forced_standard` diagnostic. `maestro stats` now tracks this separately, giving a debuggable signal for classifier coverage gaps.
@@ -296,6 +343,10 @@ Fields that affect telemetry paths, billing caps, and hot-path latency are globa
 **K1 — Classifier result cache.** An in-process LRU cache (`src/core/classifier-cache.ts`) stores `sha256(prompt) → Classification` with a 24-hour TTL and 1000-entry limit. Cache hits skip the full pipeline on repeated or near-identical prompts. When a turn completes with `stopReason: "max_tokens"` on a `standard` class, the cache entry for that prompt is invalidated so the next identical prompt re-classifies upward.
 
 **M1 — Two-signal continuation.** Prior implementation routed any short prompt matching `/^(continue|keep going|…)/` to simple class. This conflated genuine brevity (a user continuing work) with prompt padding. M1 requires two simultaneous signals: the linguistic pattern match AND `priorStopReason === "max_tokens"`. Single-signal matches now proceed to the normal pipeline. When both signals fire, `wrapper/continuation.ts` injects `CONTINUATION_HINT` ("Resume from where you stopped. No recap. Continue directly.") as the `appendSystemPrompt`, overriding the standard brevity hint.
+
+## Langfuse integration
+
+`core/langfuse.ts` streams routing events to Langfuse as traces. The peer (`langfuse` npm package) is dynamically imported on first use — when it's absent the module silently no-ops so the hot path is never broken. Three event types are streamed: `decision` (classifier result + model profile selected), `outcome` (token counts + stop reason after the spawn), and `correction` (when the user applies an `@fast`/`@deep` override to fix a misroute). Configured via `maestro telemetry langfuse --public-key … --secret-key … [--host …]`, which writes keys to `~/.maestro/config.json`.
 
 ## Oracle evaluation
 

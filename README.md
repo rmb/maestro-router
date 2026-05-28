@@ -180,8 +180,25 @@ maestro tune --posthog                    # mine cross-user patterns from PostHo
 
 # Evaluation
 maestro bench                             # accuracy on labeled eval set
+maestro bench --eval [path]               # run eval set (defaults to bundled evals/labeled.jsonl)
 maestro bench --propose overrides.json    # validate a profile change before applying
 maestro bench --tournament --confirm-cost # empirically find safe model downgrades (see below)
+
+# Export and fine-tuning
+maestro export-prompts                    # export classified prompts as relabel-ready JSONL
+maestro export-prompts --fallbacks        # export forced-standard corpus from ~/.maestro/fallbacks.jsonl
+maestro export-prompts --setfit           # export SetFit training format {text, label}
+maestro export-corrections                # export override corrections as classifier training signal
+                                          # (pipe output to scripts/dspy-optimize.py for LLM tuning)
+
+# Telemetry
+maestro telemetry status                  # event count, last-write timestamp, file path
+maestro telemetry show [--limit <n>]      # print recent events as JSONL
+maestro telemetry feedback <sessionId> --rating <1-5>   # record quality rating
+maestro telemetry langfuse --public-key <key> --secret-key <key>   # configure Langfuse
+maestro telemetry langfuse --remove       # remove Langfuse keys from config
+maestro telemetry off                     # disable remote (PostHog) event reporting
+maestro telemetry forget --confirm        # delete all local telemetry events
 
 # Setup
 maestro install-vscode                    # wire claudeProcessWrapper in VSCode
@@ -242,11 +259,18 @@ Example `~/.maestro/config.json`:
   "profile": "balanced",
   "excludeDynamicSections": true,
   "useEmbeddingClassifier": true,
+  "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+  "autoCompact": true,
+  "autoCompactThresholdTokens": 300000,
   "feedbackPrompts": "occasional"
 }
 ```
 
 Built-in profiles: `balanced` (default), `cheap` (Haiku-biased), `quality` (Opus-biased).
+
+**`autoCompact`** — when `true`, Maestro injects `/compact` into the VSCode panel conversation before the next user message whenever `cache_read_input_tokens` exceeds `autoCompactThresholdTokens` (default 300k). This keeps context windows manageable without manual intervention. Fires only once per threshold crossing; resets if you manually send `/compact`. The `maestro stats` output includes a "compact hints" counter showing how often the advisory fired.
+
+**`embeddingModel`** — override the ONNX model used by the embedding classifier. Defaults to `Xenova/all-MiniLM-L6-v2` when `@xenova/transformers` is installed.
 
 ### Per-project config
 
@@ -282,6 +306,31 @@ To use both, install RTK first (see its README), then point `claudeProcessWrappe
 
 ---
 
+## Langfuse integration
+
+Maestro can stream every routing decision, outcome, and correction event to Langfuse as traces — useful for debugging classifier behavior across a team or auditing cost attribution.
+
+```bash
+maestro telemetry langfuse \
+  --public-key pk-lf-… \
+  --secret-key sk-lf-… \
+  [--host https://your-langfuse.example.com]   # omit to use cloud.langfuse.com
+```
+
+This writes the three keys to `~/.maestro/config.json`. From that point, every `maestro run` / `maestro shell` / VSCode panel turn emits traces. The Langfuse peer (`langfuse` npm package) is dynamically imported — if the package isn't installed, the integration silently no-ops. The `scripts/install.sh` installer prompts interactively.
+
+To remove: `maestro telemetry langfuse --remove`.
+
+---
+
+## SQLite telemetry backend
+
+On Node 22.5+, Maestro automatically maintains a SQLite database (`~/.maestro/maestro.db`) alongside the existing JSONL append log. The database is built on Node's built-in `node:sqlite` module — no new runtime dependency. On first open, existing JSONL events are migrated in.
+
+The database enables indexed queries (by `ts`, `type`, `session_id`, `class`, `classifier`) so `maestro stats --since 30` and `maestro export-prompts` scan only the relevant rows instead of reading the full JSONL. On Node < 22.5, the backend falls back to JSONL-only — no configuration needed.
+
+---
+
 ## Troubleshooting
 
 **VSCode panel not routing.**
@@ -289,6 +338,8 @@ To use both, install RTK first (see its README), then point `claudeProcessWrappe
 grep claudeProcessWrapper "$HOME/Library/Application Support/Code/User/settings.json"
 ```
 If missing: `maestro install-vscode` then reload the window.
+
+**`~/.maestro/config.json` silently ignored.** Maestro validates config with Zod on load. If a field has the wrong type or an invalid enum value (e.g. `"aggressiveness": "medium"` instead of `"conservative" | "balanced" | "aggressive"`), it throws a `ConfigValidationError` with a human-readable message listing every bad field. Run `maestro telemetry status` to force a config load and surface any errors.
 
 **`pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS`.** Pass `--ignore-scripts`. The install script handles this automatically.
 

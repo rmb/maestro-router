@@ -2,42 +2,48 @@
 
 **Automatic per-prompt model routing for Claude Code — cut AI costs 60–80% without changing how you work.**
 
+[![npm](https://img.shields.io/npm/v/maestro-router)](https://www.npmjs.com/package/maestro-router)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
 [![Node ≥ 20](https://img.shields.io/badge/Node-%E2%89%A520-green)](https://nodejs.org/)
+[![CI](https://github.com/rmb/maestro-router/actions/workflows/community-tune.yml/badge.svg)](https://github.com/rmb/maestro-router/actions)
 
 ---
 
-## What this is and why you need it
+Claude Code sends every prompt to the same model. `git status`, a one-line rename, and "design a distributed cache" all hit Opus at the same cost — even though Haiku handles the first two just as well at 50× less.
 
-Claude Code uses the same model for every prompt. `git status`, a one-line rename, and "design a distributed cache" all hit Opus at the same cost — even though Haiku handles the first two just as well and costs 50× less.
+**Maestro fixes that.** It sits between you and Claude Code, classifies each prompt by complexity, and routes it to the cheapest model that will produce the right answer. Your VSCode panel, CLI, and shell work identically — Maestro is invisible until you run `maestro stats`.
 
-Maestro sits between you and Claude Code and fixes that. Every prompt is classified by complexity and routed to the cheapest model that will produce the right answer:
+```
+$ maestro stats
+Total prompts routed:  847
+Estimated savings:     $23.41  (73% vs Opus-everywhere)
+Fallback rate:         3.2%    ✓ healthy
+```
 
-| Prompt | Class | Model | Cost |
+> **No API key needed.** Works on Claude Pro/Team subscriptions via the standard CLI OAuth flow.
+
+### What gets routed where
+
+| Prompt | Class | Model | Typical cost |
 |---|---|---|---|
 | `git status` | trivial | Haiku | ~$0.0003 |
 | Rename a variable | simple | Haiku | ~$0.001 |
 | Add a feature | standard | Sonnet | ~$0.01 |
-| Debug a production incident | hard | Opus | ~$0.05 |
+| Debug a production incident | hard | Sonnet (high effort) | ~$0.05 |
 | Architect a system | max | Opus max | ~$0.10 |
 
-Your VSCode panel, `maestro run`, and `maestro shell` work the same. Maestro routes every turn before Claude sees it.
-
-**No API key needed.** Works on Claude Pro/Team subscriptions via the standard CLI OAuth flow.
-
----
-
-## Install
+### Quick start
 
 ```bash
+git clone https://github.com/rmb/maestro-router.git
+cd maestro-router
 bash scripts/install.sh
 ```
 
-Builds, installs globally, and wires `claudeCode.claudeProcessWrapper` in VSCode. Then reload VSCode: `Cmd+Shift+P` → "Developer: Reload Window".
+Reload VSCode (`Cmd+Shift+P` → "Developer: Reload Window"). Routing is live immediately.
 
-Verify it's working — type any prompt in the Claude Code panel, then:
-
+To verify:
 ```bash
 tail -1 ~/.maestro/decisions.jsonl | python3 -c "import json,sys; e=json.loads(sys.stdin.read()); print(e['decision']['class'], e.get('prompt','')[:60])"
 ```
@@ -46,13 +52,31 @@ To remove: `bash scripts/install.sh --uninstall`.
 
 **Optional: embedding classifier (~400 MB, recommended for heavy users)**
 
-Maestro ships a semantic embedding stage that catches prompts heuristics miss without burning an LLM call. It's an optional peer to avoid forcing 400 MB on every install. If you use Maestro heavily (50+ prompts/day), install it:
+Maestro ships a semantic embedding stage that catches prompts heuristics miss without burning an LLM call. It's an optional peer to avoid forcing 400 MB on every install. If you use Maestro heavily (50+ prompts/day):
 
 ```bash
 npm install -g @huggingface/transformers
 ```
 
-Without it, the pipeline falls through to the LLM classifier for uncertain prompts (~$0.001/call instead of local inference). You'll see `info.fallback.embedding_unavailable` in the routing log. With it, that warning disappears and the embedding stage runs instead.
+Without it, uncertain prompts fall through to the LLM classifier (~$0.001/call). With it, embedding runs locally at zero per-call cost.
+
+---
+
+## Contents
+
+- [How it works — step by step](#how-it-works--step-by-step)
+- [How it works — technical pipeline](#how-it-works--technical-pipeline)
+- [Commands](#commands)
+- [Tournament — empirically validate downgrades](#tournament--empirically-validate-downgrades)
+- [Override hints](#override-hints)
+- [Configuration](#configuration)
+- [Community tuning](#community-tuning)
+- [Pairing with RTK](#pairing-with-rtk)
+- [Langfuse integration](#langfuse-integration)
+- [SQLite telemetry backend](#sqlite-telemetry-backend)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Contributing](#contributing)
 
 ---
 
@@ -424,6 +448,10 @@ They answer different questions:
 The rough workflow is: `stats` surfaces the gap → `tune` proposes the fix → `bench` validates it → `tune --apply` ships it.
 
 ---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: fork, branch from `main`, run `pnpm typecheck && pnpm lint && pnpm test`, then open a PR. Classifier changes must pass `pnpm bench` with no >2% regression.
 
 ## More reading
 

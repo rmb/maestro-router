@@ -1,13 +1,34 @@
 {
   "name": "maestro-router",
   "version": "0.2.5",
-  "description": "A CLI wrapper that classifies each Claude Code prompt and routes it to the optimal model + thinking budget. Works on subscription, no API key required.",
+  "description": "Automatic per-prompt model routing for Claude Code — cut AI costs 60–80% without changing how you work. Routes trivial prompts to Haiku and complex ones to Opus. No API key required.",
   "type": "module",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.1.3",
   "sideEffects": false,
   "engines": {
     "node": ">=20"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "llm",
+    "ai",
+    "cost-optimization",
+    "model-routing",
+    "haiku",
+    "sonnet",
+    "opus",
+    "cli",
+    "developer-tools",
+    "token-optimization",
+    "ai-cost",
+    "claude-wrapper"
+  ],
+  "homepage": "https://github.com/rmb/maestro-router#readme",
+  "bugs": {
+    "url": "https://github.com/rmb/maestro-router/issues"
   },
   "repository": {
     "type": "git",

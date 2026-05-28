@@ -139,6 +139,13 @@ export type UserConfig = {
    */
   useEmbeddingClassifier?: boolean;
   /**
+   * Custom sentence-transformer model path or HuggingFace model ID for the
+   * embedding classifier. Defaults to Xenova/all-MiniLM-L6-v2. Set to a
+   * local path (e.g. `./maestro-setfit-model`) after fine-tuning with
+   * `scripts/setfit-train.py` to use your personal routing model.
+   */
+  embeddingModel?: string;
+  /**
    * Global default append-system-prompt text (X.soft). Overridden per-class
    * by CLASS_BREVITY in spawn.ts. When empty string, no flag is emitted.
    */

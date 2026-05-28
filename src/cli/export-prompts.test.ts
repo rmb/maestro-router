@@ -261,4 +261,60 @@ describe("export-prompts CLI", () => {
     const lines = (await readFile(outputPath, "utf8")).split("\n").filter(Boolean);
     expect(lines).toHaveLength(1);
   });
+
+  test("--setfit emits {text, label} rows", async () => {
+    await writeJsonl(telemetryPath, [
+      decisionLine({ ts: "2026-05-22T00:00:00Z", decisionClass: "trivial", prompt: "rename foo" }),
+      decisionLine({
+        ts: "2026-05-22T00:00:01Z",
+        decisionClass: "hard",
+        prompt: "design the cache layer",
+      }),
+    ]);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const program = makeProgram();
+    await program.parseAsync(
+      ["--config", configPath, "export-prompts", "--setfit", "--output", outputPath],
+      { from: "user" },
+    );
+    const written = await readFile(outputPath, "utf8");
+    const lines = written.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(2);
+    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(parsed[0]).toEqual({ text: "rename foo", label: "trivial" });
+    expect(parsed[1]).toEqual({ text: "design the cache layer", label: "hard" });
+    // Must NOT contain relabel-ready fields.
+    expect(parsed[0]).not.toHaveProperty("expectedClass");
+    expect(parsed[0]).not.toHaveProperty("decidedClass");
+  });
+
+  test("--setfit summary mentions train hint", async () => {
+    await writeJsonl(telemetryPath, [
+      decisionLine({ ts: "2026-05-22T00:00:00Z", decisionClass: "simple", prompt: "format this" }),
+    ]);
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const program = makeProgram();
+    await program.parseAsync(
+      ["--config", configPath, "export-prompts", "--setfit", "--output", outputPath],
+      { from: "user" },
+    );
+    const summary = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(summary).toContain("setfit");
+    expect(summary).toContain("setfit-train.py");
+  });
+
+  test("--setfit with --fallbacks warns and falls back to relabel format", async () => {
+    await writeJsonl(telemetryPath, [
+      decisionLine({ ts: "2026-05-22T00:00:00Z", decisionClass: "trivial", prompt: "x" }),
+    ]);
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const program = makeProgram();
+    // --fallbacks with no fallbacks.jsonl → empty output, but warning should appear.
+    await program.parseAsync(
+      ["--config", configPath, "export-prompts", "--setfit", "--fallbacks", "--output", outputPath],
+      { from: "user" },
+    );
+    const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(stderr).toMatch(/incompatible/);
+  });
 });

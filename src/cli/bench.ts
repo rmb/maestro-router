@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { embeddingClassifier } from "../classifiers/embedding.js";
+import { createEmbeddingClassifier } from "../classifiers/embedding.js";
 import { createHeuristicClassifier, heuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
@@ -156,7 +156,14 @@ export function registerBenchCommand(program: Command): void {
         const useLlm = cmdOpts.llm === true && cli.userConfig.useLlmClassifier !== false;
         // K2: markov prior in classifiers array (pipeline only uses it when sessionContext.recentClasses present)
         const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, markovClassifier, heuristic];
-        if (useEmbedding) classifiers.push(embeddingClassifier);
+        if (useEmbedding)
+          classifiers.push(
+            createEmbeddingClassifier(
+              cli.userConfig.embeddingModel !== undefined
+                ? { modelId: cli.userConfig.embeddingModel }
+                : {},
+            ),
+          );
         if (useLlm) classifiers.push(llmClassifier);
         const pipeline = createPipeline({
           classifiers,

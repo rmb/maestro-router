@@ -9,7 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Command } from "commander";
-import { embeddingClassifier } from "../classifiers/embedding.js";
+import { createEmbeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
@@ -63,7 +63,14 @@ export function registerShellCommand(program: Command): void {
         markovClassifier,
         heuristic,
       ];
-      if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
+      if (cli.userConfig.useEmbeddingClassifier !== false)
+        classifiers.push(
+          createEmbeddingClassifier(
+            cli.userConfig.embeddingModel !== undefined
+              ? { modelId: cli.userConfig.embeddingModel }
+              : {},
+          ),
+        );
       if (cli.userConfig.useLlmClassifierInWrapper !== false) classifiers.push(llmClassifier);
       const pipeline = createPipeline({ classifiers, profile });
 

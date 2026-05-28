@@ -83,6 +83,7 @@ export const PROJECT_CONFIG_ALLOWED_FIELDS: ReadonlySet<keyof UserConfig> = new 
   "profile",
   "excludeDynamicSections",
   "useEmbeddingClassifier",
+  "embeddingModel",
 ]);
 
 /**

@@ -19,6 +19,7 @@ type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 type CmdOptions = {
   telemetry?: string;
   fallbacks?: boolean;
+  setfit?: boolean;
   output?: string;
   limit?: string;
   keepDuplicates?: boolean;
@@ -33,6 +34,12 @@ type ExportRow = {
   ts: string;
 };
 
+/** Row written by --setfit: minimal {text, label} for SetFit training. */
+type SetFitRow = {
+  text: string;
+  label: Class;
+};
+
 const HELP_DESCRIPTION =
   "Export prompts from telemetry to a relabel-ready JSONL " +
   "(same shape as evals/labeled.jsonl). expectedClass defaults to the " +
@@ -45,12 +52,22 @@ export function registerExportPromptsCommand(program: Command): void {
     .description(HELP_DESCRIPTION)
     .option("--telemetry <path>", "telemetry JSONL path (default: ~/.maestro/decisions.jsonl)")
     .option("--fallbacks", "read from ~/.maestro/fallbacks.jsonl (forced-standard corpus) instead of decisions.jsonl")
+    .option("--setfit", "output SetFit training format {text, label} instead of relabel-ready format")
     .option("--output <path>", "write JSONL to this file (default: stdout)")
     .option("--limit <n>", "cap number of prompts emitted")
     .option("--keep-duplicates", "do not deduplicate by prompt text", false)
     .action(async (cmdOpts: CmdOptions) => {
       const parent = program.opts<ParentOptions>();
       const cli = await loadCliConfig(parent.config);
+
+      // --setfit and --fallbacks are incompatible: fallbacks label everything "standard"
+      // which is not meaningful for SetFit fine-tuning.
+      if (cmdOpts.setfit && cmdOpts.fallbacks) {
+        process.stderr.write(
+          "maestro export-prompts: --setfit and --fallbacks are incompatible; --fallbacks takes precedence.\n",
+        );
+        cmdOpts.setfit = false;
+      }
 
       // --fallbacks and --telemetry are mutually exclusive; --fallbacks wins.
       if (cmdOpts.fallbacks && cmdOpts.telemetry) {
@@ -102,6 +119,34 @@ export function registerExportPromptsCommand(program: Command): void {
         db !== null && db.count() > 0
           ? collectRowsFromDb(db, opts)
           : await collectRows(path, opts);
+
+      if (cmdOpts.setfit) {
+        const setfitRows: SetFitRow[] = rows.map((r) => ({
+          text: r.prompt,
+          label: r.expectedClass,
+        }));
+        const lines = setfitRows.map((r) => JSON.stringify(r)).join("\n");
+        const payload = lines.length > 0 ? lines + "\n" : "";
+
+        if (cmdOpts.output) {
+          await writeFile(cmdOpts.output, payload, "utf8");
+        } else {
+          process.stdout.write(payload);
+        }
+
+        if (!parent.quiet) {
+          const summary = renderSetFitSummary({
+            wroteCount: setfitRows.length,
+            target: cmdOpts.output ?? "stdout",
+            totalEvents,
+            decisionEvents,
+            skipped,
+            rows,
+          });
+          process.stderr.write(summary + "\n");
+        }
+        return;
+      }
 
       const lines = rows.map((r) => JSON.stringify(r)).join("\n");
       const payload = lines.length > 0 ? lines + "\n" : "";
@@ -387,6 +432,33 @@ type FallbackSummaryInput = {
   totalEntries: number;
   skipped: number;
 };
+
+function renderSetFitSummary(s: SummaryInput): string {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(header("export-prompts --setfit"));
+  lines.push(
+    `  ${bold("wrote")}           ${cyan(s.wroteCount)} ${gray("training rows to")} ${s.target}`,
+  );
+  lines.push(
+    `  ${bold("scanned")}         ${cyan(s.totalEvents)} ${gray("events")} ${dim(
+      `(${s.decisionEvents} decisions with prompt, ${s.skipped} malformed lines)`,
+    )}`,
+  );
+  const perClass = countPerClass(s.rows);
+  const nonZero = (ALL_CLASSES as ReadonlyArray<Class>).filter((c) => perClass[c] > 0);
+  if (nonZero.length > 0) {
+    const parts = nonZero.map((c) => `${perClass[c]} ${c}`);
+    lines.push(`  ${bold("by class")}        ${cyan(parts.join(", "))}`);
+  }
+  lines.push("");
+  lines.push(
+    dim(
+      "  Train with: python scripts/setfit-train.py --input <file>",
+    ),
+  );
+  return lines.join("\n");
+}
 
 function renderFallbackSummary(s: FallbackSummaryInput): string {
   const lines: string[] = [];

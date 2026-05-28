@@ -24,7 +24,7 @@
 
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { embeddingClassifier } from "../classifiers/embedding.js";
+import { createEmbeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
 import { llmClassifier } from "../classifiers/llm.js";
 import { markovClassifier } from "../classifiers/markov.js";
@@ -238,7 +238,14 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
   // K2: markov prior goes first in the classifiers array, but pipeline evaluates it
   // only when sessionContext.recentClasses is present. Early position is declarative.
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolResultContentClassifier, toolOverrideClassifier, markovClassifier, heuristic];
-  if (cli.userConfig.useEmbeddingClassifier !== false) classifiers.push(embeddingClassifier);
+  if (cli.userConfig.useEmbeddingClassifier !== false)
+    classifiers.push(
+      createEmbeddingClassifier(
+        cli.userConfig.embeddingModel !== undefined
+          ? { modelId: cli.userConfig.embeddingModel }
+          : {},
+      ),
+    );
   // LLM stage is on by default. Cold-cache penalty (~$0.04, 13-20s) only hits
   // the first turn after a VSCode restart; subsequent turns hit cache_read and
   // resolve in <1s. Opt out with useLlmClassifierInWrapper: false if latency

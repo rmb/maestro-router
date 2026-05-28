@@ -33,7 +33,7 @@ describe("computeSuggestions with override events (PostHog-shaped input)", () =>
     expect(patterns.some((p) => p.includes("rareword"))).toBe(false);
   });
 
-  test("ignores decision events — only override events produce patterns", () => {
+  test("ignores non-fallback decision events — only forced.standard decisions feed mining", () => {
     const events: TelemetryEvent[] = Array.from({ length: 10 }, () => ({
       type: "decision" as const,
       ts: new Date().toISOString(),
@@ -154,5 +154,94 @@ describe("computeSuggestions with correction events (implicit mis-classification
     const result = computeSuggestions([...overrides, ...corrections], { learnOnly: true });
     const patterns = result.learnedHeuristics.map((r) => r.pattern);
     expect(patterns.some((p) => p.includes("zorbiflex"))).toBe(true);
+  });
+});
+
+describe("computeSuggestions with forced.standard decision events (fallback mining)", () => {
+  const makeFallback = (prompt: string): TelemetryEvent => ({
+    type: "decision" as const,
+    ts: new Date().toISOString(),
+    decision: {
+      class: "standard" as const,
+      classifier: "forced.standard",
+      confidence: 0.1,
+      spec: { model: "sonnet" as const, effort: "medium" as const, maxBudgetUsd: 3.0 },
+      latencyMs: 0,
+      diagnostics: [{ severity: "warning" as const, code: "fallback.forced_standard", message: "" }],
+    },
+    prompt,
+  });
+
+  test("mines pattern from 5+ forced.standard decision events", () => {
+    const events: TelemetryEvent[] = Array.from({ length: 6 }, (_, i) =>
+      makeFallback(`prismatic ${i} some context here`),
+    );
+
+    const result = computeSuggestions(events, { learnOnly: true });
+    const patterns = result.learnedHeuristics.map((r) => r.pattern);
+    expect(patterns.some((p) => p.includes("prismatic"))).toBe(true);
+  });
+
+  test("defaults fallback class to 'simple' when no token-affinity signal exists", () => {
+    const events: TelemetryEvent[] = Array.from({ length: 6 }, () =>
+      makeFallback("unmappedfoo unmappedbar"),
+    );
+
+    const result = computeSuggestions(events, { learnOnly: true });
+    const r = result.learnedHeuristics.find((h) => h.pattern.includes("unmappedfoo"));
+    expect(r).toBeDefined();
+    expect(r!.class).toBe("simple");
+  });
+
+  test("resolves fallback class from token-affinity built on successful decisions", () => {
+    // Successful decisions associate "frobnicate" with "hard"
+    const successful: TelemetryEvent[] = Array.from({ length: 8 }, () => ({
+      type: "decision" as const,
+      ts: new Date().toISOString(),
+      decision: {
+        class: "hard" as const,
+        classifier: "heuristic",
+        confidence: 0.8,
+        spec: { model: "sonnet" as const, effort: "high" as const, maxBudgetUsd: 3.0 },
+        latencyMs: 0,
+        diagnostics: [],
+      },
+      prompt: "refactor frobnicate config carefully",
+    }));
+    // Fallback prompts also containing "frobnicate" should be classified as "hard"
+    const fallbacks: TelemetryEvent[] = Array.from({ length: 6 }, () =>
+      makeFallback("frobnicate signinator something"),
+    );
+
+    const result = computeSuggestions([...successful, ...fallbacks], { learnOnly: true });
+    const r = result.learnedHeuristics.find((h) => h.pattern.includes("signinator"));
+    expect(r).toBeDefined();
+    expect(r!.class).toBe("hard");
+  });
+
+  test("low-confidence successful decisions do not contribute to affinity", () => {
+    // Low-confidence (< 0.6) decisions are ignored when building affinity.
+    const lowConf: TelemetryEvent[] = Array.from({ length: 10 }, () => ({
+      type: "decision" as const,
+      ts: new Date().toISOString(),
+      decision: {
+        class: "max" as const,
+        classifier: "heuristic",
+        confidence: 0.3,
+        spec: { model: "opus" as const, effort: "max" as const, maxBudgetUsd: 10.0 },
+        latencyMs: 0,
+        diagnostics: [],
+      },
+      prompt: "shouldnotleak across",
+    }));
+    const fallbacks: TelemetryEvent[] = Array.from({ length: 6 }, () =>
+      makeFallback("shouldnotleak fallbackmarker"),
+    );
+
+    const result = computeSuggestions([...lowConf, ...fallbacks], { learnOnly: true });
+    const r = result.learnedHeuristics.find((h) => h.pattern.includes("fallbackmarker"));
+    expect(r).toBeDefined();
+    // Affinity for "shouldnotleak" should be empty → defaults to "simple", not "max"
+    expect(r!.class).toBe("simple");
   });
 });

@@ -292,7 +292,49 @@ function escapeRegex(s: string): string {
 
 type TrainingSample = { prompt: string; cls: Class; weight: number };
 
+function isFallbackDecision(classifier: string): boolean {
+  return classifier === "forced.standard" || classifier === "default";
+}
+
+function resolveFallbackClass(
+  prompt: string,
+  affinity: ReadonlyMap<string, ReadonlyMap<Class, number>>,
+): Class {
+  const tally = new Map<Class, number>();
+  for (const tok of tokenize(prompt)) {
+    const aff = affinity.get(tok);
+    if (!aff) continue;
+    for (const [c, n] of aff) tally.set(c, (tally.get(c) ?? 0) + n);
+  }
+  let best: Class = "simple";
+  let bestN = 0;
+  for (const [c, n] of tally) {
+    if (n > bestN) {
+      best = c;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 function gatherSamples(events: ReadonlyArray<TelemetryEvent>): TrainingSample[] {
+  // Pass 1: token → class affinity from successful, confidently auto-routed decisions.
+  // Used to infer the intended class for `forced.standard` fallback prompts in pass 2 —
+  // those have no class label by construction (the classifier chain produced no signal).
+  const affinity = new Map<string, Map<Class, number>>();
+  for (const e of events) {
+    if (e.type !== "decision") continue;
+    if (isFallbackDecision(e.decision.classifier)) continue;
+    if (e.decision.confidence < 0.6) continue;
+    const p = e.prompt;
+    if (!p || p.length === 0) continue;
+    for (const token of tokenize(p)) {
+      const inner = affinity.get(token) ?? new Map<Class, number>();
+      inner.set(e.decision.class, (inner.get(e.decision.class) ?? 0) + 1);
+      affinity.set(token, inner);
+    }
+  }
+
   const samples: TrainingSample[] = [];
   for (const e of events) {
     if (e.type === "override" && e.prompt?.length > 0) {
@@ -301,6 +343,19 @@ function gatherSamples(events: ReadonlyArray<TelemetryEvent>): TrainingSample[] 
     } else if (e.type === "correction" && e.prevPrompt?.length > 0) {
       // Implicit correction: prev prompt was mis-classified, weight 1.5 (stronger signal)
       samples.push({ prompt: e.prevPrompt, cls: e.correctedToClass, weight: 1.5 });
+    } else if (
+      e.type === "decision" &&
+      isFallbackDecision(e.decision.classifier) &&
+      e.prompt &&
+      e.prompt.length > 0
+    ) {
+      // Forced fallback: classifier chain produced no signal — the prompt is
+      // unambiguous evidence the heuristic layer needs to grow. Resolve the
+      // intended class via token-affinity from successful decisions; default
+      // to "simple" when no affinity exists (most fallbacks are short ambiguous
+      // user turns). Weight 1.0 — treat fallbacks as strong signal.
+      const cls = resolveFallbackClass(e.prompt, affinity);
+      samples.push({ prompt: e.prompt, cls, weight: 1.0 });
     }
   }
   return samples;

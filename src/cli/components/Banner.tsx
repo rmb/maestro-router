@@ -1,7 +1,5 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
-import React from "react";
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -30,13 +28,13 @@ function formatCwd(cwd: string): string {
 
 type BoxProps = {
   flexDirection?: "row" | "column";
-  children?: React.ReactNode;
+  children?: unknown;
 };
 type TextProps = {
   bold?: boolean;
   dimColor?: boolean;
   color?: string;
-  children?: React.ReactNode;
+  children?: unknown;
 };
 
 // The banner is a static string render, so we produce plain JSX that ink's
@@ -46,8 +44,8 @@ function BannerComponent({ info }: { info?: BannerInfo }) {
   // stand-in prop-shapes so the component body compiles. The actual Ink
   // module is injected via the `createBanner` factory below.
   const { Box, Text } = BannerComponent._components as {
-    Box: React.FC<BoxProps>;
-    Text: React.FC<TextProps>;
+    Box: (props: BoxProps) => JSX.Element | null;
+    Text: (props: TextProps) => JSX.Element | null;
   };
 
   const W = 44;
@@ -130,7 +128,10 @@ function BannerComponent({ info }: { info?: BannerInfo }) {
 
 // Slot for Ink primitives — injected at render time so the module is
 // importable without ink installed.
-BannerComponent._components = {} as { Box: React.FC<BoxProps>; Text: React.FC<TextProps> };
+BannerComponent._components = {} as {
+  Box: (props: BoxProps) => JSX.Element | null;
+  Text: (props: TextProps) => JSX.Element | null;
+};
 
 // ---------------------------------------------------------------------------
 // Raw-ANSI fallback (exact copy of original printBanner logic)
@@ -206,11 +207,11 @@ export async function renderBanner(info?: BannerInfo): Promise<void> {
     // Dynamic import — safe to fail if ink/react aren't installed.
     const [inkMod, reactMod] = await Promise.all([
       import("ink") as Promise<{
-        render: (el: React.ReactElement) => { unmount: () => void };
-        Box: React.FC<BoxProps>;
-        Text: React.FC<TextProps>;
+        render: (el: unknown) => { unmount: () => void };
+        Box: (props: BoxProps) => JSX.Element | null;
+        Text: (props: TextProps) => JSX.Element | null;
       }>,
-      import("react") as Promise<typeof React>,
+      import("react") as Promise<{ createElement: (...args: unknown[]) => unknown }>,
     ]);
 
     // Inject Ink primitives into the component.

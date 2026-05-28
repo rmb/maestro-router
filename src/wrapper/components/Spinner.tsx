@@ -1,6 +1,5 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
-import React, { useEffect, useState } from "react";
 import type { Writable } from "node:stream";
 
 // ---------------------------------------------------------------------------
@@ -12,27 +11,10 @@ const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
 // ---------------------------------------------------------------------------
-// Ink component
+// Ink component types (used inside startSpinner's dynamic import block)
 // ---------------------------------------------------------------------------
 
-type TextProps = { dimColor?: boolean; children?: React.ReactNode };
-
-function SpinnerComponent({ text, Text }: { text: string; Text: React.FC<TextProps> }) {
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => setFrame((f) => f + 1), 100);
-    return () => clearInterval(id);
-  }, []);
-
-  const icon = SPINNER_FRAMES[frame % SPINNER_FRAMES.length]!;
-
-  return (
-    <Text dimColor>
-      {icon + " " + text + "…"}
-    </Text>
-  );
-}
+type TextProps = { dimColor?: boolean; children?: unknown };
 
 // ---------------------------------------------------------------------------
 // Raw-ANSI fallback (mirrors sdk-host.ts startSpinner / clearSpinner)
@@ -81,13 +63,37 @@ export async function startSpinner(opts: SpinnerOptions): Promise<SpinnerHandle>
   try {
     const [inkMod, reactMod] = await Promise.all([
       import("ink") as Promise<{
-        render: (el: React.ReactElement) => { unmount: () => void };
-        Text: React.FC<TextProps>;
+        render: (el: unknown) => { unmount: () => void };
+        Text: (props: TextProps) => JSX.Element | null;
       }>,
-      import("react") as Promise<typeof React>,
+      import("react") as Promise<{
+        createElement: (...args: unknown[]) => unknown;
+        useState: <T>(init: T) => [T, (v: T | ((prev: T) => T)) => void];
+        useEffect: (effect: () => (() => void) | void, deps?: unknown[]) => void;
+      }>,
     ]);
 
-    const element = reactMod.createElement(SpinnerComponent, { text, Text: inkMod.Text });
+    const { useState, useEffect } = reactMod;
+    const InkText = inkMod.Text;
+
+    function SpinnerComponent({ text: label }: { text: string }) {
+      const [frame, setFrame] = useState(0);
+
+      useEffect(() => {
+        const id = setInterval(() => setFrame((f: number) => f + 1), 100);
+        return () => clearInterval(id);
+      }, []);
+
+      const icon = SPINNER_FRAMES[frame % SPINNER_FRAMES.length]!;
+
+      return (
+        <InkText dimColor>
+          {icon + " " + label + "…"}
+        </InkText>
+      );
+    }
+
+    const element = reactMod.createElement(SpinnerComponent, { text });
     const { unmount } = inkMod.render(element);
 
     return {

@@ -25,7 +25,7 @@ import { preflight } from "../wrapper/preflight.js";
 import { createSessionStore } from "../wrapper/session.js";
 import { runShellHost } from "../wrapper/sdk-host.js";
 import { resolveRealClaude } from "./wire-compat.js";
-import { loadCliConfig } from "./utils.js";
+import { embeddingOptionsFromConfig, loadCliConfig } from "./utils.js";
 import { renderBanner } from "./components/Banner.js";
 
 export function registerShellCommand(program: Command): void {
@@ -65,11 +65,7 @@ export function registerShellCommand(program: Command): void {
       ];
       if (cli.userConfig.useEmbeddingClassifier !== false)
         classifiers.push(
-          createEmbeddingClassifier(
-            cli.userConfig.embeddingModel !== undefined
-              ? { modelId: cli.userConfig.embeddingModel }
-              : {},
-          ),
+          createEmbeddingClassifier(embeddingOptionsFromConfig(cli.userConfig)),
         );
       if (cli.userConfig.useLlmClassifierInWrapper !== false) classifiers.push(llmClassifier);
       const pipeline = createPipeline({ classifiers, profile });

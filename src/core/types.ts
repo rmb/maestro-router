@@ -146,6 +146,14 @@ export type UserConfig = {
    */
   embeddingModel?: string;
   /**
+   * Override the embedding classifier's minimum cosine similarity threshold
+   * (default 0.4). Below this, the classifier returns null and the prompt
+   * falls through. Lower it to increase embedding coverage (fewer fallbacks)
+   * at the risk of lower-confidence matches; raise it to be more conservative.
+   * Must be in [0, 1].
+   */
+  embeddingMinSimilarity?: number;
+  /**
    * Global default append-system-prompt text (X.soft). Overridden per-class
    * by CLASS_BREVITY in spawn.ts. When empty string, no flag is emitted.
    */

@@ -44,7 +44,7 @@ import { streamClaude } from "../wrapper/stream.js";
 import { runSdkProxy } from "../wrapper/sdk-proxy.js";
 import { createSessionStore } from "../wrapper/session.js";
 import type { LoadedCliConfig } from "./utils.js";
-import { loadCliConfig } from "./utils.js";
+import { embeddingOptionsFromConfig, loadCliConfig } from "./utils.js";
 
 const ROUTING_FLAGS_WITH_VALUE = new Set([
   "--model",
@@ -240,11 +240,7 @@ function buildPipeline(cli: LoadedCliConfig): { pipeline: Pipeline; profile: Pro
   const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, toolResultContentClassifier, toolOverrideClassifier, markovClassifier, heuristic];
   if (cli.userConfig.useEmbeddingClassifier !== false)
     classifiers.push(
-      createEmbeddingClassifier(
-        cli.userConfig.embeddingModel !== undefined
-          ? { modelId: cli.userConfig.embeddingModel }
-          : {},
-      ),
+      createEmbeddingClassifier(embeddingOptionsFromConfig(cli.userConfig)),
     );
   // LLM stage is on by default. Cold-cache penalty (~$0.04, 13-20s) only hits
   // the first turn after a VSCode restart; subsequent turns hit cache_read and

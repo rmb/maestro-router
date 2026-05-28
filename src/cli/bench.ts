@@ -39,7 +39,7 @@ import {
   pct,
   yellow,
 } from "./render.js";
-import { format, loadCliConfig } from "./utils.js";
+import { embeddingOptionsFromConfig, format, loadCliConfig } from "./utils.js";
 
 type ParentOptions = { json?: boolean; quiet?: boolean; config?: string };
 
@@ -158,11 +158,7 @@ export function registerBenchCommand(program: Command): void {
         const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, markovClassifier, heuristic];
         if (useEmbedding)
           classifiers.push(
-            createEmbeddingClassifier(
-              cli.userConfig.embeddingModel !== undefined
-                ? { modelId: cli.userConfig.embeddingModel }
-                : {},
-            ),
+            createEmbeddingClassifier(embeddingOptionsFromConfig(cli.userConfig)),
           );
         if (useLlm) classifiers.push(llmClassifier);
         const pipeline = createPipeline({

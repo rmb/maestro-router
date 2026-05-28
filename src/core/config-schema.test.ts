@@ -78,6 +78,23 @@ describe("parseUserConfig", () => {
     }
   });
 
+  test("embeddingMinSimilarity accepts a value in [0, 1]", () => {
+    const result = parseUserConfig({ embeddingMinSimilarity: 0.5 });
+    expect(result.embeddingMinSimilarity).toBe(0.5);
+  });
+
+  test("embeddingMinSimilarity rejects values above 1", () => {
+    expect(() => parseUserConfig({ embeddingMinSimilarity: 1.5 })).toThrowError(
+      ConfigValidationError,
+    );
+  });
+
+  test("embeddingMinSimilarity rejects values below 0", () => {
+    expect(() => parseUserConfig({ embeddingMinSimilarity: -0.1 })).toThrowError(
+      ConfigValidationError,
+    );
+  });
+
   test("invalid enum value throws ConfigValidationError with readable message", () => {
     try {
       parseUserConfig({ aggressiveness: "extreme" });

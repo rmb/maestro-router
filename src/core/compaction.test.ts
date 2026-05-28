@@ -35,4 +35,14 @@ describe("classifyCompactionCandidate", () => {
     const diags = classifyCompactionCandidate(5_000, 120_000);
     expect(diags[0]!.message).toContain("120k-token session");
   });
+
+  test("returns [] for prompt exactly 1 char below threshold", () => {
+    expect(classifyCompactionCandidate(2_999, 300_000)).toEqual([]);
+  });
+
+  test("fires for prompt at exact threshold (inclusive)", () => {
+    const diags = classifyCompactionCandidate(3_000, 300_000);
+    expect(diags).toHaveLength(1);
+    expect(diags[0]!.code).toBe("compaction.candidate");
+  });
 });

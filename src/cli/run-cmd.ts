@@ -215,7 +215,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         };
       } else {
         decision = await pipeline.route(
-          { prompt },
+          { prompt: stripped },
           {
             sessionContext: {
               recentClasses,
@@ -264,7 +264,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
 
         if (cli.userConfig.posthogApiKey) {
           const phEarly = createPostHogClient(cli.userConfig.posthogApiKey);
-          const distinctId = Buffer.from(process.cwd()).toString("base64url").slice(0, 16);
+          const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
           const corrProps: Record<string, unknown> = {
             distinct_id: distinctId,
             prev_class: prevDecision.cls,

@@ -7,7 +7,7 @@
 //
 // See wrapper/sdk-host.ts for the protocol and topology.
 
-import { randomUUID } from "node:crypto";
+import { computeFingerprint } from "../wrapper/prewarm.js";
 import type { Command } from "commander";
 import { createEmbeddingClassifier } from "../classifiers/embedding.js";
 import { heuristicClassifier, createHeuristicClassifier } from "../classifiers/heuristic.js";
@@ -87,18 +87,30 @@ export function registerShellCommand(program: Command): void {
         .sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt))[0];
       const recentClasses = cmdOpts.new ? [] : (prior?.recentClasses ?? []);
 
-      const sessionId = randomUUID();
-      const bootstrapModel = profile.classes.standard.model;
+      // F9: reuse the most recent session for this fingerprint to amortize cache_creation cost.
+      const standardSpec = profile.classes.standard;
+      const fp = computeFingerprint({
+        model: standardSpec.model,
+        bare: false,
+        excludeDynamicSections: standardSpec.excludeDynamicSections ?? true,
+        ...(standardSpec.tools ? { tools: standardSpec.tools } : {}),
+        ...(standardSpec.mcpConfig ? { mcpConfig: standardSpec.mcpConfig } : {}),
+      });
+      const shellSession = await sessions.getByFingerprint(cwd, fp, {
+        ...(cmdOpts.new ? { newSession: true } : {}),
+      });
+      const { sessionId, isNew } = shellSession;
       const claudeArgs = [
         "--print",
         "--input-format", "stream-json",
         "--output-format", "stream-json",
         "--verbose",
-        "--model", bootstrapModel,
+        "--model", standardSpec.model,
         "--session-id", sessionId,
+        ...(!isNew ? ["--resume"] : []),
       ];
 
-      await renderBanner({ cwd: process.cwd(), resumed: !cmdOpts.new && prior !== undefined });
+      await renderBanner({ cwd: process.cwd(), resumed: !isNew });
 
       const code = await runShellHost({
         realClaude,

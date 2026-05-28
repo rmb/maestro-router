@@ -26,7 +26,7 @@ export function classifyCompactionCandidate(
   promptLength: number,
   sessionCacheReadTokens: number,
 ): Diagnostic[] {
-  if (promptLength <= PASTE_THRESHOLD_CHARS) return [];
+  if (promptLength < PASTE_THRESHOLD_CHARS) return [];
   if (sessionCacheReadTokens <= SESSION_WARM_TOKENS) return [];
 
   const urgency = sessionCacheReadTokens >= SESSION_HOT_TOKENS ? "high" : "medium";

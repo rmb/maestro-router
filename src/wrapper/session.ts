@@ -118,13 +118,22 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
     await writeFile(path, JSON.stringify(records, null, 2), "utf8");
   };
 
+  // Serialize all read-modify-write operations within this process to prevent
+  // last-writer-wins data loss when methods are called in quick succession.
+  let writeQueue: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = writeQueue.then(fn);
+    writeQueue = next.catch(() => undefined);
+    return next;
+  };
+
   /** Core lookup/create logic keyed by fingerprint. */
-  const getOrCreateByFingerprint = async (
+  const getOrCreateByFingerprint = (
     cwd: string,
     fingerprint: string,
     modelTier: string | undefined,
     options: GetOrCreateOptions | undefined,
-  ): Promise<GetOrCreateResult> => {
+  ): Promise<GetOrCreateResult> => enqueue(async () => {
     const records = await read();
     const nowIso = new Date(now()).toISOString();
 
@@ -159,59 +168,67 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
     };
     await write([...records, created]);
     return { sessionId, isNew: true };
-  };
+  });
 
   return {
-    async getOrCreate(cwd, modelTier, options) {
+    getOrCreate(cwd, modelTier, options) {
       // Deprecated: derive fingerprint from modelTier so old callers keep working
       // but these sessions are NEVER reused by getByFingerprint callers (different key namespace).
       const fingerprint = createHash("sha256").update(modelTier).digest("hex").slice(0, 16);
       return getOrCreateByFingerprint(cwd, fingerprint, modelTier, options);
     },
 
-    async getByFingerprint(cwd, fingerprint, options) {
+    getByFingerprint(cwd, fingerprint, options) {
       return getOrCreateByFingerprint(cwd, fingerprint, undefined, options);
     },
 
-    async touch(sessionId) {
-      const records = await read();
-      const nowIso = new Date(now()).toISOString();
-      const updated = records.map((r) =>
-        r.sessionId === sessionId ? { ...r, lastUsedAt: nowIso } : r,
-      );
-      await write(updated);
-    },
-
-    async appendClass(sessionId, cls) {
-      const records = await read();
-      const updated = records.map((r) => {
-        if (r.sessionId !== sessionId) return r;
-        const prev = r.recentClasses ?? [];
-        const next = [...prev, cls].slice(-5); // keep last 5
-        return { ...r, recentClasses: next, turnCount: (r.turnCount ?? 0) + 1 };
+    touch(sessionId) {
+      return enqueue(async () => {
+        const records = await read();
+        const nowIso = new Date(now()).toISOString();
+        const updated = records.map((r) =>
+          r.sessionId === sessionId ? { ...r, lastUsedAt: nowIso } : r,
+        );
+        await write(updated);
       });
-      await write(updated);
     },
 
-    async appendTurnType(sessionId, turnType) {
-      const records = await read();
-      const updated = records.map((r) => {
-        if (r.sessionId !== sessionId) return r;
-        const prev = r.recentTurnTypes ?? [];
-        const next = [...prev, turnType].slice(-5); // keep last 5
-        return { ...r, recentTurnTypes: next };
+    appendClass(sessionId, cls) {
+      return enqueue(async () => {
+        const records = await read();
+        const updated = records.map((r) => {
+          if (r.sessionId !== sessionId) return r;
+          const prev = r.recentClasses ?? [];
+          const next = [...prev, cls].slice(-5); // keep last 5
+          return { ...r, recentClasses: next, turnCount: (r.turnCount ?? 0) + 1 };
+        });
+        await write(updated);
       });
-      await write(updated);
     },
 
-    async updateLastDecision(sessionId, prompt, cls) {
-      const records = await read();
-      const updated = records.map((r) =>
-        r.sessionId === sessionId
-          ? { ...r, lastPrompt: prompt.slice(0, 500), lastDecisionClass: cls, lastDecisionAt: new Date().toISOString() }
-          : r,
-      );
-      await write(updated);
+    appendTurnType(sessionId, turnType) {
+      return enqueue(async () => {
+        const records = await read();
+        const updated = records.map((r) => {
+          if (r.sessionId !== sessionId) return r;
+          const prev = r.recentTurnTypes ?? [];
+          const next = [...prev, turnType].slice(-5); // keep last 5
+          return { ...r, recentTurnTypes: next };
+        });
+        await write(updated);
+      });
+    },
+
+    updateLastDecision(sessionId, prompt, cls) {
+      return enqueue(async () => {
+        const records = await read();
+        const updated = records.map((r) =>
+          r.sessionId === sessionId
+            ? { ...r, lastPrompt: prompt, lastDecisionClass: cls, lastDecisionAt: new Date().toISOString() }
+            : r,
+        );
+        await write(updated);
+      });
     },
 
     async getLastDecision(sessionId) {
@@ -221,20 +238,24 @@ export function createSessionStore(opts: SessionStoreOptions = {}): SessionStore
       return { prompt: r.lastPrompt, cls: r.lastDecisionClass, ts: r.lastDecisionAt };
     },
 
-    async updatePostTurnData(sessionId, data) {
-      const records = await read();
-      const updated = records.map((r) =>
-        r.sessionId === sessionId ? { ...r, lastStopReason: data.stopReason, lastCacheReadTokens: data.lastCacheReadTokens } : r,
-      );
-      await write(updated);
+    updatePostTurnData(sessionId, data) {
+      return enqueue(async () => {
+        const records = await read();
+        const updated = records.map((r) =>
+          r.sessionId === sessionId ? { ...r, lastStopReason: data.stopReason, lastCacheReadTokens: data.lastCacheReadTokens } : r,
+        );
+        await write(updated);
+      });
     },
 
-    async setEffortEscalated(sessionId) {
-      const records = await read();
-      const updated = records.map((r) =>
-        r.sessionId === sessionId ? { ...r, effortEscalated: true } : r,
-      );
-      await write(updated);
+    setEffortEscalated(sessionId) {
+      return enqueue(async () => {
+        const records = await read();
+        const updated = records.map((r) =>
+          r.sessionId === sessionId ? { ...r, effortEscalated: true } : r,
+        );
+        await write(updated);
+      });
     },
 
     async getEffortEscalated(sessionId) {

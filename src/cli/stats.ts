@@ -280,9 +280,9 @@ function makePerClass(): Record<Class, { count: number; totalCost: number; cache
   return out;
 }
 
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const arr = [...sorted].sort((a, b) => a - b);
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const arr = [...values].sort((a, b) => a - b);
   const idx = Math.min(arr.length - 1, Math.floor(arr.length * p));
   return arr[idx] ?? 0;
 }

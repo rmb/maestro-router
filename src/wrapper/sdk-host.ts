@@ -248,8 +248,9 @@ function installGhostText(
   completions: string[],
   output: Writable,
 ): void {
-  type RlInternal = { _refreshLine(): void; line: string; cursor: number };
+  type RlInternal = { _refreshLine?(): void; line: string; cursor: number };
   const iface = rl as unknown as RlInternal;
+  if (typeof iface._refreshLine !== "function") return;
   const orig = iface._refreshLine.bind(rl);
   iface._refreshLine = function refreshWithGhost(): void {
     orig();
@@ -375,8 +376,11 @@ export async function runShellHost(opts: ShellHostOptions): Promise<number> {
     const outTok = usage.output_tokens ?? 0;
     const ccTok = usage.cache_creation_input_tokens ?? 0;
     const crTok = usage.cache_read_input_tokens ?? 0;
-    const cost = computeTurnCost(model, inTok, outTok, ccTok, crTok, false);
-    const baseline = computeOpusBaseline(inTok, outTok, ccTok, crTok, 0, 0, 0);
+    const is1m = model.includes("[1m]");
+    const cost = computeTurnCost(model, inTok, outTok, ccTok, crTok, is1m);
+    const baseline = is1m
+      ? computeOpusBaseline(0, outTok, 0, 0, inTok, ccTok, crTok)
+      : computeOpusBaseline(inTok, outTok, ccTok, crTok, 0, 0, 0);
     sessionCost += cost;
     sessionBaseline += baseline;
     turns += 1;

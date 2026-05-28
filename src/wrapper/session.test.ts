@@ -397,12 +397,12 @@ describe("model-tier affinity", () => {
     expect(last).toBeNull();
   });
 
-  test("updateLastDecision truncates prompts longer than 500 chars", async () => {
+  test("updateLastDecision stores the prompt verbatim (truncation is the caller's responsibility)", async () => {
     const store = createSessionStore({ path: join(dir, "s.json") });
     const { sessionId } = await store.getOrCreate("/foo", "haiku");
     const long = "x".repeat(600);
     await store.updateLastDecision(sessionId, long, "standard");
     const last = await store.getLastDecision(sessionId);
-    expect(last!.prompt.length).toBe(500);
+    expect(last!.prompt.length).toBe(600);
   });
 });

@@ -90,12 +90,170 @@ type Summary = {
   durationApiMsP90ByClass: Partial<Record<Class, number>>;
 };
 
+// ---------------------------------------------------------------------------
+// Trend: per-day breakdown
+// ---------------------------------------------------------------------------
+
+export type TrendBucket = {
+  date: string;           // YYYY-MM-DD UTC
+  requests: number;
+  costUsd: number;
+  baselineUsd: number;
+  savingsRatio: number | null;  // null when requests === 0
+  topModel: string | null;      // alias "haiku"/"sonnet"/"opus" from modelAlias(), null when 0
+  topModelCount: number;
+};
+
+export function computeTrend(events: ReadonlyArray<TelemetryEvent>, windowDays: number): TrendBucket[] {
+  // Generate all dates in window [today-windowDays+1 .. today]
+  const today = new Date();
+  const dates: string[] = [];
+  for (let i = windowDays - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - i));
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  // Group decision events by UTC date
+  const byDate = new Map<string, TelemetryEvent[]>();
+  for (const date of dates) {
+    byDate.set(date, []);
+  }
+  for (const e of events) {
+    if (e.type === "decision") {
+      const date = e.ts.slice(0, 10);
+      if (byDate.has(date)) {
+        byDate.get(date)!.push(e);
+      }
+    }
+  }
+
+  const buckets: TrendBucket[] = [];
+  for (const date of dates) {
+    const dayEvents = byDate.get(date)!;
+    if (dayEvents.length === 0) {
+      buckets.push({
+        date,
+        requests: 0,
+        costUsd: 0,
+        baselineUsd: 0,
+        savingsRatio: null,
+        topModel: null,
+        topModelCount: 0,
+      });
+      continue;
+    }
+
+    let costUsd = 0;
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalCacheCreate = 0;
+    let totalCacheRead = 0;
+    const modelCounts = new Map<string, number>();
+
+    for (const e of dayEvents) {
+      if (e.type !== "decision") continue;
+      if (e.cost) {
+        const modelUsed = e.cost.modelUsed ?? e.decision.spec.model;
+        const is1m = e.cost.is1mVariant ?? false;
+        costUsd += computeTurnCost(
+          modelUsed,
+          e.cost.inputTokens,
+          e.cost.outputTokens,
+          e.cost.cacheCreationInputTokens,
+          e.cost.cacheReadInputTokens,
+          is1m,
+        );
+        totalInput += e.cost.inputTokens;
+        totalOutput += e.cost.outputTokens;
+        totalCacheCreate += e.cost.cacheCreationInputTokens;
+        totalCacheRead += e.cost.cacheReadInputTokens;
+        const alias = modelAlias(modelUsed);
+        modelCounts.set(alias, (modelCounts.get(alias) ?? 0) + 1);
+      } else {
+        const alias = modelAlias(e.decision.spec.model);
+        modelCounts.set(alias, (modelCounts.get(alias) ?? 0) + 1);
+      }
+    }
+
+    const baselineUsd = computeOpusBaseline(
+      totalInput, totalOutput, totalCacheCreate, totalCacheRead,
+      0, 0, 0,
+    );
+
+    let topModel: string | null = null;
+    let topModelCount = 0;
+    for (const [alias, count] of modelCounts) {
+      if (count > topModelCount) {
+        topModel = alias;
+        topModelCount = count;
+      }
+    }
+
+    const savingsRatio = baselineUsd > 0 ? (baselineUsd - costUsd) / baselineUsd : null;
+
+    buckets.push({
+      date,
+      requests: dayEvents.length,
+      costUsd: round(costUsd, 6),
+      baselineUsd: round(baselineUsd, 6),
+      savingsRatio: savingsRatio !== null ? round(savingsRatio, 4) : null,
+      topModel,
+      topModelCount,
+    });
+  }
+
+  return buckets;
+}
+
+export function renderTrend(buckets: TrendBucket[], windowDays: number): string {
+  const sep = dim("──────────────────────────────────────────────────────");
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(header(`Trend (last ${windowDays}d)`));
+  lines.push(sep);
+  lines.push(
+    `${"Date".padEnd(12)}${"Req".padStart(4)}   ${"Cost ($)".padEnd(10)}${"Savings".padEnd(9)}  Top Model`,
+  );
+  lines.push(sep);
+
+  for (const b of buckets) {
+    if (b.requests === 0) {
+      lines.push(
+        `${dim(b.date)}  ${dim("—").padEnd(4)}   ${dim("—").padEnd(10)}${dim("—").padEnd(9)}  ${dim("—")}`,
+      );
+    } else {
+      const reqStr = cyan(String(b.requests).padStart(3));
+      const costStr = yellow(b.costUsd.toFixed(4).padStart(8));
+      const savStr = b.savingsRatio !== null ? savingsColor(b.savingsRatio)(pct(b.savingsRatio, 1).padStart(7)) : dim("—".padStart(7));
+      const modelStr = b.topModel !== null ? gray(`${b.topModel} (${b.topModelCount})`) : dim("—");
+      lines.push(
+        `${b.date}  ${reqStr}   ${costStr}  ${savStr}  ${modelStr}`,
+      );
+    }
+  }
+
+  lines.push(sep);
+
+  // Footer: avg savings over active days
+  const activeBuckets = buckets.filter((b) => b.requests > 0 && b.savingsRatio !== null);
+  if (activeBuckets.length > 0) {
+    const avgSavings = activeBuckets.reduce((s, b) => s + (b.savingsRatio ?? 0), 0) / activeBuckets.length;
+    const savColor = savingsColor(avgSavings);
+    lines.push(dim("  avg ") + savColor(pct(avgSavings, 1)) + dim(` savings over ${activeBuckets.length} active day${activeBuckets.length !== 1 ? "s" : ""}`));
+  } else {
+    lines.push(dim("  no active days in window"));
+  }
+
+  return lines.join("\n");
+}
+
 export function registerStatsCommand(program: Command): void {
   program
     .command("stats")
     .description("Cost vs Opus-everywhere baseline, cache hit %, override rate")
     .option("--since <days>", "window in days", String(DEFAULT_WINDOW_DAYS))
-    .action(async (cmdOpts: { since: string }) => {
+    .option("--trend", "per-day cost and savings breakdown")
+    .action(async (cmdOpts: { since: string; trend?: boolean }) => {
       const parent = program.opts<ParentOptions>();
       const cli = await loadCliConfig(parent.config);
       const path = cli.userConfig.telemetryPath ?? DEFAULT_TELEMETRY_PATH;
@@ -108,20 +266,29 @@ export function registerStatsCommand(program: Command): void {
       // before parsing raw_json for cost/spec fields.
       const dbPath = path.endsWith(".jsonl") ? path.slice(0, -6) + ".db" : path + ".db";
       const db = openDb(dbPath);
-      let summary: Summary;
+      let events: TelemetryEvent[];
       if (db !== null && db.count() > 0) {
-        const events = readEventsFromDbSince(db, cutoff);
-        summary = computeSummary(events, since);
+        events = readEventsFromDbSince(db, cutoff);
       } else {
-        const events = (await t.readAll()).filter(
+        events = (await t.readAll()).filter(
           (e) => Date.parse(e.ts) >= cutoff,
         );
-        summary = computeSummary(events, since);
       }
+      const summary = computeSummary(events, since);
       if (parent.json) {
-        process.stdout.write(format(summary, { json: true }) + "\n");
+        if (cmdOpts.trend) {
+          const trend = computeTrend(events, since);
+          process.stdout.write(format({ summary, trend }, { json: true }) + "\n");
+        } else {
+          process.stdout.write(format(summary, { json: true }) + "\n");
+        }
       } else if (!parent.quiet) {
-        process.stdout.write(renderHuman(summary) + "\n");
+        let out = renderHuman(summary);
+        if (cmdOpts.trend) {
+          const trend = computeTrend(events, since);
+          out += "\n" + renderTrend(trend, since);
+        }
+        process.stdout.write(out + "\n");
       }
     });
 }

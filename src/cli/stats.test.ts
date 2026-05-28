@@ -1,7 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test } from "vitest";
-import { computeSummary } from "./stats.js";
+import { computeSummary, computeTrend } from "./stats.js";
 import type { TelemetryEvent } from "../core/types.js";
 
 function makeDecision(
@@ -536,5 +536,140 @@ describe("durationApiMsP90ByClass", () => {
     const summary = computeSummary(events, 7);
     // sorted: [1, 2, ..., 100], idx = ceil(100 * 0.9) - 1 = 89, arr[89] = 90
     expect(summary.durationApiMsP90ByClass["hard"]).toBe(90);
+  });
+});
+
+describe("computeTrend", () => {
+  test("0 events → windowDays buckets all zero/null", () => {
+    const buckets = computeTrend([], 7);
+    expect(buckets).toHaveLength(7);
+    for (const b of buckets) {
+      expect(b.requests).toBe(0);
+      expect(b.costUsd).toBe(0);
+      expect(b.baselineUsd).toBe(0);
+      expect(b.savingsRatio).toBeNull();
+      expect(b.topModel).toBeNull();
+      expect(b.topModelCount).toBe(0);
+    }
+  });
+
+  test("buckets are sorted by date ascending", () => {
+    const buckets = computeTrend([], 5);
+    expect(buckets).toHaveLength(5);
+    for (let i = 1; i < buckets.length; i++) {
+      expect(buckets[i]!.date > buckets[i - 1]!.date).toBe(true);
+    }
+  });
+
+  test("events on specific dates are bucketed correctly", () => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const event: TelemetryEvent = {
+      type: "decision",
+      ts: todayStr + "T12:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model: "sonnet", effort: "medium", maxBudgetUsd: 0.1 },
+        latencyMs: 10,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.001,
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        durationMs: 500,
+        durationApiMs: 400,
+        stopReason: "end_turn",
+        modelUsed: "claude-sonnet-4-6",
+        serviceTier: "default",
+      },
+    };
+    const buckets = computeTrend([event], 7);
+    expect(buckets).toHaveLength(7);
+    const todayBucket = buckets.find((b) => b.date === todayStr);
+    expect(todayBucket).toBeDefined();
+    expect(todayBucket!.requests).toBe(1);
+    expect(todayBucket!.topModel).toBe("sonnet");
+    expect(todayBucket!.topModelCount).toBe(1);
+    expect(todayBucket!.savingsRatio).not.toBeNull();
+  });
+
+  test("events outside the window are not included", () => {
+    // Use a date 30 days ago — outside a 7-day window
+    const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const event: TelemetryEvent = {
+      type: "decision",
+      ts: oldDate + "T12:00:00.000Z",
+      decision: {
+        class: "standard",
+        classifier: "heuristic",
+        confidence: 0.9,
+        spec: { model: "haiku", effort: "low", maxBudgetUsd: 0.05 },
+        latencyMs: 5,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.0001,
+        inputTokens: 50,
+        outputTokens: 100,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        durationMs: 200,
+        durationApiMs: 180,
+        stopReason: "end_turn",
+        modelUsed: "claude-haiku-4-5",
+        serviceTier: "default",
+      },
+    };
+    const buckets = computeTrend([event], 7);
+    expect(buckets.every((b) => b.requests === 0)).toBe(true);
+  });
+
+  test("mixed-day events are grouped into separate buckets", () => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const yesterdayStr = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const makeEvent = (dateStr: string, model: string): TelemetryEvent => ({
+      type: "decision",
+      ts: dateStr + "T10:00:00.000Z",
+      decision: {
+        class: "trivial",
+        classifier: "heuristic",
+        confidence: 0.95,
+        spec: { model, effort: "low", maxBudgetUsd: 0.05 },
+        latencyMs: 5,
+        diagnostics: [],
+      },
+      cost: {
+        totalCostUsd: 0.0001,
+        inputTokens: 50,
+        outputTokens: 100,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        durationMs: 200,
+        durationApiMs: 180,
+        stopReason: "end_turn",
+        modelUsed: model === "haiku" ? "claude-haiku-4-5" : "claude-sonnet-4-6",
+        serviceTier: "default",
+      },
+    });
+
+    const events: TelemetryEvent[] = [
+      makeEvent(todayStr, "haiku"),
+      makeEvent(todayStr, "haiku"),
+      makeEvent(yesterdayStr, "sonnet"),
+    ];
+    const buckets = computeTrend(events, 7);
+    const todayBucket = buckets.find((b) => b.date === todayStr);
+    const yestBucket = buckets.find((b) => b.date === yesterdayStr);
+    expect(todayBucket?.requests).toBe(2);
+    expect(todayBucket?.topModel).toBe("haiku");
+    expect(yestBucket?.requests).toBe(1);
+    expect(yestBucket?.topModel).toBe("sonnet");
   });
 });

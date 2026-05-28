@@ -13,9 +13,9 @@ function extractModelFamily(model: string): "haiku" | "sonnet" | "opus" | null {
 import type { SessionRecord } from "../../wrapper/session.js";
 import { computeFingerprint } from "../../wrapper/prewarm.js";
 import { CONTINUATION_HINT, CONTINUATION_PATTERNS } from "../../wrapper/continuation.js";
-import type { CheckResult, DimensionResult } from "./telemetry-correctness.js";
+import type { CheckResult, DimensionResult, PerDecisionVerdict } from "./telemetry-correctness.js";
 
-export type { CheckResult, DimensionResult };
+export type { CheckResult, DimensionResult, PerDecisionVerdict };
 export type { SessionRecord };
 
 // ---------------------------------------------------------------------------
@@ -91,16 +91,19 @@ export function checkFingerprintStability(
   const total = decisionEvents.length;
   const rate = matched / total;
 
-  // Detect fingerprint algorithm drift: if rate is ~0 with non-trivial
-  // sample size, the fingerprint format likely changed (e.g. dimension
-  // added). Treat as n/a until new sessions accumulate.
-  if (rate === 0 && total >= 5) {
+  // Detect fingerprint algorithm drift: if rate is near-zero with a
+  // non-trivial sample size, the fingerprint format likely changed (e.g. a
+  // new dimension was added). A genuine partial failure (e.g. Track Z down
+  // for some sessions) would produce a rate above 5%, not 0–2%. Treat the
+  // near-zero band as n/a until new sessions accumulate.
+  if (rate < 0.02 && total >= 10) {
+    const matchedStr = matched === 0 ? "0" : `only ${matched}`;
     return {
       name: "fingerprint-stability",
       pass: true,
       value: "n/a (format drift)",
       gate: "≥95%",
-      detail: `0 of ${total} recent events match any session fingerprint. Likely fingerprint algorithm changed; will activate as new sessions accumulate.`,
+      detail: `${matchedStr} of ${total} recent events match any session fingerprint (${(rate * 100).toFixed(1)}%). Likely fingerprint algorithm changed; will activate as new sessions accumulate.`,
     };
   }
 
@@ -156,12 +159,19 @@ export function checkFlagCoverage(events: TelemetryEvent[]): CheckResult {
   }
 
   let matched = 0;
+  const verdicts: PerDecisionVerdict[] = [];
   for (const event of decisionEvents) {
     const specModel = event.decision.spec.model;
     const modelUsed = event.cost!.modelUsed;
     const specFamily = extractModelFamily(specModel);
     const usedFamily = extractModelFamily(modelUsed);
-    if (modelUsed.includes(specModel) || (specFamily !== null && specFamily === usedFamily)) matched++;
+    const correct = modelUsed.includes(specModel) || (specFamily !== null && specFamily === usedFamily);
+    if (correct) matched++;
+    verdicts.push({
+      ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}),
+      ts: event.ts,
+      correct,
+    });
   }
 
   const total = decisionEvents.length;
@@ -179,6 +189,7 @@ export function checkFlagCoverage(events: TelemetryEvent[]): CheckResult {
     pass,
     value,
     gate: "≥30%",
+    verdicts,
   };
 
   if (!pass) {

@@ -7,12 +7,28 @@ import { costFromEvent } from "../../core/pricing.js";
 // Shared result types (will be extracted to oracle/types.ts later)
 // ---------------------------------------------------------------------------
 
+/** Per-decision correctness verdict emitted by checks that have row-level signal. */
+export type PerDecisionVerdict = {
+  /** Session that produced this decision. Undefined for pre-P5 events. */
+  sessionId?: string;
+  /** ISO timestamp of the decision event. */
+  ts: string;
+  /** True if the routing decision was deemed correct by this check. */
+  correct: boolean;
+};
+
 export type CheckResult = {
   name: string;
   pass: boolean;
   value: number | string;
   gate?: string;
   detail?: string;
+  /**
+   * Optional per-decision correctness verdicts. Populated by checks that have
+   * row-level signal (e.g. flag-coverage). Included in `perDecision` in the
+   * oracle JSON output for use by calibrate-threshold.py.
+   */
+  verdicts?: PerDecisionVerdict[];
 };
 
 export type DimensionResult = {

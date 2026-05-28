@@ -175,6 +175,24 @@ describe("checkFingerprintStability", () => {
     expect(result.detail).toBeUndefined();
   });
 
+  test("near-zero match rate (< 2%) treated as format drift, not a real failure", () => {
+    // 1 match out of 100 decisions = 1% — below the 2% drift threshold.
+    // Before the fix the condition was `rate === 0`, so 1/100 would fall through
+    // to the real-failure path and report pass: false.
+    const spec = { model: "sonnet", effort: "medium" as const, maxBudgetUsd: 0.1 };
+    const fp = computeFingerprint(spec);
+
+    const events: TelemetryEvent[] = [
+      makeDecision({ model: "sonnet" }),  // 1 match
+      ...Array.from({ length: 99 }, () => makeDecision({ model: "opus" })),  // 99 no-match
+    ];
+    const sessions: SessionRecord[] = [makeSession({ fingerprint: fp })];
+    const result = checkFingerprintStability(events, sessions);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("n/a (format drift)");
+    expect(result.detail).toContain("1.0%");
+  });
+
   test("falls back to computeFingerprint(spec) when decision.fingerprint is absent", () => {
     // Old events without stored fingerprints still match via spec recomputation.
     const spec = { model: "haiku", effort: "low" as const, maxBudgetUsd: 0.05 };

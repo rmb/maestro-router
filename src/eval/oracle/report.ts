@@ -1,9 +1,9 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
-import type { DimensionResult, CheckResult } from "./telemetry-correctness.js";
+import type { DimensionResult, CheckResult, PerDecisionVerdict } from "./telemetry-correctness.js";
 import { bold, dim, green, red, header } from "../../cli/render.js";
 
-export type { DimensionResult, CheckResult };
+export type { DimensionResult, CheckResult, PerDecisionVerdict };
 
 export type OracleReport = {
   generatedAt: string;
@@ -11,6 +11,13 @@ export type OracleReport = {
   totalEvents: number;
   dimensions: DimensionResult[];
   overallPass: boolean;
+  /**
+   * Per-decision correctness verdicts aggregated from all checks that emit
+   * row-level signal (currently: flag-coverage). Emitted in `--json` output
+   * for use by `calibrate-threshold.py --oracle`.
+   * Omitted from text output (too verbose for the terminal).
+   */
+  perDecision?: PerDecisionVerdict[];
 };
 
 export function buildReport(params: {
@@ -19,12 +26,17 @@ export function buildReport(params: {
   totalEvents: number;
   dimensions: DimensionResult[];
 }): OracleReport {
+  const perDecision = params.dimensions
+    .flatMap((d) => d.checks)
+    .flatMap((c) => c.verdicts ?? []);
+
   return {
     generatedAt: params.generatedAt ?? new Date().toISOString(),
     windowDays: params.windowDays,
     totalEvents: params.totalEvents,
     dimensions: params.dimensions,
     overallPass: params.dimensions.every((d) => d.pass),
+    ...(perDecision.length > 0 ? { perDecision } : {}),
   };
 }
 

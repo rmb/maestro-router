@@ -112,15 +112,20 @@ def load_similarities(path: Path) -> tuple[list[dict], int]:
 def load_oracle_labels(path: Path) -> dict[str, bool]:
     """Load a per-key correctness map from an oracle JSON file, if shaped that
     way. Returns {join_key: correct_bool}. Returns {} when the oracle JSON has
-    no per-decision verdicts to join on (e.g. it's an aggregate report)."""
+    no per-decision verdicts to join on (e.g. it's an aggregate report).
+
+    Accepted file shapes:
+    - A list of {id/sessionId, ts, correct} — e.g. a hand-authored verdicts file.
+    - An ``maestro oracle --json`` report dict containing a ``perDecision`` key
+      whose value is the list of per-decision verdicts.
+    - A dict mapping join_key -> bool / {correct: bool} — legacy format.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         print(f"[warn] could not read oracle file: {exc}", file=sys.stderr)
         return {}
 
-    # Accept a few plausible shapes: a list of {id/sessionId, ts, correct},
-    # or a dict mapping key -> bool / {correct: bool}.
     labels: dict[str, bool] = {}
 
     def add(key, value):
@@ -131,8 +136,8 @@ def load_oracle_labels(path: Path) -> dict[str, bool]:
         elif isinstance(value, dict) and isinstance(value.get("correct"), bool):
             labels[key] = value["correct"]
 
-    if isinstance(data, list):
-        for item in data:
+    def process_list(items):
+        for item in items:
             if not isinstance(item, dict) or "correct" not in item:
                 continue
             rid = item.get("id")
@@ -142,9 +147,19 @@ def load_oracle_labels(path: Path) -> dict[str, bool]:
             sid, ts = item.get("sessionId"), item.get("ts")
             if isinstance(sid, str) and isinstance(ts, str):
                 add(f"{sid}@{ts}", item.get("correct"))
+
+    if isinstance(data, list):
+        process_list(data)
     elif isinstance(data, dict):
-        for key, value in data.items():
-            add(key, value)
+        # Check for `maestro oracle --json` report shape: perDecision is the
+        # list of per-decision verdicts emitted by checks with row-level signal.
+        per_decision = data.get("perDecision")
+        if isinstance(per_decision, list):
+            process_list(per_decision)
+        else:
+            # Legacy dict format: key -> bool / {correct: bool}
+            for key, value in data.items():
+                add(key, value)
     return labels
 
 
@@ -165,8 +180,8 @@ def proxy_report(sims) -> None:
     print(
         "\nNo oracle labels were joinable, so precision can't be computed. "
         "Pick a floor that keeps most genuine matches while trimming the low-sim tail.\n"
-        "Re-run with --oracle <maestro oracle --json output> once per-decision "
-        "correctness verdicts are available for a calibrated recommendation."
+        "For a calibrated recommendation, run:  maestro oracle --json > oracle.json\n"
+        "then re-run:  python scripts/calibrate-threshold.py --oracle oracle.json"
     )
 
 
@@ -229,7 +244,12 @@ def main() -> None:
     parser.add_argument(
         "--oracle",
         default=None,
-        help="Optional JSON from `maestro oracle --json` with per-decision correctness verdicts.",
+        help=(
+            "Optional JSON file with per-decision correctness verdicts. "
+            "Produce with: maestro oracle --json > oracle.json  "
+            "(the report's perDecision array is joined automatically). "
+            "Without this flag the script falls back to a proxy coverage analysis."
+        ),
     )
     parser.add_argument(
         "--target-precision",

@@ -71,7 +71,7 @@ export type EmbedFn = (text: string) => Promise<Float32Array>;
 export type EmbeddingClassifierOptions = {
   /** Path to the pre-computed exemplars.json. Defaults to the shipped file. */
   exemplarsPath?: string;
-  /** Min cosine similarity to return a non-null classification. Default 0.5. */
+  /** Min cosine similarity to return a non-null classification. Default 0.4. */
   minSimilarity?: number;
   /** Classifier weight in the pipeline vote. Default 0.6. */
   weight?: number;

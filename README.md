@@ -49,7 +49,7 @@ To remove: `bash scripts/install.sh --uninstall`.
 Maestro ships a semantic embedding stage that catches prompts heuristics miss without burning an LLM call. It's an optional peer to avoid forcing 400 MB on every install. If you use Maestro heavily (50+ prompts/day), install it:
 
 ```bash
-npm install -g @xenova/transformers
+npm install -g @huggingface/transformers
 ```
 
 Without it, the pipeline falls through to the LLM classifier for uncertain prompts (~$0.001/call instead of local inference). You'll see `info.fallback.embedding_unavailable` in the routing log. With it, that warning disappears and the embedding stage runs instead.
@@ -66,7 +66,10 @@ You type a message in the VSCode Claude panel, run `maestro run "…"`, or start
 **Step 2 — Slash commands are passed through unchanged.**
 `/clear`, `/model`, `/help`, `/cost`, `/compact` are detected by `wrapper/passthrough.ts` and forwarded to Claude as-is. No classification, no routing decision, no cost.
 
-**Step 3 — The classifier pipeline runs.**
+**Step 3 — The prompt is preprocessed.**
+Before classification, three pure-function transforms run on the extracted text. `line-stripper.ts` removes POSIX line-number prefixes (`1\t`, `2\t`) from tool results — token inflation with no routing value (skipped when RTK is on PATH). `tool-envelope.ts` collapses Claude Code-specific tool_result boilerplate: Write/Edit acknowledgements, TodoWrite confirmations, trailing "file state" footers. `paste.ts` detects prompts dominated by pasted structured data (log tables, analytics dumps) and condenses them so the classifier isn't overweighted by structured noise.
+
+**Step 4 — The classifier pipeline runs.**
 For all other prompts, Maestro runs up to 8 classifiers in cheapest-first order. Each returns a class (trivial / simple / standard / hard / reasoning / max) and a confidence score, or null if it has no signal. The pipeline short-circuits the moment any stage returns confidence ≥ 0.55:
 
 | Stage | What it checks | Cost per call |
@@ -82,7 +85,7 @@ For all other prompts, Maestro runs up to 8 classifiers in cheapest-first order.
 
 If no stage clears the threshold, a weighted vote runs across all sub-threshold results. If that still produces no winner, the prompt defaults to `standard`. The fallback is tracked separately in telemetry so you can see classifier coverage gaps in `maestro stats`.
 
-**Step 4 — The class is mapped to a model profile.**
+**Step 5 — The class is mapped to a model profile.**
 `core/profile.ts` converts the class into concrete CLI flags:
 
 | Class | Model | Effort | Budget cap |
@@ -94,10 +97,12 @@ If no stage clears the threshold, a weighted vote runs across all sub-threshold 
 | reasoning | Opus | high | $0.30 |
 | max | Opus | max | $0.50 |
 
-**Step 5 — Session reuse is checked.**
+**Step 6 — Session reuse is checked.**
 Maestro hashes all system-prompt-affecting flags (`model`, `tools`, `--bare`, `--mcp-config`, etc.) into a 16-char fingerprint. If a session for this `cwd` with this fingerprint already exists and is less than 24 hours old, Maestro reuses it with `--session-id` + `--resume`. This is the single biggest cost lever: Anthropic's system prompt cache (~37k tokens) costs ~$0.035 per cold boot. Reusing a session brings that to ~$0.001.
 
-**Step 6 — `claude --print` is spawned with the right flags.**
+On the first turn of any new session routed to an Opus-class model, the first-turn guard (`wrapper/first-turn-guard.ts`) downgrades the model to Sonnet. A fresh Opus session boot costs $3–12; Sonnet runs ~$0.30. Subsequent turns route freely.
+
+**Step 7 — `claude --print` is spawned with the right flags.**
 `wrapper/spawn.ts` builds the final command:
 ```
 claude --print --output-format json
@@ -107,8 +112,8 @@ claude --print --output-format json
 ```
 stdout is piped live to your terminal so you see tokens stream in real time.
 
-**Step 7 — Cost and routing are logged.**
-After the response completes, `wrapper/output.ts` parses the JSON envelope from Claude for exact token counts. Cost is derived from those volumes via the same rate table that backs `maestro stats` — `total_cost_usd` is fabricated on Pro/Team subscriptions and is not used. The decision is appended to `~/.maestro/decisions.jsonl`.
+**Step 8 — Cost and routing are logged.**
+After the response completes, `wrapper/output.ts` parses the JSON envelope from Claude for exact token counts. Cost is derived from those volumes via `core/pricing.ts` — `total_cost_usd` is fabricated on Pro/Team subscriptions and is not used. The decision is appended to `~/.maestro/decisions.jsonl`.
 
 ---
 
@@ -201,6 +206,8 @@ maestro telemetry off                     # disable remote (PostHog) event repor
 maestro telemetry forget --confirm        # delete all local telemetry events
 
 # Setup
+maestro init                              # idempotent setup wizard (defaults + VSCode + hook)
+maestro doctor                            # check environment without writing anything
 maestro install-vscode                    # wire claudeProcessWrapper in VSCode
 maestro install-hook                      # enable Stop-hook feedback collection
 ```

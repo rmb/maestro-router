@@ -10,3 +10,5 @@ coverage/
 *.tsbuildinfo
 *.tgz
 .claude/worktrees/
+__pycache__/
+*.pyc

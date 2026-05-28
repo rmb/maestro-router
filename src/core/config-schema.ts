@@ -1,6 +1,7 @@
 // Copyright 2026 Maestro Contributors. SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import type { ZodIssue } from "zod";
 import type { UserConfig } from "./types.js";
 
 /**
@@ -14,15 +15,33 @@ export class ConfigValidationError extends Error {
   }
 }
 
+function formatIssue(issue: ZodIssue): string {
+  const field = issue.path.join(".");
+  const prefix = field ? `  ${field}` : "  (root)";
+  if (issue.code === "invalid_enum_value") {
+    const opts = issue.options.join(" | ");
+    return `${prefix}: must be one of ${opts}, got "${issue.received}"`;
+  }
+  if (issue.code === "invalid_type") {
+    return `${prefix}: expected ${issue.expected}, got ${issue.received}`;
+  }
+  return `${prefix}: ${issue.message}`;
+}
+
 /**
  * Zod schema mirroring `UserConfig`. Every field is optional and `.strip()`
  * removes unknown keys silently.
+ *
+ * The compile-time drift guard below (`_SchemaCoversUserConfig`) causes a TS
+ * error when a new field is added to UserConfig but not to this schema.
+ * `disabledModels` uses `z.array` (without `.readonly()`) because Zod does not
+ * infer `ReadonlyArray` — the guard uses `Required` to normalise optionality.
  */
 export const userConfigSchema = z
   .object({
     profile: z.string().optional(),
     aggressiveness: z.enum(["conservative", "balanced", "aggressive"]).optional(),
-    disabledModels: z.array(z.string()).readonly().optional(),
+    disabledModels: z.array(z.string()).optional(),
     dailyCostCapUsd: z.number().optional(),
     feedbackPrompts: z.enum(["never", "occasional", "always"]).optional(),
     feedbackSampleRate: z.number().optional(),
@@ -61,23 +80,34 @@ export const userConfigSchema = z
   .strip();
 
 /**
+ * Compile-time drift guard: errors if `userConfigSchema` output is missing a
+ * key that exists in `UserConfig`. Add a field to `UserConfig` without adding
+ * it here and TypeScript will report "Type 'false' is not assignable to type
+ * 'true'" pointing at this line.
+ */
+type _SchemaOutput = z.output<typeof userConfigSchema>;
+// Normalise both sides: make all keys required and replace arrays with
+// `unknown[]` so ReadonlyArray vs Array differences don't matter.
+type _NormSchema = { [K in keyof Required<_SchemaOutput>]: unknown };
+type _NormConfig = { [K in keyof Required<UserConfig>]: unknown };
+// This type errors when UserConfig has a key not present in the schema.
+// Exported so both TS and ESLint consider it "used".
+export type SchemaCoversUserConfig = _NormConfig extends _NormSchema
+  ? true
+  : "schema is missing fields from UserConfig — add them to userConfigSchema";
+
+/**
  * Parse raw JSON (from `readJsonOrNull`) into a validated `UserConfig`.
  * Throws `ConfigValidationError` with a human-readable message on failure.
  */
 export function parseUserConfig(raw: unknown): UserConfig {
   const result = userConfigSchema.safeParse(raw);
   if (result.success) {
+    // exactOptionalPropertyTypes: Zod infers `T | undefined` for optional fields
+    // but UserConfig uses `T?`. The values are identical at runtime.
     return result.data as UserConfig;
   }
 
-  const lines = result.error.issues.map((issue) => {
-    const field = issue.path.join(".");
-    const received =
-      "received" in issue ? String((issue as { received: unknown }).received) : "unknown";
-    const expected =
-      "expected" in issue ? String((issue as { expected: unknown }).expected) : issue.message;
-    return field ? `  ${field}: expected ${expected}, got ${received}` : `  ${issue.message}`;
-  });
-
+  const lines = result.error.issues.map(formatIssue);
   throw new ConfigValidationError(`config validation failed:\n${lines.join("\n")}`);
 }

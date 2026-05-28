@@ -152,12 +152,12 @@ export async function loadCliConfig(
   if (!opts.noProject) {
     projectConfigDir = await findProjectConfigDir(opts.cwd ?? process.cwd());
     if (projectConfigDir) {
-      const userProjectRaw = await readJsonOrNull(join(projectConfigDir, "config.json"));
+      const projectConfigPath = join(projectConfigDir, "config.json");
+      const userProjectRaw = await readJsonOrNull(projectConfigPath);
       try {
         userProject = parseUserConfig(userProjectRaw ?? {});
       } catch (err) {
         if (err instanceof ConfigValidationError) {
-          const projectConfigPath = join(projectConfigDir, "config.json");
           process.stderr.write(`maestro: config error in ${projectConfigPath}:\n${formatConfigError(err.message)}\n`);
           process.exit(1);
         }

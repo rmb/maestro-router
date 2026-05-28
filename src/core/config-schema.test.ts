@@ -77,4 +77,17 @@ describe("parseUserConfig", () => {
       expect((err as Error).name).toBe("ConfigValidationError");
     }
   });
+
+  test("invalid enum value throws ConfigValidationError with readable message", () => {
+    try {
+      parseUserConfig({ aggressiveness: "extreme" });
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigValidationError);
+      const msg = (err as Error).message;
+      expect(msg).toContain("aggressiveness");
+      expect(msg).toContain("conservative");
+      expect(msg).not.toMatch(/expected Invalid enum/);
+    }
+  });
 });

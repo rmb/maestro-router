@@ -391,10 +391,27 @@ describe("embeddingOptionsFromConfig", () => {
     ).toEqual({ modelId: "./m", minSimilarity: 0.7 });
   });
 
+  test("only embeddingHeadPath set returns { headPath }", () => {
+    expect(embeddingOptionsFromConfig({ embeddingHeadPath: "./head.json" })).toEqual({
+      headPath: "./head.json",
+    });
+  });
+
+  test("all three set returns all keys", () => {
+    expect(
+      embeddingOptionsFromConfig({
+        embeddingModel: "./m",
+        embeddingMinSimilarity: 0.7,
+        embeddingHeadPath: "./head.json",
+      }),
+    ).toEqual({ modelId: "./m", minSimilarity: 0.7, headPath: "./head.json" });
+  });
+
   test("does not set keys to undefined", () => {
     const result = embeddingOptionsFromConfig({});
     expect("modelId" in result).toBe(false);
     expect("minSimilarity" in result).toBe(false);
+    expect("headPath" in result).toBe(false);
   });
 });
 

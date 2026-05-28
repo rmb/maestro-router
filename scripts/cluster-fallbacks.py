@@ -116,10 +116,12 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Mirror the TS runtime's needsQueryPrefix rule: bge/e5 model families
-    # require a "query: " instruction prefix on every text, or cosine
-    # similarities are misaligned. Prefixing here keeps the clusters consistent
-    # with how the runtime would embed the same prompts.
+    # Approximate the TS runtime's needsQueryPrefix rule: bge/e5 model families
+    # require a "query: " instruction prefix on every text. This uses a looser
+    # substring test than the TS delimited-segment regex (so e.g. "embget" would
+    # match here but not at runtime) — acceptable because these embeddings are
+    # only used for human-facing cluster inspection, not runtime vector
+    # comparison, so a stray prefix only mildly affects cluster quality.
     model_id_lower = args.model.lower()
     needs_prefix = "bge" in model_id_lower or "e5" in model_id_lower
     texts = [f"query: {p}" for p in prompts] if needs_prefix else prompts

@@ -79,6 +79,15 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.75,
     source: "builtin",
   },
+  // Short diagnostic question — "why is this empty?", "why is that broken?"
+  // Confidence 0.6 so Markov can upgrade when prior turns indicate harder context.
+  {
+    pattern: "^\\s*(why|what)\\s+is\\s+(this|that|it|the\\s+\\w{1,20})\\s+(empty|wrong|broken|failing|missing|null|undefined|happening|error|like\\s+this)\\??\\s*$",
+    flags: "i",
+    class: "simple",
+    confidence: 0.6,
+    source: "builtin",
+  },
   {
     pattern: "^\\s*(rename|format|lint)\\s+\\S+(?:\\s+\\S+)?\\s*$",
     flags: "i",

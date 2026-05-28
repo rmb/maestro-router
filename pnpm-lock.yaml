@@ -22,7 +22,7 @@ importers:
         specifier: ^0.18.2
         version: 0.18.2
       '@huggingface/transformers':
-        specifier: ^3.0.0
+        specifier: ^3.0.0 || ^4.0.0
         version: 3.8.1
       '@types/node':
         specifier: ^22.10.5

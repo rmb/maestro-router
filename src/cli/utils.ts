@@ -85,6 +85,9 @@ export const PROJECT_CONFIG_ALLOWED_FIELDS: ReadonlySet<keyof UserConfig> = new 
   "excludeDynamicSections",
   "useEmbeddingClassifier",
   "embeddingModel",
+  // embeddingHeadPath is a local path like embeddingModel — same trust model,
+  // so it's project-scopable for consistency with embeddingModel.
+  "embeddingHeadPath",
   "embeddingMinSimilarity",
 ]);
 
@@ -97,6 +100,7 @@ export function embeddingOptionsFromConfig(config: UserConfig): EmbeddingClassif
   const opts: EmbeddingClassifierOptions = {};
   if (config.embeddingModel !== undefined) opts.modelId = config.embeddingModel;
   if (config.embeddingMinSimilarity !== undefined) opts.minSimilarity = config.embeddingMinSimilarity;
+  if (config.embeddingHeadPath !== undefined) opts.headPath = config.embeddingHeadPath;
   return opts;
 }
 

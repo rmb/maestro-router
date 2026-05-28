@@ -154,6 +154,13 @@ export type UserConfig = {
    */
   embeddingMinSimilarity?: number;
   /**
+   * Path to a SetFit logistic-head JSON exported by `scripts/setfit-train.py`.
+   * When set, the embedding classifier applies the head to the prompt
+   * embedding to produce calibrated per-class probabilities instead of using
+   * cosine-nearest-exemplar; the exemplars file is then not consulted.
+   */
+  embeddingHeadPath?: string;
+  /**
    * Global default append-system-prompt text (X.soft). Overridden per-class
    * by CLASS_BREVITY in spawn.ts. When empty string, no flag is emitted.
    */

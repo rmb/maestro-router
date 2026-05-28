@@ -56,6 +56,11 @@ function fixedEmbed(vec: number[]): EmbedFn {
   return async () => Float32Array.from(vec);
 }
 
+/** Write a SetFit head JSON to the tmpDir. `head` is written verbatim. */
+async function writeHeadFile(path: string, head: unknown): Promise<void> {
+  await writeFile(path, JSON.stringify(head), "utf8");
+}
+
 describe("cosineSimilarity", () => {
   test("identical unit vectors → 1.0", () => {
     expect(cosineSimilarity([1, 0, 0], [1, 0, 0])).toBe(1);
@@ -327,6 +332,152 @@ describe("createEmbeddingClassifier — empty prompt", () => {
     const result = await classifier.classify({ prompt: "" });
     expect(result).toBeNull();
     expect(called).toBe(0);
+  });
+});
+
+describe("SetFit head", () => {
+  // A 2-class head over a tiny dim-3 embedding space.
+  //   coef[0]=[1,0,0] (trivial), coef[1]=[0,1,0] (hard); both intercepts 0.
+  // With embedding [2,0,0]:
+  //   logits = [2, 0]; stable softmax (subtract max=2): exp(0)=1, exp(-2)=0.13533528
+  //   sum=1.13533528; p(trivial)=1/1.13533528 ≈ 0.880797 → argmax index 0 = "trivial".
+  const head2 = {
+    coef: [
+      [1, 0, 0],
+      [0, 1, 0],
+    ],
+    intercept: [0, 0],
+    classes: { trivial: 0, hard: 1 },
+  };
+  const EXPECTED_P = 1 / (1 + Math.exp(-2)); // ≈ 0.8807970779778823
+
+  test("clear winner → returns that class with softmax confidence", async () => {
+    const headPath = join(tmpDir, "head.json");
+    await writeHeadFile(headPath, head2);
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([2, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "anything" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("trivial");
+    expect(result.confidence).toBeCloseTo(EXPECTED_P, 6);
+    expect((result.diagnostics ?? []).some((d) => d.code === "embedding.head_matched")).toBe(true);
+    expect(diagnostics.length).toBe(0);
+  });
+
+  test("bestProb below floor → null + head_low_confidence", async () => {
+    const headPath = join(tmpDir, "head.json");
+    await writeHeadFile(headPath, head2);
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([2, 0, 0]), // p ≈ 0.88
+      minSimilarity: 0.95, // floor above the achievable prob
+      diagnosticSink: sink,
+    });
+    const result = await classifier.classify({ prompt: "p" });
+    expect(result).toBeNull();
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_head_low_confidence")).toBe(true);
+  });
+
+  test("embedding dim ≠ head dim → null + head_dim_mismatch", async () => {
+    const headPath = join(tmpDir, "head.json");
+    await writeHeadFile(headPath, head2); // dim 3
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([1, 0]), // dim 2 — mismatch
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = await classifier.classify({ prompt: "p" });
+    expect(result).toBeNull();
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_head_dim_mismatch")).toBe(true);
+  });
+
+  test("malformed head (length mismatch) → null + head_unavailable", async () => {
+    const headPath = join(tmpDir, "head.json");
+    // intercept has 1 entry but coef/classes have 2 → loader rejects.
+    await writeHeadFile(headPath, {
+      coef: [
+        [1, 0, 0],
+        [0, 1, 0],
+      ],
+      intercept: [0],
+      classes: { trivial: 0, hard: 1 },
+    });
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([2, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = await classifier.classify({ prompt: "p" });
+    expect(result).toBeNull();
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_head_unavailable")).toBe(true);
+  });
+
+  test("malformed head (unknown class name) → null + head_unavailable", async () => {
+    const headPath = join(tmpDir, "head.json");
+    await writeHeadFile(headPath, {
+      coef: [
+        [1, 0, 0],
+        [0, 1, 0],
+      ],
+      intercept: [0, 0],
+      classes: { trivial: 0, bogus: 1 }, // "bogus" is not a valid Class
+    });
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      embed: fixedEmbed([2, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = await classifier.classify({ prompt: "p" });
+    expect(result).toBeNull();
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_head_unavailable")).toBe(true);
+  });
+
+  test("headPath set → exemplars are NOT consulted (no exemplars file needed)", async () => {
+    const headPath = join(tmpDir, "head.json");
+    await writeHeadFile(headPath, head2);
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      headPath,
+      // Point exemplarsPath at a nonexistent file: must NOT be read.
+      exemplarsPath: join(tmpDir, "does-not-exist.json"),
+      embed: fixedEmbed([2, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "x" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("trivial");
+    // Proves the exemplar path was never taken.
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_exemplars_unavailable")).toBe(false);
+  });
+
+  test("no headPath → cosine/exemplar path unchanged", async () => {
+    const path = join(tmpDir, "exemplars.json");
+    await writeExemplarsFile(path, [
+      { class: "trivial", prompt: "x", embedding: [1, 0, 0] },
+      { class: "reasoning", prompt: "y", embedding: [0, 1, 0] },
+    ]);
+    const classifier = createEmbeddingClassifier({
+      exemplarsPath: path,
+      embed: fixedEmbed([0.9, 0.1, 0.05]),
+      minSimilarity: 0.5,
+    });
+    const result = (await classifier.classify({ prompt: "p" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("trivial");
+    expect((result.diagnostics ?? []).some((d) => d.code === "embedding.matched")).toBe(true);
   });
 });
 

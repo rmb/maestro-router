@@ -10,6 +10,7 @@ import {
   computeSeedsChecksum,
   cosineSimilarity,
   createEmbeddingClassifier,
+  needsQueryPrefix,
   type EmbedFn,
 } from "./embedding.js";
 import { EXEMPLAR_SEEDS } from "./exemplars-seeds.js";
@@ -77,6 +78,35 @@ describe("computeSeedsChecksum", () => {
   test("is a 64-char hex string (sha256)", () => {
     const c = computeSeedsChecksum();
     expect(c).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe("needsQueryPrefix", () => {
+  test("true for bge family", () => {
+    expect(needsQueryPrefix("Xenova/bge-small-en-v1.5")).toBe(true);
+    expect(needsQueryPrefix("BAAI/bge-large-en")).toBe(true);
+    expect(needsQueryPrefix("bge-base")).toBe(true);
+  });
+  test("true for e5 family", () => {
+    expect(needsQueryPrefix("intfloat/e5-small-v2")).toBe(true);
+    expect(needsQueryPrefix("intfloat/multilingual-e5-large")).toBe(true);
+    expect(needsQueryPrefix("some/large-e5")).toBe(true);
+  });
+  test("false for MiniLM (the default)", () => {
+    expect(needsQueryPrefix("Xenova/all-MiniLM-L6-v2")).toBe(false);
+  });
+  test("false for gte — must not match e5", () => {
+    expect(needsQueryPrefix("Xenova/gte-small")).toBe(false);
+    expect(needsQueryPrefix("thenlper/gte-base")).toBe(false);
+  });
+  test("case-insensitive", () => {
+    expect(needsQueryPrefix("Xenova/BGE-small")).toBe(true);
+    expect(needsQueryPrefix("intfloat/E5-large")).toBe(true);
+  });
+  test("does not match substrings inside unrelated words", () => {
+    // 'bge'/'e5' embedded in larger alphanumeric tokens should not trigger.
+    expect(needsQueryPrefix("vendor/embget-model")).toBe(false);
+    expect(needsQueryPrefix("vendor/codeword")).toBe(false);
   });
 });
 

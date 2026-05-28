@@ -34,6 +34,19 @@ const DEFAULT_MIN_SIMILARITY = 0.4;
 const DEFAULT_WEIGHT = 0.6;
 const DEFAULT_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 
+/**
+ * The bge/e5 model families require a `query:` instruction prefix prepended to
+ * every text before embedding. Returns true when the model id contains `bge`
+ * or `e5` as a delimited segment (case-insensitive). Exemplars and runtime
+ * prompts MUST use the same prefix or cosine similarities are misaligned.
+ *
+ * Matches: Xenova/bge-small-en-v1.5, intfloat/e5-small-v2, .../large-e5.
+ * Does NOT match: Xenova/all-MiniLM-L6-v2, Xenova/gte-small.
+ */
+export function needsQueryPrefix(modelId: string): boolean {
+  return /(^|[/\-_])(bge|e5)([/\-_]|$|\d)/i.test(modelId);
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_EXEMPLARS_PATH = join(__dirname, "exemplars.json");
 
@@ -210,7 +223,8 @@ function makeDefaultEmbed(modelId: string): EmbedFn {
       })();
     }
     const extractor = await extractorPromise;
-    const output = await extractor(text, { pooling: "mean", normalize: true });
+    const input = needsQueryPrefix(modelId) ? `query: ${text}` : text;
+    const output = await extractor(input, { pooling: "mean", normalize: true });
     return output.data;
   };
 }

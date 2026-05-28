@@ -45,11 +45,14 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^22.10.5",
+    "@types/react": "^18.0.0",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
     "@huggingface/transformers": "^3.0.0",
     "eslint": "^9.18.0",
+    "ink": "^5.0.0",
     "publint": "^0.3.2",
+    "react": "^18.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^8.0.14",
@@ -61,13 +64,21 @@
   },
   "peerDependencies": {
     "@huggingface/transformers": "^3.0.0",
-    "langfuse": "^3.0.0"
+    "ink": "^5.0.0",
+    "langfuse": "^3.0.0",
+    "react": "^18.0.0"
   },
   "peerDependenciesMeta": {
     "@huggingface/transformers": {
       "optional": true
     },
+    "ink": {
+      "optional": true
+    },
     "langfuse": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     }
   }

@@ -26,69 +26,7 @@ import { createSessionStore } from "../wrapper/session.js";
 import { runShellHost } from "../wrapper/sdk-host.js";
 import { resolveRealClaude } from "./wire-compat.js";
 import { loadCliConfig } from "./utils.js";
-
-function formatCwd(cwd: string): string {
-  const home = process.env["HOME"] ?? "";
-  const withTilde = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
-  const rest = withTilde.startsWith("~/") ? withTilde.slice(2) : withTilde.replace(/^\//, "");
-  const parts = rest.split("/").filter(Boolean);
-  if (parts.length <= 2) return withTilde;
-  return `~/…/${parts.slice(-2).join("/")}`;
-}
-
-function printBanner(info?: { cwd: string; resumed: boolean }): void {
-  const isTTY = (process.stdout as { isTTY?: boolean }).isTTY === true;
-  const D = isTTY ? "\x1b[2m" : "";
-  const B = isTTY ? "\x1b[1m" : "";
-  const R = isTTY ? "\x1b[0m" : "";
-  const G = isTTY ? "\x1b[32m" : "";
-  const C = isTTY ? "\x1b[36m" : "";
-  const M = isTTY ? "\x1b[35m" : "";
-  // W = inner box width. Every content line must fill exactly W visible chars.
-  const W = 44;
-  // 17 visible chars: "══ maestro shell "
-  const topInner = `══ ${R}${B}maestro shell${R}${D} ${"═".repeat(W - 17)}`;
-  const emptyInner = " ".repeat(W);
-  const divInner = "═".repeat(W);
-
-  const routeText = "auto-route · cheapest model that works"; // 38 visible
-  const routeInner = "  " + routeText + " ".repeat(W - 2 - routeText.length);
-
-  const haikuVisible = "haiku  ·  sonnet  ·  opus"; // 25 visible
-  const haikuInner = `  ${G}haiku${R}${D}  ·  ${R}${C}sonnet${R}${D}  ·  ${R}${M}opus${R}${D}${" ".repeat(W - 2 - haikuVisible.length)}`;
-
-  // Override hints: color-coded to match their model, dim separators.
-  const hintsVisible = "@fast · @think · @deep  ·  /help"; // 32 visible
-  const hintsInner = `  ${G}@fast${R}${D} · ${R}${C}@think${R}${D} · ${R}${M}@deep${R}${D}  ·  /help${" ".repeat(W - 2 - hintsVisible.length)}`;
-
-  // Status row: cwd + session continuity — dim metadata.
-  const cwdStr = info ? formatCwd(info.cwd) : formatCwd(process.cwd());
-  const sessionStr = info?.resumed ? "resumed" : "new";
-  const statusVisible = `${cwdStr}  ·  ${sessionStr}`;
-  const maxStatusVisible = W - 2;
-  const statusTrunc =
-    statusVisible.length > maxStatusVisible
-      ? statusVisible.slice(0, maxStatusVisible - 1) + "…"
-      : statusVisible;
-  const statusPad = " ".repeat(maxStatusVisible - statusTrunc.length);
-  const statusInner = `  ${D}${statusTrunc}${statusPad}${R}`;
-
-  const lines = [
-    "",
-    ` ${D}╔${topInner}╗${R}`,
-    ` ${D}║${R}${emptyInner}${D}║${R}`,
-    ` ${D}║${R}${routeInner}${D}║${R}`,
-    ` ${D}║${R}${emptyInner}${D}║${R}`,
-    ` ${D}╠${divInner}╣${R}`,
-    ` ${D}║${R}${haikuInner}${D}║${R}`,
-    ` ${D}║${R}${hintsInner}${D}║${R}`,
-    ` ${D}╠${divInner}╣${R}`,
-    ` ${D}║${statusInner}${D}║${R}`,
-    ` ${D}╚${divInner}╝${R}`,
-    "",
-  ];
-  process.stdout.write(lines.join("\n") + "\n");
-}
+import { renderBanner } from "./components/Banner.js";
 
 export function registerShellCommand(program: Command): void {
   program
@@ -153,7 +91,7 @@ export function registerShellCommand(program: Command): void {
         "--session-id", sessionId,
       ];
 
-      printBanner({ cwd: process.cwd(), resumed: !cmdOpts.new && prior !== undefined });
+      await renderBanner({ cwd: process.cwd(), resumed: !cmdOpts.new && prior !== undefined });
 
       const code = await runShellHost({
         realClaude,

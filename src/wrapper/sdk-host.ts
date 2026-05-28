@@ -36,6 +36,8 @@ import type { Pipeline } from "../core/pipeline.js";
 import type { Decision, Profile, UserConfig, Class } from "../core/types.js";
 import type { TelemetryWriter } from "../core/telemetry.js";
 import type { SessionStore } from "./session.js";
+import { startSpinner } from "./components/Spinner.js";
+import type { SpinnerHandle } from "./components/Spinner.js";
 
 export const HOST_INIT_REQUEST_ID = "sdk-host-1";
 
@@ -78,8 +80,6 @@ const COLORS = {
   sonnet: "\x1b[36m", // cyan
   opus: "\x1b[35m", // magenta
 } as const;
-
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function badgeColor(alias: "haiku" | "sonnet" | "opus"): string {
   return COLORS[alias];
@@ -334,19 +334,13 @@ export async function runShellHost(opts: ShellHostOptions): Promise<number> {
   };
 
   // Spinner — runs between prompt submission and first streamed content.
-  let spinnerTimer: ReturnType<typeof setInterval> | null = null;
-  let spinnerIdx = 0;
-  function startSpinner(): void {
+  let activeSpinner: SpinnerHandle | null = null;
+  async function startThinkingSpinner(): Promise<void> {
     if (!useColor) return;
-    spinnerIdx = 0;
-    spinnerTimer = setInterval(() => {
-      opts.output.write(`\r${paint(SPINNER[spinnerIdx % SPINNER.length]! + " thinking…", COLORS.dim)}`);
-      spinnerIdx++;
-    }, 100);
+    activeSpinner = await startSpinner({ output: opts.output, text: "thinking" });
   }
   function clearSpinner(): void {
-    if (spinnerTimer) { clearInterval(spinnerTimer); spinnerTimer = null; }
-    if (useColor) opts.output.write("\r\x1b[K");
+    if (activeSpinner) { activeSpinner.stop(); activeSpinner = null; }
   }
 
   // Cumulative session economics (token-derived; never total_cost_usd).
@@ -632,7 +626,7 @@ export async function runShellHost(opts: ShellHostOptions): Promise<number> {
     turnOutputStarted = false;
     turnStart = now();
     writeUserFrame(text);
-    startSpinner();
+    void startThinkingSpinner();
   }
 
   rl.on("line", (raw) => {
@@ -644,7 +638,7 @@ export async function runShellHost(opts: ShellHostOptions): Promise<number> {
       pendingApproval.resolve(allow);
       pendingApproval = null;
       // Resume spinner since the turn is still in flight.
-      if (inTurn) startSpinner();
+      if (inTurn) void startThinkingSpinner();
       return;
     }
     inputQueue.push(raw);

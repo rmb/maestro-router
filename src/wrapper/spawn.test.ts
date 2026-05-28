@@ -63,7 +63,7 @@ describe("buildClaudeArgs — base shape", () => {
       sessionId: "x",
       isResume: false,
     });
-    expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
+    expect(args[args.indexOf("--model") + 1]).toBe("claude-sonnet-4-6");
     expect(args[args.indexOf("--effort") + 1]).toBe("high");
     expect(args[args.indexOf("--max-budget-usd") + 1]).toBe("3");
   });

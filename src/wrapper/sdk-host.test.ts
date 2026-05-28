@@ -199,7 +199,7 @@ describe("runShellHost", () => {
     const setModel = fc.stdinFrames.find(
       (f) => (f["request"] as { subtype?: string } | undefined)?.subtype === "set_model",
     );
-    expect((setModel?.["request"] as { model?: string })?.model).toBe("haiku");
+    expect((setModel?.["request"] as { model?: string })?.model).toBe("claude-haiku-4-5-20251001");
 
     // Assistant text rendered, HUD shows the haiku badge with high savings.
     expect(out.text()).toContain("echo: explain recursion");
@@ -431,8 +431,8 @@ describe("runShellHost", () => {
       (f) => (f["request"] as { subtype?: string } | undefined)?.subtype === "set_model",
     );
     const models = setModels.map((f) => (f["request"] as { model?: string })?.model);
-    expect(models).toContain("haiku");
-    expect(models).not.toContain("sonnet");
+    expect(models).toContain("claude-haiku-4-5-20251001");
+    expect(models).not.toContain("claude-sonnet-4-6");
 
     input.write("/exit\n");
     await hostPromise;
@@ -473,7 +473,7 @@ describe("runShellHost", () => {
       (f) => (f["request"] as { subtype?: string } | undefined)?.subtype === "set_model",
     );
     const models = setModels.map((f) => (f["request"] as { model?: string })?.model);
-    expect(models).toContain("sonnet");
+    expect(models).toContain("claude-sonnet-4-6");
 
     input.write("/exit\n");
     await hostPromise;

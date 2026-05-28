@@ -128,7 +128,7 @@ describe("runSdkProxy — user message routing", () => {
     expect(setModel.type).toBe("control_request");
     expect(setModel.request.subtype).toBe("set_model");
     // trivial → haiku per balancedProfile
-    expect(setModel.request.model).toBe("haiku");
+    expect(setModel.request.model).toBe("claude-haiku-4-5-20251001");
     expect(setModel.request_id.startsWith(MAESTRO_REQUEST_ID_PREFIX)).toBe(true);
 
     const setThink = JSON.parse(fc.stdinWrites[1]!.trim()) as {

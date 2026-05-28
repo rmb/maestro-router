@@ -30,13 +30,13 @@ describe("builtin profiles", () => {
   });
 
   test("cheap profile uses cheaper models than balanced for mid tiers", () => {
-    expect(cheapProfile.classes.simple.model).toBe("haiku");
-    expect(balancedProfile.classes.simple.model).toBe("sonnet");
+    expect(cheapProfile.classes.simple.model).toBe("claude-haiku-4-5-20251001");
+    expect(balancedProfile.classes.simple.model).toBe("claude-sonnet-4-6");
   });
 
   test("quality profile uses opus more often than balanced", () => {
-    expect(qualityProfile.classes.hard.model).toBe("opus");
-    expect(balancedProfile.classes.hard.model).toBe("sonnet");
+    expect(qualityProfile.classes.hard.model).toBe("claude-opus-4-8");
+    expect(balancedProfile.classes.hard.model).toBe("claude-sonnet-4-6");
   });
 
   test("balanced trivial has --bare and restricted tools", () => {
@@ -94,7 +94,7 @@ describe("applyOverrides", () => {
       standard: { maxBudgetUsd: 1.5 },
     });
     expect(result.classes.standard.maxBudgetUsd).toBe(1.5);
-    expect(result.classes.standard.model).toBe("sonnet"); // preserved
+    expect(result.classes.standard.model).toBe("claude-sonnet-4-6"); // preserved
     expect(result.classes.trivial.maxBudgetUsd).toBe(0.05); // untouched
   });
 
@@ -170,9 +170,9 @@ describe("loadProfile", () => {
   });
 });
 
-// Sanity: profiles never have a model that isn't one of haiku/sonnet/opus
+// Sanity: profiles never have a model that isn't a known versioned ID
 test("all builtin profiles use only known model aliases", () => {
-  const known = new Set(["haiku", "sonnet", "opus"]);
+  const known = new Set(["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8"]);
   for (const [, profile] of Object.entries(builtinProfiles) as [string, Profile][]) {
     for (const cls of ALL_CLASSES) {
       expect(known.has(profile.classes[cls].model)).toBe(true);

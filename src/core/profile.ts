@@ -34,7 +34,7 @@ export const balancedProfile: Profile = {
   name: "balanced",
   classes: {
     trivial: {
-      model: "haiku",
+      model: "claude-haiku-4-5-20251001",
       effort: "low",
       tools: "Read,Edit",
       bare: true,
@@ -43,7 +43,7 @@ export const balancedProfile: Profile = {
       noPersist: true,
     },
     simple: {
-      model: "sonnet",
+      model: "claude-sonnet-4-6",
       effort: "low",
       tools: "default",
       mcpConfig: '{"mcpServers":{}}',
@@ -52,10 +52,10 @@ export const balancedProfile: Profile = {
     // P8: standard/hard isolate inherited MCP servers (saves 3-10k cache_creation
     // tokens on machines with active MCP configs). Tools left as "default" — MCP
     // isolation is the cheaper win without restricting tool access.
-    standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 1.0, maxOutputTokens: 16000 },
-    hard: { model: "sonnet", effort: "high", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
-    reasoning: { model: "opus", effort: "xhigh", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
-    max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
+    standard: { model: "claude-sonnet-4-6", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 1.0, maxOutputTokens: 16000 },
+    hard: { model: "claude-sonnet-4-6", effort: "high", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 3.0, maxOutputTokens: 4000 },
+    reasoning: { model: "claude-opus-4-8", effort: "xhigh", tools: "default", maxBudgetUsd: 5.0, maxOutputTokens: 6000 },
+    max: { model: "claude-opus-4-8", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };
 
@@ -64,7 +64,7 @@ export const cheapProfile: Profile = {
   name: "cheap",
   classes: {
     trivial: {
-      model: "haiku",
+      model: "claude-haiku-4-5-20251001",
       effort: "low",
       tools: "Read,Edit",
       bare: true,
@@ -73,17 +73,17 @@ export const cheapProfile: Profile = {
       noPersist: true,
     },
     simple: {
-      model: "haiku",
+      model: "claude-haiku-4-5-20251001",
       effort: "low",
       tools: "default",
       mcpConfig: '{"mcpServers":{}}',
       maxBudgetUsd: 0.1,
     },
     // P8: cheap profile also gets MCP isolation on standard/hard
-    standard: { model: "sonnet", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
-    hard: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 2.0 },
-    reasoning: { model: "sonnet", effort: "xhigh", tools: "default", maxBudgetUsd: 3.0 },
-    max: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
+    standard: { model: "claude-sonnet-4-6", effort: "low", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
+    hard: { model: "claude-sonnet-4-6", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 2.0 },
+    reasoning: { model: "claude-sonnet-4-6", effort: "xhigh", tools: "default", maxBudgetUsd: 3.0 },
+    max: { model: "claude-opus-4-8", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
   },
 };
 
@@ -92,7 +92,7 @@ export const qualityProfile: Profile = {
   name: "quality",
   classes: {
     trivial: {
-      model: "haiku",
+      model: "claude-haiku-4-5-20251001",
       effort: "low",
       tools: "Read,Edit",
       bare: true,
@@ -100,11 +100,11 @@ export const qualityProfile: Profile = {
       maxBudgetUsd: 0.1,
       noPersist: true,
     },
-    simple: { model: "sonnet", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
-    standard: { model: "sonnet", effort: "high", tools: "default", maxBudgetUsd: 2.0 },
-    hard: { model: "opus", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
-    reasoning: { model: "opus", effort: "xhigh", tools: "default", maxBudgetUsd: 10.0 },
-    max: { model: "opus", effort: "max", tools: "default", maxBudgetUsd: 20.0 },
+    simple: { model: "claude-sonnet-4-6", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
+    standard: { model: "claude-sonnet-4-6", effort: "high", tools: "default", maxBudgetUsd: 2.0 },
+    hard: { model: "claude-opus-4-8", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
+    reasoning: { model: "claude-opus-4-8", effort: "xhigh", tools: "default", maxBudgetUsd: 10.0 },
+    max: { model: "claude-opus-4-8", effort: "max", tools: "default", maxBudgetUsd: 20.0 },
   },
 };
 

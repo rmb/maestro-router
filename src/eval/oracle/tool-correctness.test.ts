@@ -151,6 +151,44 @@ describe("checkFingerprintStability", () => {
     const result = checkFingerprintStability([], [session]);
     expect(result.gate).toBe("≥95%");
   });
+
+  test("uses stored decision.fingerprint when present, bypassing computeFingerprint(spec)", () => {
+    // The stored fingerprint is an opaque runtime value that cannot be reproduced
+    // from spec alone (it also reflects effectiveBare, resolvedAppendPrompt, etc.).
+    // When event.decision.fingerprint is set it must be used directly.
+    const storedFp = "runtime-fp-abc123";
+    const session = makeSession({ fingerprint: storedFp });
+
+    // Build an event whose spec fingerprint would NOT match storedFp, but whose
+    // stored decision.fingerprint does — this proves the oracle reads the stored value.
+    const event: Extract<TelemetryEvent, { type: "decision" }> = {
+      ...makeDecision({ model: "sonnet" }),
+      decision: {
+        ...makeDecision({ model: "sonnet" }).decision,
+        fingerprint: storedFp,
+      },
+    };
+
+    const result = checkFingerprintStability([event], [session]);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("100.0%");
+    expect(result.detail).toBeUndefined();
+  });
+
+  test("falls back to computeFingerprint(spec) when decision.fingerprint is absent", () => {
+    // Old events without stored fingerprints still match via spec recomputation.
+    const spec = { model: "haiku", effort: "low" as const, maxBudgetUsd: 0.05 };
+    const fp = computeFingerprint(spec);
+    const session = makeSession({ fingerprint: fp });
+
+    const event = makeDecision({ model: "haiku", effort: "low" });
+    // Confirm no fingerprint field is set (makeDecision does not set it)
+    expect((event.decision as { fingerprint?: string }).fingerprint).toBeUndefined();
+
+    const result = checkFingerprintStability([event], [session]);
+    expect(result.pass).toBe(true);
+    expect(result.value).toBe("100.0%");
+  });
 });
 
 // ---------------------------------------------------------------------------

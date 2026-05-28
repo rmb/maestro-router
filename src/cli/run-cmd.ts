@@ -530,6 +530,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       const decisionWithCacheHit: Decision = {
         ...effectiveDecision,
         cacheHit: (effectiveParsed?.cost?.cacheReadInputTokens ?? 0) > 0,
+        fingerprint: fp,
         ...(t4OriginalCost !== null
           ? {
               diagnostics: [

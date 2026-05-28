@@ -72,8 +72,7 @@ export function checkFingerprintStability(
 
   let matched = 0;
   for (const event of decisionEvents) {
-    const spec = event.decision.spec;
-    const fingerprint = computeFingerprint(spec);
+    const fingerprint = event.decision.fingerprint ?? computeFingerprint(event.decision.spec);
     const found = computedSessions.some(
       (s) => s.systemPromptFingerprint === fingerprint,
     );

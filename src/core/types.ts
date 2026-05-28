@@ -323,6 +323,8 @@ export type Decision = {
   latencyMs: number;
   diagnostics: ReadonlyArray<Diagnostic>;
   cacheHit?: boolean;
+  /** Track Z fingerprint computed at routing time. Stored for oracle verification. */
+  fingerprint?: string;
 };
 
 /** Token + cost data parsed from `claude --output-format json`. */

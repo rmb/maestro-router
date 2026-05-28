@@ -104,7 +104,7 @@ For all other prompts, Maestro runs up to 8 classifiers in cheapest-first order.
 | Tool-override | Model hints embedded in tool names or outputs | $0 |
 | Markov | Recent session class history (prior 5 turns) | $0 |
 | Heuristic | 45+ compiled regexes (git ops, renames, incidents, design vocab) | $0 |
-| Embedding | ONNX cosine similarity vs. ~60 labeled examples (optional) | ~$0 CPU |
+| Embedding | ONNX cosine similarity vs. 76 labeled exemplars (optional) | ~$0 CPU |
 | LLM | Haiku via `--json-schema` for genuinely ambiguous prompts | ~$0.001 |
 
 If no stage clears the threshold, a weighted vote runs across all sub-threshold results. If that still produces no winner, the prompt defaults to `standard`. The fallback is tracked separately in telemetry so you can see classifier coverage gaps in `maestro stats`.
@@ -159,7 +159,7 @@ For every prompt, Maestro runs an 8-stage classifier pipeline — cheapest stage
 4. **Tool-override** — model hints embedded in tool names or outputs
 5. **Markov** — recent session class history biases toward the session's dominant class
 6. **Heuristic** — 45+ regex rules for common patterns (git ops, refactors, debug questions) plus your own learned rules
-7. **Embedding** — ONNX cosine similarity against ~60 labeled examples (optional)
+7. **Embedding** — ONNX cosine similarity against 76 labeled exemplars (optional)
 8. **LLM** — Haiku via `--json-schema` for genuinely ambiguous prompts (~$0.001/call, off by default)
 
 The winner maps to one of six classes: **trivial → simple → standard → hard → reasoning → max**, each with a configured model, effort level, and cost ceiling. No match defaults to `standard`.
@@ -301,13 +301,42 @@ Built-in profiles: `balanced` (default), `cheap` (Haiku-biased), `quality` (Opus
 
 **`autoCompact`** — when `true`, Maestro injects `/compact` into the VSCode panel conversation before the next user message whenever `cache_read_input_tokens` exceeds `autoCompactThresholdTokens` (default 300k). This keeps context windows manageable without manual intervention. Fires only once per threshold crossing; resets if you manually send `/compact`. The `maestro stats` output includes a "compact hints" counter showing how often the advisory fired.
 
-**`embeddingModel`** — override the ONNX model used by the embedding classifier. Defaults to `Xenova/all-MiniLM-L6-v2` when `@xenova/transformers` is installed.
+**`embeddingModel`** — override the ONNX model used by the embedding classifier. Defaults to `Xenova/all-MiniLM-L6-v2` when `@xenova/transformers` is installed. When you change this you must rebuild the exemplars with the same model (see below) — a model/exemplar mismatch is rejected at runtime with the `fallback.embedding_model_mismatch` diagnostic.
+
+**`embeddingMinSimilarity`** — the embedding classifier's confidence floor, a number in `[0,1]` (default `0.4`). On the default cosine path it is the minimum cosine similarity; on the SetFit head path it is the minimum calibrated probability. Below the floor the classifier abstains and the pipeline falls through.
+
+**`embeddingHeadPath`** — path to a SetFit logistic-head JSON. When set, the embedding classifier applies the head to the prompt embedding to produce calibrated per-class probabilities instead of cosine-nearest-exemplar (the exemplars file is then not consulted). Requires a matching `embeddingModel` — the embedding dimension must match the head, else `fallback.embedding_head_dim_mismatch` fires.
+
+All three (`embeddingModel`, `embeddingMinSimilarity`, `embeddingHeadPath`) are per-project-scopable like the other embedding settings.
+
+### Tuning the embedding classifier (advanced)
+
+To cut the router's fallback rate you can swap in a stronger embedding model, replace cosine-nearest with a calibrated head, or tune the confidence floor against your own logs.
+
+```bash
+# Swap the embedding model — rebuild exemplars with the same model you'll run.
+# bge/e5 families get a "query:" prefix automatically at embed-time and runtime.
+MAESTRO_EMBED_MODEL=Xenova/bge-small-en-v1.5 pnpm embed
+
+# SetFit logistic head — calibrated per-class probabilities instead of cosine.
+maestro export-prompts --setfit > setfit-data.jsonl
+python scripts/setfit-train.py --export-head-json ~/.maestro/maestro-head.json
+# then set BOTH embeddingModel and embeddingHeadPath in config to point at them
+# (--export-head-json supports only the default sklearn head, not a torch head)
+
+# Discover missing exemplar classes from the forced-standard corpus (UMAP+HDBSCAN).
+# Add the surfaced seeds to src/classifiers/exemplars-seeds.ts, then `pnpm embed`.
+python scripts/cluster-fallbacks.py
+
+# Pick embeddingMinSimilarity from logged embedding.matched similarities.
+python scripts/calibrate-threshold.py
+```
 
 ### Per-project config
 
 Drop a `.maestro/` directory anywhere in your repo. Maestro walks up from `cwd` and loads the nearest one, layered on top of your global config. Useful for repos that need a different profile or extra heuristic rules without affecting your other projects.
 
-Allowed per-project fields: `profile`, `excludeDynamicSections`, `useEmbeddingClassifier`. Fields like `telemetryPath` and billing caps are global-only so a committed `.maestro/config.json` can't silently affect teammates.
+Allowed per-project fields: `profile`, `excludeDynamicSections`, `useEmbeddingClassifier`, `embeddingMinSimilarity`, `embeddingHeadPath`. Fields like `telemetryPath` and billing caps are global-only so a committed `.maestro/config.json` can't silently affect teammates.
 
 ---
 

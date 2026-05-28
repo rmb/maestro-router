@@ -58,6 +58,7 @@ import { condensePaste } from "../wrapper/paste.js";
 import { detectContinuation } from "../wrapper/continuation.js";
 import { applyFirstTurnGuard } from "../wrapper/first-turn-guard.js";
 import { format, loadCliConfig, readState } from "./utils.js";
+import { classifyCompactionCandidate } from "../core/compaction.js";
 
 const log = (msg: string, quiet?: boolean): void => {
   if (!quiet) process.stderr.write(`[maestro] ${msg}\n`);
@@ -346,6 +347,11 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         }
       }
 
+      // Compaction candidate advisory: proactive hint when a large prompt arrives into
+      // an active session. Non-blocking — only appends diagnostics to the decision so
+      // stats can surface "N turns were compaction candidates" without changing routing.
+      const compactionHints = classifyCompactionCandidate(effectivePrompt.length, currentSessionCacheRead);
+
       // E1.escalate: upgrade effort on sessions where a prior standard turn hit max_tokens
       const isEscalated = session.isNew ? false : await sessions.getEffortEscalated(session.sessionId);
       let effectiveDecision: Decision = {
@@ -375,6 +381,14 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         : effectiveDecision;
       if (isFirstTurn && runCmdGuardEnabled && effectiveDecision.spec.model !== decision.spec.model) {
         log(`first-turn guard: ${decision.spec.model} → ${effectiveDecision.spec.model} (avoid $3-12 boot cost)`, quiet);
+      }
+
+      // Merge compaction candidate hints into the final decision diagnostics.
+      if (compactionHints.length > 0) {
+        effectiveDecision = {
+          ...effectiveDecision,
+          diagnostics: [...effectiveDecision.diagnostics, ...compactionHints],
+        };
       }
 
       // M1 continuation: previously injected the hint via appendSystemPrompt

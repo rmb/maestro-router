@@ -70,6 +70,8 @@ type Summary = {
   freshSessionCount: number;
   /** Count of auto-compact events fired in this window. */
   autoCompactCount: number;
+  /** Count of decision events that had a compaction.candidate hint. */
+  compactionCandidateCount: number;
   perClass: Record<
     Class,
     {
@@ -157,6 +159,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
   let cacheReadCostUsd = 0;
   let freshSessionCount = 0;
   let autoCompactCount = 0;
+  let compactionCandidateCount = 0;
 
   for (const e of events) {
     if (e.type === "decision") {
@@ -205,6 +208,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         durationApiMsByClass[cls].push(e.cost.durationApiMs);
       }
       if (e.isNewSession === true) freshSessionCount++;
+      if (e.decision.diagnostics.some((d) => d.code === "compaction.candidate")) compactionCandidateCount++;
     } else if (e.type === "override") {
       const key = `${e.from}>${e.to}`;
       const cur = overridePairs.get(key) ?? { from: e.from, to: e.to, count: 0 };
@@ -253,6 +257,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     freshSessionRate: totalRequests > 0 ? round(freshSessionCount / totalRequests, 4) : 0,
     freshSessionCount,
     autoCompactCount,
+    compactionCandidateCount,
     perClass: perClassOut,
     topOverrides: [...overridePairs.values()].sort((a, b) => b.count - a.count).slice(0, 5),
     fallbackRate: totalRequests > 0 ? fallbackCount / totalRequests : 0,
@@ -333,6 +338,12 @@ function renderHuman(s: Summary): string {
   if (s.autoCompactCount > 0) {
     lines.push(
       `  ${bold("auto-compacts")}   ${cyan(String(s.autoCompactCount))}`,
+    );
+  }
+  if (s.compactionCandidateCount > 0) {
+    const pctOf = s.totalRequests > 0 ? ` (${pct(s.compactionCandidateCount / s.totalRequests, 1)})` : "";
+    lines.push(
+      `  ${bold("compact hints")}   ${cyan(String(s.compactionCandidateCount))}${dim(pctOf)}  ${dim("turns with large prompt + active session")}`,
     );
   }
 

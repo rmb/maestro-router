@@ -214,6 +214,52 @@ describe("createEmbeddingClassifier — checksum drift", () => {
   });
 });
 
+describe("createEmbeddingClassifier — model/exemplar mismatch", () => {
+  test("classifier modelId differs from file model → null + model_mismatch", async () => {
+    const path = join(tmpDir, "exemplars.json");
+    await writeExemplarsFile(
+      path,
+      [{ class: "trivial", prompt: "x", embedding: [1, 0, 0] }],
+      { model: "Xenova/bge-small-en-v1.5" },
+    );
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      exemplarsPath: path,
+      modelId: "Xenova/all-MiniLM-L6-v2", // differs from the file's model
+      embed: fixedEmbed([1, 0, 0]),
+      diagnosticSink: sink,
+    });
+    const result = await classifier.classify({ prompt: "anything" });
+    expect(result).toBeNull();
+    const mismatch = diagnostics.find((d) => d.code === "fallback.embedding_model_mismatch");
+    expect(mismatch).toBeDefined();
+    expect(mismatch?.severity).toBe("warning");
+    expect(mismatch?.message).toContain("Xenova/bge-small-en-v1.5");
+    expect(mismatch?.message).toContain("Xenova/all-MiniLM-L6-v2");
+  });
+
+  test("matching model proceeds to classification", async () => {
+    const path = join(tmpDir, "exemplars.json");
+    await writeExemplarsFile(
+      path,
+      [{ class: "trivial", prompt: "x", embedding: [1, 0, 0] }],
+      { model: "Xenova/bge-small-en-v1.5" },
+    );
+    const { sink, diagnostics } = makeSink();
+    const classifier = createEmbeddingClassifier({
+      exemplarsPath: path,
+      modelId: "Xenova/bge-small-en-v1.5", // matches the file's model
+      embed: fixedEmbed([1, 0, 0]),
+      minSimilarity: 0.5,
+      diagnosticSink: sink,
+    });
+    const result = (await classifier.classify({ prompt: "p" })) as Classification;
+    expect(result).not.toBeNull();
+    expect(result.class).toBe("trivial");
+    expect(diagnostics.some((d) => d.code === "fallback.embedding_model_mismatch")).toBe(false);
+  });
+});
+
 describe("createEmbeddingClassifier — minSimilarity threshold", () => {
   test("similarity below threshold → null + low_similarity diagnostic", async () => {
     const path = join(tmpDir, "exemplars.json");

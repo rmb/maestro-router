@@ -44,6 +44,9 @@ const DEFAULT_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
  * Does NOT match: Xenova/all-MiniLM-L6-v2, Xenova/gte-small.
  */
 export function needsQueryPrefix(modelId: string): boolean {
+  // Match `bge`/`e5` only as a whole `/`-`-`-`_`-delimited segment, anchored at
+  // a boundary on both sides; the trailing `\d` branch lets versioned families
+  // like `e5-large`/`bge2` match while a fused token like `embget` does not.
   return /(^|[/\-_])(bge|e5)([/\-_]|$|\d)/i.test(modelId);
 }
 
@@ -142,11 +145,12 @@ async function loadExemplars(path: string): Promise<ExemplarsFile> {
   }
   if (
     typeof parsed.version !== "string" ||
+    typeof parsed.model !== "string" ||
     typeof parsed.seedsChecksum !== "string" ||
     !Array.isArray(parsed.vectors)
   ) {
     throw new ExemplarsLoadError(
-      `embedding classifier: ${path} missing required fields (version, seedsChecksum, vectors)`,
+      `embedding classifier: ${path} missing required fields (version, model, seedsChecksum, vectors)`,
     );
   }
   const expected = computeSeedsChecksum();
@@ -273,6 +277,18 @@ export function createEmbeddingClassifier(
         "warning",
         "fallback.embedding_exemplars_unavailable",
         (err as Error).message,
+      );
+    }
+
+    // The seedsChecksum only covers seed TEXT, not the model — so a file
+    // embedded with one model and a classifier configured with another would
+    // pass the checksum but compare vectors from different embedding spaces
+    // (and possibly different dimensions). Guard against that misalignment.
+    if (exemplars.model !== modelId) {
+      return emit(
+        "warning",
+        "fallback.embedding_model_mismatch",
+        `exemplars.json was embedded with "${exemplars.model}" but classifier is configured for "${modelId}". Re-run \`pnpm embed\` with the same model or fix \`embeddingModel\` in config.`,
       );
     }
 

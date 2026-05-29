@@ -146,6 +146,23 @@ export type UserConfig = {
    */
   embeddingModel?: string;
   /**
+   * Override the embedding classifier's confidence floor (default 0.4). On the
+   * default cosine-exemplar path this is the minimum cosine similarity; on the
+   * SetFit head path (`embeddingHeadPath`) it is the minimum calibrated class
+   * probability. Below the floor, the classifier returns null and the prompt
+   * falls through. Lower it to increase embedding coverage (fewer fallbacks) at
+   * the risk of lower-confidence matches; raise it to be more conservative.
+   * Must be in [0, 1].
+   */
+  embeddingMinSimilarity?: number;
+  /**
+   * Path to a SetFit logistic-head JSON exported by `scripts/setfit-train.py`.
+   * When set, the embedding classifier applies the head to the prompt
+   * embedding to produce calibrated per-class probabilities instead of using
+   * cosine-nearest-exemplar; the exemplars file is then not consulted.
+   */
+  embeddingHeadPath?: string;
+  /**
    * Global default append-system-prompt text (X.soft). Overridden per-class
    * by CLASS_BREVITY in spawn.ts. When empty string, no flag is emitted.
    */

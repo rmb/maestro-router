@@ -3,6 +3,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
+import type { EmbeddingClassifierOptions } from "../classifiers/embedding.js";
 import { loadUserHeuristics } from "../classifiers/heuristic.js";
 import { ConfigValidationError, parseUserConfig } from "../core/config-schema.js";
 import type {
@@ -84,7 +85,24 @@ export const PROJECT_CONFIG_ALLOWED_FIELDS: ReadonlySet<keyof UserConfig> = new 
   "excludeDynamicSections",
   "useEmbeddingClassifier",
   "embeddingModel",
+  // embeddingHeadPath is a local path like embeddingModel — same trust model,
+  // so it's project-scopable for consistency with embeddingModel.
+  "embeddingHeadPath",
+  "embeddingMinSimilarity",
 ]);
+
+/**
+ * Builds the options object for `createEmbeddingClassifier` from user config.
+ * Keys are included only when their source field is set, so the result never
+ * carries explicit `undefined` values (rejected under exactOptionalPropertyTypes).
+ */
+export function embeddingOptionsFromConfig(config: UserConfig): EmbeddingClassifierOptions {
+  const opts: EmbeddingClassifierOptions = {};
+  if (config.embeddingModel !== undefined) opts.modelId = config.embeddingModel;
+  if (config.embeddingMinSimilarity !== undefined) opts.minSimilarity = config.embeddingMinSimilarity;
+  if (config.embeddingHeadPath !== undefined) opts.headPath = config.embeddingHeadPath;
+  return opts;
+}
 
 /**
  * Returns a copy of `project` with every key that is not in

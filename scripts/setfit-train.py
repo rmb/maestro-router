@@ -9,10 +9,16 @@ Usage:
     python scripts/setfit-train.py --input maestro-setfit.jsonl \\
         --base-model BAAI/bge-small-en-v1.5 \\
         --output-dir ./maestro-setfit-model
+    python scripts/setfit-train.py --input maestro-setfit.jsonl \\
+        --output-dir ./maestro-setfit-model \\
+        --export-head-json ./maestro-setfit-head.json
 
 After training, point Maestro at the model:
     # ~/.maestro/config.json
     { "embeddingModel": "./maestro-setfit-model" }
+
+With --export-head-json, also set embeddingHeadPath so the runtime applies
+the calibrated logistic head (see the "Next step" line printed at the end).
 """
 
 import argparse
@@ -52,6 +58,82 @@ def build_label_map(rows: list[dict]) -> dict[str, int]:
     """Return a stable label → integer ID mapping (sorted for reproducibility)."""
     labels = sorted({r["label"] for r in rows})
     return {label: idx for idx, label in enumerate(labels)}
+
+
+def export_head_json(model, id2label: dict[int, str], path: Path) -> bool:
+    """Serialize the trained SetFit logistic head to the JSON shape Maestro's
+    TS runtime (`src/classifiers/embedding.ts`, type `SetFitHead`) loads.
+
+    Output shape (validated strictly by the TS loader):
+        { "coef": [[...], ...],      # [nClasses][embeddingDim]
+          "intercept": [...],        # length nClasses
+          "classes": { "<name>": <rowIndex>, ... } }
+
+    Returns True on success, False if the head can't be exported (caller keeps
+    the already-saved model dir — we never crash a successful training run).
+
+    Row ordering: the SetFit default head is an sklearn LogisticRegression at
+    `model.model_head`. Its `.coef_` rows are ordered by `.classes_` (the
+    integer labels seen during fit), NOT by label_map insertion order. So for
+    each row index `i`, the integer label is `model_head.classes_[i]` and the
+    class NAME is `id2label[int(model_head.classes_[i])]`.
+    """
+    head = getattr(model, "model_head", None)
+    if head is None:
+        print(
+            "error: model has no `model_head`; cannot export logistic head. "
+            "The model dir was still saved.",
+            file=sys.stderr,
+        )
+        return False
+
+    coef = getattr(head, "coef_", None)
+    intercept = getattr(head, "intercept_", None)
+    classes = getattr(head, "classes_", None)
+    if coef is None or intercept is None or classes is None:
+        print(
+            "error: model_head lacks coef_/intercept_/classes_ (likely a "
+            "differentiable torch head, not sklearn LogisticRegression). "
+            "Head export skipped; the model dir was still saved.",
+            file=sys.stderr,
+        )
+        return False
+
+    coef_list = coef.tolist()
+    intercept_list = intercept.tolist()
+    class_ints = [int(c) for c in classes.tolist()]
+
+    if len(coef_list) == 1 and len(class_ints) == 2:
+        # Binary case: sklearn LogisticRegression emits a SINGLE coef row /
+        # intercept for the positive class (classes_[1]). The TS side needs two
+        # rows for a 2-way softmax. We emit a zero reference row for the
+        # negative class (classes_[0]) and the real row for the positive class.
+        # This is mathematically exact: softmax([0, z]) == sigmoid(z), the
+        # logistic probability of the positive class, so the decision boundary
+        # is preserved.
+        dim = len(coef_list[0])
+        out_coef = [[0.0] * dim, list(coef_list[0])]
+        out_intercept = [0.0, float(intercept_list[0])]
+        class_map = {
+            id2label[class_ints[0]]: 0,
+            id2label[class_ints[1]]: 1,
+        }
+    else:
+        # >=3 classes (multinomial / OvR): coef_ is [nClasses, dim], intercept_
+        # is [nClasses]. Emit rows directly, mapping name -> row index via the
+        # classes_ order.
+        out_coef = [list(row) for row in coef_list]
+        out_intercept = [float(v) for v in intercept_list]
+        class_map = {id2label[lbl]: i for i, lbl in enumerate(class_ints)}
+
+    payload = {
+        "coef": out_coef,
+        "intercept": out_intercept,
+        "classes": class_map,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return True
 
 
 def main() -> None:
@@ -97,6 +179,15 @@ def main() -> None:
         type=int,
         default=42,
         help="Random seed for reproducible train/test splitting.",
+    )
+    parser.add_argument(
+        "--export-head-json",
+        default=None,
+        help=(
+            "If set, also serialize the trained logistic head to this JSON path "
+            "for Maestro's embeddingHeadPath (type SetFitHead in embedding.ts). "
+            "Lets the runtime apply calibrated per-class probabilities."
+        ),
     )
     args = parser.parse_args()
 
@@ -224,6 +315,22 @@ def main() -> None:
         f"\nNext step: set embeddingModel in ~/.maestro/config.json:\n"
         f'  {{ "embeddingModel": "{output_dir.resolve()}" }}'
     )
+
+    # Optional: export the logistic head as JSON for the TS runtime. Done after
+    # the model dir is already saved so a head-export failure never loses the
+    # trained model.
+    if args.export_head_json:
+        head_path = Path(args.export_head_json)
+        if export_head_json(model, id2label, head_path):
+            print(f"\nLogistic head exported to {head_path}")
+            print(
+                "\nNext step: set BOTH keys in ~/.maestro/config.json so the "
+                "runtime applies the calibrated head:\n"
+                f"  {{\n"
+                f'    "embeddingModel": "{output_dir.resolve()}",\n'
+                f'    "embeddingHeadPath": "{head_path.resolve()}"\n'
+                f"  }}"
+            )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,14 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { filterProjectConfig, format, loadCliConfig, wrap, writeUserConfig } from "./utils.js";
+import {
+  embeddingOptionsFromConfig,
+  filterProjectConfig,
+  format,
+  loadCliConfig,
+  wrap,
+  writeUserConfig,
+} from "./utils.js";
 
 let dir: string;
 let prevMaestroHome: string | undefined;
@@ -325,6 +332,7 @@ describe("loadCliConfig — allowed-field integration", () => {
       profile: "quality",
       excludeDynamicSections: true,
       useEmbeddingClassifier: false,
+      embeddingMinSimilarity: 0.55,
       telemetryPath: "/should/be/removed",
       feedbackSampleRate: 0.99,
       useLlmClassifierInWrapper: true,
@@ -336,6 +344,7 @@ describe("loadCliConfig — allowed-field integration", () => {
       profile: "quality",
       excludeDynamicSections: true,
       useEmbeddingClassifier: false,
+      embeddingMinSimilarity: 0.55,
     });
     expect("telemetryPath" in result).toBe(false);
     expect("feedbackSampleRate" in result).toBe(false);
@@ -356,6 +365,53 @@ describe("loadCliConfig — allowed-field integration", () => {
     const original = { ...input };
     filterProjectConfig(input);
     expect(input).toEqual(original);
+  });
+});
+
+describe("embeddingOptionsFromConfig", () => {
+  test("empty config returns empty options", () => {
+    expect(embeddingOptionsFromConfig({})).toEqual({});
+  });
+
+  test("only embeddingModel set returns { modelId }", () => {
+    expect(embeddingOptionsFromConfig({ embeddingModel: "./my-model" })).toEqual({
+      modelId: "./my-model",
+    });
+  });
+
+  test("only embeddingMinSimilarity set returns { minSimilarity }", () => {
+    expect(embeddingOptionsFromConfig({ embeddingMinSimilarity: 0.3 })).toEqual({
+      minSimilarity: 0.3,
+    });
+  });
+
+  test("both set returns both keys", () => {
+    expect(
+      embeddingOptionsFromConfig({ embeddingModel: "./m", embeddingMinSimilarity: 0.7 }),
+    ).toEqual({ modelId: "./m", minSimilarity: 0.7 });
+  });
+
+  test("only embeddingHeadPath set returns { headPath }", () => {
+    expect(embeddingOptionsFromConfig({ embeddingHeadPath: "./head.json" })).toEqual({
+      headPath: "./head.json",
+    });
+  });
+
+  test("all three set returns all keys", () => {
+    expect(
+      embeddingOptionsFromConfig({
+        embeddingModel: "./m",
+        embeddingMinSimilarity: 0.7,
+        embeddingHeadPath: "./head.json",
+      }),
+    ).toEqual({ modelId: "./m", minSimilarity: 0.7, headPath: "./head.json" });
+  });
+
+  test("does not set keys to undefined", () => {
+    const result = embeddingOptionsFromConfig({});
+    expect("modelId" in result).toBe(false);
+    expect("minSimilarity" in result).toBe(false);
+    expect("headPath" in result).toBe(false);
   });
 });
 

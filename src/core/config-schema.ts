@@ -54,6 +54,8 @@ export const userConfigSchema = z
     useLlmClassifierInWrapper: z.boolean().optional(),
     useEmbeddingClassifier: z.boolean().optional(),
     embeddingModel: z.string().optional(),
+    embeddingMinSimilarity: z.number().min(0).max(1).optional(),
+    embeddingHeadPath: z.string().optional(),
     appendSystemPrompt: z.string().optional(),
     posthogApiKey: z.string().optional(),
     posthogQueryKey: z.string().optional(),

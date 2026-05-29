@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.5.0 — 2026-05-29 · Fallback-rate reduction: model swapping, tunable threshold, SetFit head
+
+**Problem:** The embedding classifier was locked to a single ONNX model with a fixed confidence floor and a single nearest-exemplar strategy. Prompts that didn't resemble the 76 seed exemplars fell through to the LLM stage or the forced-`standard` default, inflating the fallback rate. There was no supported path to swap in a stronger embedding model, tune the confidence floor to a real workload, or replace cosine-nearest with a calibrated classifier head.
+
+### What changed
+
+**`embed`: model swapping with query-prefix handling** (`scripts/embed.ts`, `src/classifiers/embedding.ts`)
+
+`pnpm embed` now honors the `MAESTRO_EMBED_MODEL` env var, so exemplars can be rebuilt with a different ONNX model (e.g. `Xenova/bge-small-en-v1.5`). bge and e5 model families require a `query:` prefix, applied automatically at both embed-time and runtime via a `needsQueryPrefix` rule. A runtime guard rejects a model/exemplar mismatch with the `fallback.embedding_model_mismatch` diagnostic.
+
+**`embeddingMinSimilarity`: tunable confidence floor** (config field, number in [0,1], default 0.4)
+
+The embedding classifier's confidence floor. On the cosine path it is the minimum cosine similarity; on the SetFit head path it is the minimum calibrated probability. Below the floor the classifier abstains rather than emitting a low-confidence guess.
+
+**`embeddingHeadPath`: optional SetFit logistic head** (config field, string)
+
+Path to a SetFit logistic-head JSON. When set, the embedding classifier applies the head to the prompt embedding to produce calibrated per-class probabilities instead of cosine-nearest-exemplar (the exemplars file is then not consulted). Requires a matching `embeddingModel` — the embedding dimension must match the head, else `fallback.embedding_head_dim_mismatch` fires.
+
+**Per-project scoping**: both `embeddingMinSimilarity` and `embeddingHeadPath` are in `PROJECT_CONFIG_ALLOWED_FIELDS`, so they can be set in a per-project `.maestro/config.json`.
+
+**Tuning scripts** (`scripts/`)
+
+`setfit-train.py --export-head-json PATH` exports the trained sklearn logistic head as JSON for `embeddingHeadPath` (only the default sklearn head, not a torch differentiable head). `cluster-fallbacks.py` clusters the `maestro export-prompts --fallbacks` corpus with UMAP+HDBSCAN to reveal missing exemplar classes — add seeds to `src/classifiers/exemplars-seeds.ts`, then run `pnpm embed`. `calibrate-threshold.py` analyzes logged `embedding.matched` similarities (and optional oracle labels) to recommend an `embeddingMinSimilarity` value.
+
+**GitHub discoverability** (minor): `package.json` keywords, `.github/ISSUE_TEMPLATE/`, `PULL_REQUEST_TEMPLATE.md`, `CONTRIBUTING.md`, and a README hero rewrite.
+
+### Configuration
+
+```json
+// ~/.maestro/config.json (or per-project .maestro/config.json)
+{
+  "embeddingModel": "Xenova/bge-small-en-v1.5",
+  "embeddingMinSimilarity": 0.4,
+  "embeddingHeadPath": "~/.maestro/maestro-head.json"
+}
+```
+
+### Upgrade
+
+```sh
+npm install -g maestro-router@0.5.0
+```
+
+No configuration changes are required — the new fields are optional and default to the prior behavior (`all-MiniLM-L6-v2`, cosine-nearest, floor 0.4).
+
+---
+
 ## v0.2.4 — 2026-05-26 · Auto-compact + paste condenser + race condition fix
 
 **Problem:** Three issues prevented savings from recovering: (1) `lastCacheReadTokens` was never persisted due to a race condition between two concurrent fire-and-forget writes; (2) the compaction advisory was passive — it could warn but not act; (3) large structured-data pastes (analytics dumps, tabular data) were sent verbatim to Claude even when only the summary mattered.

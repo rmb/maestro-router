@@ -103,6 +103,33 @@ elif [[ -t 0 ]]; then
   echo ""
 fi
 
+# Offer Python calibration deps (optional, needed for calibrate-threshold.py).
+_py_cmd=""
+for _py in python3 python; do
+  if command -v "$_py" >/dev/null 2>&1; then _py_cmd="$_py"; break; fi
+done
+
+if [[ -n "$_py_cmd" ]]; then
+  _sklearn_ok=0
+  "$_py_cmd" -c "import sklearn, numpy" >/dev/null 2>&1 && _sklearn_ok=1
+  if [[ "$_sklearn_ok" -eq 1 ]]; then
+    echo "→ Python calibration deps already installed (scikit-learn + numpy)."
+  elif [[ -t 0 ]]; then
+    echo ""
+    echo "→ Python calibration deps (optional)"
+    echo "  Required by scripts/calibrate-threshold.py (embedding threshold tuning)."
+    echo "  Usage: maestro oracle --json > oracle.json && python scripts/calibrate-threshold.py --oracle oracle.json"
+    read -r -p "  Install scikit-learn + numpy via pip? [y/N] " _pip_reply
+    if [[ "$_pip_reply" == "y" || "$_pip_reply" == "Y" ]]; then
+      "$_py_cmd" -m pip install --quiet scikit-learn numpy
+      echo "  scikit-learn + numpy installed."
+    else
+      echo "  Skipped. Install later: pip install scikit-learn numpy"
+    fi
+    echo ""
+  fi
+fi
+
 echo "→ Packing tarball…"
 rm -f maestro-router-*.tgz
 pnpm pack >/dev/null

@@ -14,11 +14,12 @@ import {
 } from "../src/classifiers/exemplars-seeds.js";
 import {
   computeSeedsChecksum,
+  needsQueryPrefix,
   type ExemplarVector,
   type ExemplarsFile,
 } from "../src/classifiers/embedding.js";
 
-const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
+const MODEL_ID = process.env["MAESTRO_EMBED_MODEL"] ?? "Xenova/all-MiniLM-L6-v2";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_PATH = join(__dirname, "..", "src", "classifiers", "exemplars.json");
@@ -60,7 +61,8 @@ async function main(): Promise<void> {
     process.stderr.write(
       `[embed] [${i}/${EXEMPLAR_SEEDS.length}] (${seed.class}) "${seed.prompt.slice(0, 60)}"\n`,
     );
-    const output = await extractor(seed.prompt, { pooling: "mean", normalize: true });
+    const input = needsQueryPrefix(MODEL_ID) ? `query: ${seed.prompt}` : seed.prompt;
+    const output = await extractor(input, { pooling: "mean", normalize: true });
     vectors.push({
       class: seed.class,
       prompt: seed.prompt,

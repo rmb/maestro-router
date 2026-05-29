@@ -57,7 +57,7 @@ import { computeFingerprint } from "../wrapper/prewarm.js";
 import { condensePaste } from "../wrapper/paste.js";
 import { detectContinuation } from "../wrapper/continuation.js";
 import { applyFirstTurnGuard } from "../wrapper/first-turn-guard.js";
-import { format, loadCliConfig, readState } from "./utils.js";
+import { embeddingOptionsFromConfig, format, loadCliConfig, readState } from "./utils.js";
 import { classifyCompactionCandidate } from "../core/compaction.js";
 
 const log = (msg: string, quiet?: boolean): void => {
@@ -143,11 +143,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       const classifiers: Classifier[] = [overrideClassifier, turnTypeClassifier, markovClassifier, heuristic];
       if (useEmbedding)
         classifiers.push(
-          createEmbeddingClassifier(
-            cli.userConfig.embeddingModel !== undefined
-              ? { modelId: cli.userConfig.embeddingModel }
-              : {},
-          ),
+          createEmbeddingClassifier(embeddingOptionsFromConfig(cli.userConfig)),
         );
       if (useLlm) classifiers.push(llmClassifier);
       const pipeline = createPipeline({

@@ -2,11 +2,11 @@
 
 **Automatic per-prompt model routing for Claude Code — cut AI costs 60–80% without changing how you work.**
 
-[![npm](https://img.shields.io/npm/v/maestro-router)](https://www.npmjs.com/package/maestro-router)
+[![Version](https://img.shields.io/github/v/tag/rmb/maestro-router?label=version&sort=semver)](https://github.com/rmb/maestro-router/tags)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
 [![Node ≥ 20](https://img.shields.io/badge/Node-%E2%89%A520-green)](https://nodejs.org/)
-[![CI](https://github.com/rmb/maestro-router/actions/workflows/community-tune.yml/badge.svg)](https://github.com/rmb/maestro-router/actions)
+[![Community tune](https://github.com/rmb/maestro-router/actions/workflows/community-tune.yml/badge.svg)](https://github.com/rmb/maestro-router/actions/workflows/community-tune.yml)
 
 ---
 

@@ -259,7 +259,9 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         void telEarly.log(correctionEvent);
 
         if (cli.userConfig.posthogApiKey) {
-          const phEarly = createPostHogClient(cli.userConfig.posthogApiKey);
+          const phEarly = createPostHogClient(cli.userConfig.posthogApiKey, {
+            region: cli.userConfig.posthogRegion,
+          });
           const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
           const corrProps: Record<string, unknown> = {
             distinct_id: distinctId,
@@ -565,6 +567,8 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         });
       }
 
+      const phFlushes: Promise<void>[] = [];
+
       if (effectiveParsed) {
         // Outcome event: stop_reason + output token ratio reveals over/under-routing.
         if (effectiveParsed.cost) {
@@ -595,31 +599,39 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
         }
 
         if (cli.userConfig.posthogApiKey) {
-          const ph = createPostHogClient(cli.userConfig.posthogApiKey);
+          const ph = createPostHogClient(cli.userConfig.posthogApiKey, {
+            region: cli.userConfig.posthogRegion,
+          });
           // One-way SHA-256 of cwd — stable pseudonym, not reversible (no PII)
           const distinctId = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
-          void ph.capture("maestro_decision", {
-            distinct_id: distinctId,
-            class: effectiveDecision.class,
-            model: effectiveDecision.spec.model,
-            effort: effectiveDecision.spec.effort,
-            confidence: effectiveDecision.confidence,
-            classifier: effectiveDecision.classifier,
-            latency_ms: effectiveDecision.latencyMs,
-            prompt_length: prompt.length,
-            cost_usd: effectiveParsed.cost?.totalCostUsd ?? null,
-          });
-
-          if (effectiveParsed.cost) {
-            void ph.capture("maestro_outcome", {
+          // Collect capture promises — must be awaited before process.exit or the
+          // fetch never completes (Node exits before the event loop drains the async).
+          phFlushes.push(
+            ph.capture("maestro_decision", {
               distinct_id: distinctId,
               class: effectiveDecision.class,
-              stop_reason: effectiveParsed.cost.stopReason,
-              output_tokens: effectiveParsed.cost.outputTokens,
-              cache_creation_tokens: effectiveParsed.cost.cacheCreationInputTokens,
-              total_cost_usd: effectiveParsed.cost.totalCostUsd,
-              duration_api_ms: effectiveParsed.cost.durationApiMs,
-            });
+              model: effectiveDecision.spec.model,
+              effort: effectiveDecision.spec.effort,
+              confidence: effectiveDecision.confidence,
+              classifier: effectiveDecision.classifier,
+              latency_ms: effectiveDecision.latencyMs,
+              prompt_length: prompt.length,
+              cost_usd: effectiveParsed.cost?.totalCostUsd ?? null,
+            }),
+          );
+
+          if (effectiveParsed.cost) {
+            phFlushes.push(
+              ph.capture("maestro_outcome", {
+                distinct_id: distinctId,
+                class: effectiveDecision.class,
+                stop_reason: effectiveParsed.cost.stopReason,
+                output_tokens: effectiveParsed.cost.outputTokens,
+                cache_creation_tokens: effectiveParsed.cost.cacheCreationInputTokens,
+                total_cost_usd: effectiveParsed.cost.totalCostUsd,
+                duration_api_ms: effectiveParsed.cost.durationApiMs,
+              }),
+            );
           }
 
           // Emit override event when user used @fast / @deep / @think
@@ -637,7 +649,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
             if (cli.userConfig.sendPromptText) {
               overrideProps["prompt"] = truncate(prompt, PROMPT_TRUNCATE_CHARS);
             }
-            void ph.capture("maestro_override", overrideProps);
+            phFlushes.push(ph.capture("maestro_override", overrideProps));
           }
         }
 
@@ -682,6 +694,16 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
           // never block the exit on auto-tune errors
         }
       })();
+
+      // Flush PostHog captures before exit — fetch is async and process.exit()
+      // would kill in-flight network calls. 3s cap ensures PostHog downtime
+      // never delays the user noticeably.
+      if (phFlushes.length > 0) {
+        await Promise.race([
+          Promise.allSettled(phFlushes),
+          new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+        ]);
+      }
 
       process.exit(result.exitCode ?? 0);
     });

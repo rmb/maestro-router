@@ -153,6 +153,11 @@ async function updateCounters(configPath: string, ts: string): Promise<void> {
   let config: ConfigShape = {};
   try {
     const data = await readFile(configPath, "utf8");
+    // A corrupt or truncated config must NOT be clobbered — bumping a counter is
+    // not worth destroying the user's PostHog keys / settings. Skip the update and
+    // leave the file for manual repair. A parse failure below re-throws and is
+    // caught by the caller, which also skips the write (keys preserved).
+    if (data.trim() === "") return;
     config = JSON.parse(data) as ConfigShape;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -163,5 +168,11 @@ async function updateCounters(configPath: string, ts: string): Promise<void> {
     lastWriteAt: ts,
   };
   await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2), "utf8");
+  // Atomic write: write to a temp file then rename over the target. POSIX rename
+  // is atomic, so config.json is never observed truncated even if this process is
+  // interrupted mid-write or another maestro invocation writes concurrently.
+  // Without this, writeFile's O_TRUNC opens a window where a crash leaves 0 bytes.
+  const tmp = `${configPath}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(config, null, 2), "utf8");
+  await rename(tmp, configPath);
 }

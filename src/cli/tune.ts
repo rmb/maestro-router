@@ -96,7 +96,11 @@ export function registerTuneCommand(program: Command): void {
           );
           process.exit(1);
         }
-        const queryClient = createPostHogQueryClient({ queryKey: posthogQueryKey, projectId: posthogProjectId });
+        const queryClient = createPostHogQueryClient({
+          queryKey: posthogQueryKey,
+          projectId: posthogProjectId,
+          region: cli.userConfig.posthogRegion,
+        });
         const [overrides, corrections] = await Promise.all([
           queryClient.fetchOverrides({ since: new Date(cutoff) }),
           queryClient.fetchCorrections({ since: new Date(cutoff) }),

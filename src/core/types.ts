@@ -69,6 +69,13 @@ export type ClassSpec = {
    */
   posthogProjectId?: string;
   /**
+   * PostHog cloud region: `"us"` (default) or `"eu"`. Selects both the capture
+   * ingestion endpoint and the query API host. EU projects (key/ID issued at
+   * eu.posthog.com) MUST set `"eu"` or events are silently dropped at the US
+   * endpoint and `tune --posthog` 403s on the wrong-region key.
+   */
+  posthogRegion?: "us" | "eu";
+  /**
    * When true, include the raw prompt text in PostHog `maestro_override` events.
    * Default false. Only enable if you consent to sending prompt snippets to PostHog.
    * Required for `maestro tune --posthog` to mine patterns from cross-user data.
@@ -194,6 +201,13 @@ export type UserConfig = {
    * Find it in PostHog → Project Settings → Project ID.
    */
   posthogProjectId?: string;
+  /**
+   * PostHog cloud region: `"us"` (default) or `"eu"`. Selects both the capture
+   * ingestion endpoint and the query API host. EU projects (key/ID issued at
+   * eu.posthog.com) MUST set `"eu"` or events are silently dropped at the US
+   * endpoint and `tune --posthog` 403s on the wrong-region key.
+   */
+  posthogRegion?: "us" | "eu";
   /**
    * When true, include the raw prompt text in PostHog `maestro_override` events.
    * Default false. Only enable if you consent to sending prompt snippets to PostHog.

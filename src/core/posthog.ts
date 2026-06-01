@@ -6,14 +6,26 @@ export type PostHogClient = {
   capture(event: string, properties: Record<string, unknown>): Promise<void>;
 };
 
+export type PostHogRegion = "us" | "eu";
+
+/** Capture (event ingestion) endpoint per PostHog cloud region. */
+export function captureEndpoint(region: PostHogRegion = "us"): string {
+  return region === "eu" ? "https://eu.i.posthog.com/capture/" : "https://us.i.posthog.com/capture/";
+}
+
+/** Query/API host per PostHog cloud region (no trailing slash). */
+export function queryHost(region: PostHogRegion = "us"): string {
+  return region === "eu" ? "https://eu.posthog.com" : "https://us.posthog.com";
+}
+
 export type PostHogClientOptions = {
   /** Injected fetch for testing. Defaults to global fetch. */
   fetch?: typeof globalThis.fetch;
-  /** PostHog capture endpoint. Defaults to US cloud. */
+  /** PostHog capture endpoint. Overrides `region`. Defaults to the region endpoint. */
   endpoint?: string;
+  /** PostHog cloud region. Selects the default capture endpoint. Defaults to "us". */
+  region?: PostHogRegion | undefined;
 };
-
-const DEFAULT_ENDPOINT = "https://us.i.posthog.com/capture/";
 
 /**
  * Fire-and-forget PostHog client. Never throws — network errors are swallowed.
@@ -21,7 +33,7 @@ const DEFAULT_ENDPOINT = "https://us.i.posthog.com/capture/";
  */
 export function createPostHogClient(apiKey: string, opts: PostHogClientOptions = {}): PostHogClient {
   const fetchFn = opts.fetch ?? globalThis.fetch;
-  const endpoint = opts.endpoint ?? DEFAULT_ENDPOINT;
+  const endpoint = opts.endpoint ?? captureEndpoint(opts.region ?? "us");
 
   return {
     async capture(event: string, properties: Record<string, unknown>): Promise<void> {
@@ -65,7 +77,10 @@ export type PostHogQueryOptions = {
   queryKey: string;
   projectId: string;
   fetch?: typeof globalThis.fetch;
+  /** Query/API host. Overrides `region`. Defaults to the region host. */
   host?: string;
+  /** PostHog cloud region. Selects the default query host. Defaults to "us". */
+  region?: PostHogRegion | undefined;
 };
 
 export type PostHogQueryClient = {
@@ -74,11 +89,9 @@ export type PostHogQueryClient = {
   fetchCorrections(opts: { since: Date; limit?: number }): Promise<PostHogCorrectionEvent[]>;
 };
 
-const DEFAULT_HOST = "https://app.posthog.com";
-
 export function createPostHogQueryClient(opts: PostHogQueryOptions): PostHogQueryClient {
   const fetchFn = opts.fetch ?? globalThis.fetch;
-  const host = opts.host ?? DEFAULT_HOST;
+  const host = opts.host ?? queryHost(opts.region ?? "us");
 
   return {
     async fetchOverrides({ since, limit = 1000 }: { since: Date; limit?: number }): Promise<PostHogOverrideEvent[]> {

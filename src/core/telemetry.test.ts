@@ -114,6 +114,35 @@ describe("createTelemetry", () => {
     expect(config.telemetry.eventsLogged).toBe(1);
   });
 
+  test("does not clobber an empty/truncated config when updating counters", async () => {
+    // A previous non-atomic write could leave config.json at 0 bytes. Bumping the
+    // counter must not overwrite it with a counter-only object — that would erase
+    // the user's PostHog keys. The write is skipped; the file is left for repair.
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, "", "utf8");
+    const tel = createTelemetry({ path: join(dir, "decisions.jsonl"), configPath });
+    await tel.log(decisionEvent());
+
+    expect(await readFile(configPath, "utf8")).toBe("");
+  });
+
+  test("does not leave a partial config behind on the atomic write path", async () => {
+    // After a successful counter update, no .tmp sibling should remain.
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ posthogApiKey: "phc_keep" }), "utf8");
+    const tel = createTelemetry({ path: join(dir, "decisions.jsonl"), configPath });
+    await tel.log(decisionEvent());
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      posthogApiKey: string;
+      telemetry: { eventsLogged: number };
+    };
+    expect(config.posthogApiKey).toBe("phc_keep");
+    expect(config.telemetry.eventsLogged).toBe(1);
+    const leftovers = (await readdir(dir)).filter((f) => f.startsWith("config.json."));
+    expect(leftovers).toEqual([]);
+  });
+
   test("rotates when file exceeds maxFileBytes", async () => {
     const path = join(dir, "decisions.jsonl");
     const configPath = join(dir, "config.json");

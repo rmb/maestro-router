@@ -62,6 +62,7 @@ export const userConfigSchema = z
     communityHeuristicsUrl: z.string().optional(),
     autoTuneIntervalDays: z.number().optional(),
     posthogProjectId: z.string().optional(),
+    posthogRegion: z.enum(["us", "eu"]).optional(),
     sendPromptText: z.boolean().optional(),
     telemetry: z
       .object({

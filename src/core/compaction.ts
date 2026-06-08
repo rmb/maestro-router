@@ -7,8 +7,8 @@ import type { Diagnostic } from "./types.js";
 const PASTE_THRESHOLD_CHARS = 3_000;
 
 // Session context thresholds in tokens.
-const SESSION_WARM_TOKENS = 80_000;  // session is active and growing
-const SESSION_HOT_TOKENS = 250_000;  // session is large; next big turn will be expensive
+const SESSION_WARM_TOKENS = 200_000;  // session is active and growing
+const SESSION_HOT_TOKENS = 500_000;  // session is large; next big turn will be expensive
 
 /**
  * Proactive compaction advisory. Called before spawn to detect turns that will

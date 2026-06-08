@@ -9,7 +9,7 @@ describe("classifyCompactionCandidate", () => {
   });
 
   test("returns [] when session has little cached context", () => {
-    expect(classifyCompactionCandidate(5_000, 50_000)).toEqual([]);
+    expect(classifyCompactionCandidate(5_000, 150_000)).toEqual([]);
   });
 
   test("returns [] when both prompt is short and session is small", () => {
@@ -17,7 +17,7 @@ describe("classifyCompactionCandidate", () => {
   });
 
   test("fires at medium urgency for warm session + large prompt", () => {
-    const diags = classifyCompactionCandidate(4_000, 100_000);
+    const diags = classifyCompactionCandidate(4_000, 250_000);
     expect(diags).toHaveLength(1);
     expect(diags[0]!.code).toBe("compaction.candidate");
     expect(diags[0]!.message).toContain("medium urgency");
@@ -25,15 +25,15 @@ describe("classifyCompactionCandidate", () => {
   });
 
   test("fires at high urgency for hot session + large prompt", () => {
-    const diags = classifyCompactionCandidate(10_000, 300_000);
+    const diags = classifyCompactionCandidate(10_000, 600_000);
     expect(diags).toHaveLength(1);
     expect(diags[0]!.code).toBe("compaction.candidate");
     expect(diags[0]!.message).toContain("high urgency");
   });
 
   test("reports cached token count in kilo", () => {
-    const diags = classifyCompactionCandidate(5_000, 120_000);
-    expect(diags[0]!.message).toContain("120k-token session");
+    const diags = classifyCompactionCandidate(5_000, 250_000);
+    expect(diags[0]!.message).toContain("250k-token session");
   });
 
   test("returns [] for prompt exactly 1 char below threshold", () => {

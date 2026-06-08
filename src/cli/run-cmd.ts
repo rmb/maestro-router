@@ -309,7 +309,7 @@ export function registerRunCommand(program: Command, _streamFn?: StreamFn): void
       // Use the current session's lastCacheReadTokens (not priorSession's) — they diverge
       // when model/fingerprint changes between turns, causing the wrong session's value to
       // be checked against the threshold.
-      const COMPACT_THRESHOLD = cli.userConfig.autoCompactThresholdTokens ?? 300_000;
+      const COMPACT_THRESHOLD = cli.userConfig.autoCompactThresholdTokens ?? 500_000;
       const currentSessionCacheRead =
         allSessions.find((s) => s.sessionId === session.sessionId)?.lastCacheReadTokens ?? 0;
       const needsCompact = !session.isNew && currentSessionCacheRead > COMPACT_THRESHOLD;

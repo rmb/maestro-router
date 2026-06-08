@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      MAESTRO_POSTHOG_QUERY_KEY: ${{ secrets.POSTHOG_QUERY_KEY }}
+      MAESTRO_POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +32,8 @@ jobs:
 
       - name: Mine community heuristics from PostHog
         id: tune
-        if: ${{ secrets.POSTHOG_QUERY_KEY != '' && secrets.POSTHOG_PROJECT_ID != '' }}
+        if: ${{ env.MAESTRO_POSTHOG_QUERY_KEY != '' && env.MAESTRO_POSTHOG_PROJECT_ID != '' }}
         run: node dist/cli/index.js tune --posthog --learn --community-output community/heuristics.json
-        env:
-          MAESTRO_POSTHOG_QUERY_KEY: ${{ secrets.POSTHOG_QUERY_KEY }}
-          MAESTRO_POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
 
       - name: Eval gate — reject if accuracy regresses >2%
         if: steps.tune.conclusion == 'success'

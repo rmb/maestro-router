@@ -1,3 +1,11 @@
+# pnpm 11.1.3 honors `allowBuilds` (a map of pkg: true) for running native
+# build scripts in CI. `onlyBuiltDependencies` is kept for forward-compat with
+# newer pnpm but is ignored by 11.1.3 — `allowBuilds` is the one that takes effect.
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
 onlyBuiltDependencies:
   - esbuild
   - onnxruntime-node

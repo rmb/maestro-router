@@ -28,7 +28,7 @@ jobs:
         run: pnpm build
 
       - name: Mine community heuristics from PostHog
-        run: node dist/cli.js tune --posthog --learn --community-output community/heuristics.json
+        run: node dist/cli/index.js tune --posthog --learn --community-output community/heuristics.json
         env:
           MAESTRO_POSTHOG_QUERY_KEY: ${{ secrets.POSTHOG_QUERY_KEY }}
           MAESTRO_POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
@@ -37,7 +37,7 @@ jobs:
         run: |
           # Merge candidate community heuristics and run eval against locked baseline.
           # bench --gate 0.02 exits non-zero when accuracy drops >2% vs baseline.json.
-          node dist/cli.js bench --eval-heuristics community/heuristics.json --gate 0.02 || {
+          node dist/cli/index.js bench --eval-heuristics community/heuristics.json --gate 0.02 || {
             echo "Community heuristics failed eval gate — aborting commit." >&2
             exit 1
           }

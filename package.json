@@ -58,7 +58,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prebuild": "tsx scripts/check-exemplars-checksum.ts",
-    "build": "tsc && cp src/classifiers/exemplars.json dist/classifiers/exemplars.json && chmod +x dist/cli/index.js",
+    "build": "tsc && cp src/classifiers/exemplars.json dist/classifiers/exemplars.json && mkdir -p dist/data && cp data/model-pricing.json dist/data/model-pricing.json && chmod +x dist/cli/index.js",
     "embed": "tsx scripts/embed.ts",
     "eval": "tsx evals/run.ts",
     "verify": "pnpm dlx publint && pnpm dlx @arethetypeswrong/cli --pack ."

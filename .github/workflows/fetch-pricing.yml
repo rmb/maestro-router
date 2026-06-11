@@ -1,0 +1,39 @@
+name: Fetch model pricing
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # Every day at 02:00 UTC
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      MAESTRO_POSTHOG_QUERY_KEY: ${{ secrets.POSTHOG_QUERY_KEY }}
+      MAESTRO_POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch LiteLLM model pricing
+        run: pnpm tsx scripts/fetch-litellm-pricing.ts
+
+      - name: Commit if changed
+        run: |
+          git config user.name "maestro-bot"
+          git config user.email "bot@maestro-router"
+          git add data/model-pricing.json
+          git diff --cached --quiet || git commit -m "chore: update model pricing from LiteLLM [skip ci]"
+          git diff HEAD~1..HEAD --quiet || git push

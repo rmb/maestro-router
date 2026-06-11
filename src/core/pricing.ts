@@ -6,7 +6,48 @@
  * All costs are derived from token volumes × model rates. Never trust
  * total_cost_usd from Claude Code's JSON output — it is fabricated on
  * Pro/Team subscriptions and cannot be used for savings calculations.
+ *
+ * Live rates: `loadLiteLLMRates()` reads data/model-pricing.json (committed
+ * daily by the fetch-pricing CI job) and returns overrides that callers pass
+ * into computeTurnCost / computeOpusBaseline. Falls back to the hardcoded
+ * constants below when the file is absent or unreadable.
  */
+
+// ---------------------------------------------------------------------------
+// LiteLLM rate overlay
+// ---------------------------------------------------------------------------
+
+export type RateSet = {
+  model: string;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+};
+
+export type LiteLLMRates = {
+  updatedAt: string;
+  source: string;
+  rates: { haiku: RateSet; sonnet: RateSet; opus: RateSet };
+};
+
+/**
+ * Load the pre-processed LiteLLM pricing snapshot committed to the repo.
+ * Returns null (silently) when the file is missing or unparseable so callers
+ * can fall back to hardcoded constants.
+ */
+export async function loadLiteLLMRates(dataPath?: string): Promise<LiteLLMRates | null> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const { join, dirname } = await import("node:path");
+    const path = dataPath ?? join(dirname(fileURLToPath(import.meta.url)), "../data/model-pricing.json");
+    const raw = await readFile(path, "utf8");
+    return JSON.parse(raw) as LiteLLMRates;
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Rate tables (USD per token)
@@ -77,16 +118,20 @@ export function computeTurnCost(
   cacheCreationTokens: number,
   cacheReadTokens: number,
   is1m: boolean,
+  liveRates?: LiteLLMRates | null,
 ): number {
   const alias = modelAlias(modelUsed);
-  const ir = alias === "opus" && is1m ? OPUS_1M_INPUT_PER_TOK : (INPUT_RATE[alias] ?? INPUT_RATE.sonnet!);
-  const or = OUTPUT_RATE[alias] ?? OUTPUT_RATE.sonnet!;
-  const cwr = alias === "opus"
+  const ov = liveRates?.rates[alias];
+  // 1M-context variant is priced at 2× standard; apply same multiplier to live rates.
+  const scale = alias === "opus" && is1m ? 2 : 1;
+  const ir = ov ? ov.input * scale : (alias === "opus" && is1m ? OPUS_1M_INPUT_PER_TOK : (INPUT_RATE[alias] ?? INPUT_RATE.sonnet!));
+  const or = ov?.output ?? (OUTPUT_RATE[alias] ?? OUTPUT_RATE.sonnet!);
+  const cwr = ov ? ov.cacheWrite * scale : (alias === "opus"
     ? (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK)
-    : (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!);
-  const crr = alias === "opus"
+    : (CACHE_WRITE_RATE[alias] ?? CACHE_WRITE_RATE.sonnet!));
+  const crr = ov ? ov.cacheRead * scale : (alias === "opus"
     ? (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK)
-    : (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!);
+    : (CACHE_READ_RATE[alias] ?? CACHE_READ_RATE.sonnet!));
   return inputTokens * ir + outputTokens * or + cacheCreationTokens * cwr + cacheReadTokens * crr;
 }
 
@@ -102,19 +147,29 @@ export function computeOpusBaseline(
   inputTokens1m: number,
   cacheCreationTokens1m: number,
   cacheReadTokens1m: number,
+  liveRates?: LiteLLMRates | null,
 ): number {
+  const ov = liveRates?.rates.opus;
   const inputStd = inputTokens - inputTokens1m;
   const cacheCreationStd = cacheCreationTokens - cacheCreationTokens1m;
   const cacheReadStd = cacheReadTokens - cacheReadTokens1m;
 
+  const ir = ov?.input ?? OPUS_INPUT_PER_TOK;
+  const ir1m = ov ? ov.input * 2 : OPUS_1M_INPUT_PER_TOK;
+  const or = ov?.output ?? OPUS_OUTPUT_PER_TOK;
+  const cwr = ov?.cacheWrite ?? OPUS_CACHE_WRITE_PER_TOK;
+  const cwr1m = ov ? ov.cacheWrite * 2 : OPUS_1M_CACHE_WRITE_PER_TOK;
+  const crr = ov?.cacheRead ?? OPUS_CACHE_READ_PER_TOK;
+  const crr1m = ov ? ov.cacheRead * 2 : OPUS_1M_CACHE_READ_PER_TOK;
+
   return (
-    inputStd * OPUS_INPUT_PER_TOK +
-    inputTokens1m * OPUS_1M_INPUT_PER_TOK +
-    outputTokens * OPUS_OUTPUT_PER_TOK +
-    cacheCreationStd * OPUS_CACHE_WRITE_PER_TOK +
-    cacheCreationTokens1m * OPUS_1M_CACHE_WRITE_PER_TOK +
-    cacheReadStd * OPUS_CACHE_READ_PER_TOK +
-    cacheReadTokens1m * OPUS_1M_CACHE_READ_PER_TOK
+    inputStd * ir +
+    inputTokens1m * ir1m +
+    outputTokens * or +
+    cacheCreationStd * cwr +
+    cacheCreationTokens1m * cwr1m +
+    cacheReadStd * crr +
+    cacheReadTokens1m * crr1m
   );
 }
 
@@ -133,6 +188,7 @@ export function costFromEvent(
     is1mVariant?: boolean;
   },
   decidedModel: string,
+  liveRates?: LiteLLMRates | null,
 ): number {
   return computeTurnCost(
     cost.modelUsed ?? decidedModel,
@@ -141,5 +197,6 @@ export function costFromEvent(
     cost.cacheCreationInputTokens,
     cost.cacheReadInputTokens,
     cost.is1mVariant ?? false,
+    liveRates,
   );
 }

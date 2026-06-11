@@ -23,25 +23,29 @@ import { DEFAULT_TELEMETRY_PATH, format, loadCliConfig } from "./utils.js";
 import {
   computeTurnCost,
   computeOpusBaseline,
+  loadLiteLLMRates,
   modelAlias,
   OPUS_1M_CACHE_WRITE_PER_TOK,
   OPUS_1M_CACHE_READ_PER_TOK,
   OPUS_CACHE_WRITE_PER_TOK,
   OPUS_CACHE_READ_PER_TOK,
 } from "../core/pricing.js";
+import type { LiteLLMRates } from "../core/pricing.js";
 
 const DEFAULT_WINDOW_DAYS = 7;
 
-function estimateCacheWriteCost(modelUsed: string, tokens: number, is1m: boolean): number {
+function estimateCacheWriteCost(modelUsed: string, tokens: number, is1m: boolean, liveRates?: LiteLLMRates | null): number {
   if (tokens <= 0) return 0;
   const alias = modelAlias(modelUsed);
+  if (liveRates) return computeTurnCost(modelUsed, 0, 0, tokens, 0, is1m, liveRates);
   if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_WRITE_PER_TOK : OPUS_CACHE_WRITE_PER_TOK);
   return computeTurnCost(modelUsed, 0, 0, tokens, 0, is1m);
 }
 
-function estimateCacheReadCost(modelUsed: string, tokens: number, is1m: boolean): number {
+function estimateCacheReadCost(modelUsed: string, tokens: number, is1m: boolean, liveRates?: LiteLLMRates | null): number {
   if (tokens <= 0) return 0;
   const alias = modelAlias(modelUsed);
+  if (liveRates) return computeTurnCost(modelUsed, 0, 0, 0, tokens, is1m, liveRates);
   if (alias === "opus") return tokens * (is1m ? OPUS_1M_CACHE_READ_PER_TOK : OPUS_CACHE_READ_PER_TOK);
   return computeTurnCost(modelUsed, 0, 0, 0, tokens, is1m);
 }
@@ -104,7 +108,7 @@ export type TrendBucket = {
   topModelCount: number;
 };
 
-export function computeTrend(events: ReadonlyArray<TelemetryEvent>, windowDays: number): TrendBucket[] {
+export function computeTrend(events: ReadonlyArray<TelemetryEvent>, windowDays: number, liveRates?: LiteLLMRates | null): TrendBucket[] {
   // Generate all dates in window [today-windowDays+1 .. today]
   const today = new Date();
   const dates: string[] = [];
@@ -162,6 +166,7 @@ export function computeTrend(events: ReadonlyArray<TelemetryEvent>, windowDays: 
           e.cost.cacheCreationInputTokens,
           e.cost.cacheReadInputTokens,
           is1m,
+          liveRates,
         );
         totalInput += e.cost.inputTokens;
         totalOutput += e.cost.outputTokens;
@@ -178,6 +183,7 @@ export function computeTrend(events: ReadonlyArray<TelemetryEvent>, windowDays: 
     const baselineUsd = computeOpusBaseline(
       totalInput, totalOutput, totalCacheCreate, totalCacheRead,
       0, 0, 0,
+      liveRates,
     );
 
     let topModel: string | null = null;
@@ -274,10 +280,11 @@ export function registerStatsCommand(program: Command): void {
           (e) => Date.parse(e.ts) >= cutoff,
         );
       }
-      const summary = computeSummary(events, since);
+      const liveRates = await loadLiteLLMRates();
+      const summary = computeSummary(events, since, liveRates);
       if (parent.json) {
         if (cmdOpts.trend) {
-          const trend = computeTrend(events, since);
+          const trend = computeTrend(events, since, liveRates);
           process.stdout.write(format({ summary, trend }, { json: true }) + "\n");
         } else {
           process.stdout.write(format(summary, { json: true }) + "\n");
@@ -285,7 +292,7 @@ export function registerStatsCommand(program: Command): void {
       } else if (!parent.quiet) {
         let out = renderHuman(summary);
         if (cmdOpts.trend) {
-          const trend = computeTrend(events, since);
+          const trend = computeTrend(events, since, liveRates);
           out += "\n" + renderTrend(trend, since);
         }
         process.stdout.write(out + "\n");
@@ -293,7 +300,7 @@ export function registerStatsCommand(program: Command): void {
     });
 }
 
-export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays: number): Summary {
+export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays: number, liveRates?: LiteLLMRates | null): Summary {
   const perClass: Record<Class, {
     count: number;
     totalCost: number;
@@ -342,6 +349,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
             e.cost.cacheCreationInputTokens,
             e.cost.cacheReadInputTokens,
             e.cost.is1mVariant ?? false,
+            liveRates,
           )
         : 0;
       totalCost += cost;
@@ -358,14 +366,14 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
         perClass[cls].cacheCreations.push(e.cost.cacheCreationInputTokens);
         cacheReadTokens += e.cost.cacheReadInputTokens;
         if (e.cost.cacheCreationInputTokens > 0) {
-          cacheCreationCost += estimateCacheWriteCost(modelUsed, e.cost.cacheCreationInputTokens, is1m);
+          cacheCreationCost += estimateCacheWriteCost(modelUsed, e.cost.cacheCreationInputTokens, is1m, liveRates);
         }
         if (e.cost.cacheReadInputTokens > 0) cacheReadCount++;
         totalInputTokens += e.cost.inputTokens;
         totalOutputTokens += e.cost.outputTokens;
         totalCacheCreationTokens += e.cost.cacheCreationInputTokens;
         totalCacheReadTokens += e.cost.cacheReadInputTokens;
-        cacheReadCostUsd += estimateCacheReadCost(modelUsed, e.cost.cacheReadInputTokens, is1m);
+        cacheReadCostUsd += estimateCacheReadCost(modelUsed, e.cost.cacheReadInputTokens, is1m, liveRates);
         if (is1m) {
           count1mVariant++;
           totalInputTokens1m += e.cost.inputTokens;
@@ -406,6 +414,7 @@ export function computeSummary(events: ReadonlyArray<TelemetryEvent>, windowDays
     totalInputTokens1m,
     totalCacheCreationTokens1m,
     totalCacheReadTokens1m,
+    liveRates,
   );
 
   return {

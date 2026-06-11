@@ -79,9 +79,10 @@ const COLORS = {
   haiku: "\x1b[32m", // green
   sonnet: "\x1b[36m", // cyan
   opus: "\x1b[35m", // magenta
+  fable: "\x1b[33m", // yellow
 } as const;
 
-function badgeColor(alias: "haiku" | "sonnet" | "opus"): string {
+function badgeColor(alias: "haiku" | "sonnet" | "opus" | "fable"): string {
   return COLORS[alias];
 }
 

@@ -87,7 +87,7 @@ export const cheapProfile: Profile = {
   },
 };
 
-/** Quality-biased profile — uses Opus more aggressively. */
+/** Quality-biased profile — uses Opus/Fable more aggressively. */
 export const qualityProfile: Profile = {
   name: "quality",
   classes: {
@@ -103,8 +103,8 @@ export const qualityProfile: Profile = {
     simple: { model: "claude-sonnet-4-6", effort: "medium", tools: "default", mcpConfig: '{"mcpServers":{}}', maxBudgetUsd: 0.5 },
     standard: { model: "claude-sonnet-4-6", effort: "high", tools: "default", maxBudgetUsd: 2.0 },
     hard: { model: "claude-opus-4-8", effort: "high", tools: "default", maxBudgetUsd: 5.0 },
-    reasoning: { model: "claude-opus-4-8", effort: "xhigh", tools: "default", maxBudgetUsd: 10.0 },
-    max: { model: "claude-opus-4-8", effort: "max", tools: "default", maxBudgetUsd: 20.0 },
+    reasoning: { model: "claude-fable-5", effort: "xhigh", tools: "default", maxBudgetUsd: 10.0 },
+    max: { model: "claude-fable-5", effort: "max", tools: "default", maxBudgetUsd: 20.0 },
   },
 };
 

@@ -28,7 +28,7 @@ export type RateSet = {
 export type LiteLLMRates = {
   updatedAt: string;
   source: string;
-  rates: { haiku: RateSet; sonnet: RateSet; opus: RateSet };
+  rates: { haiku: RateSet; sonnet: RateSet; opus: RateSet; fable?: RateSet };
 };
 
 /**
@@ -58,6 +58,11 @@ export const OPUS_OUTPUT_PER_TOK = 75 / 1_000_000;
 export const OPUS_CACHE_WRITE_PER_TOK = 18.75 / 1_000_000;
 export const OPUS_CACHE_READ_PER_TOK = 1.50 / 1_000_000;
 
+export const FABLE_INPUT_PER_TOK = 10 / 1_000_000;
+export const FABLE_OUTPUT_PER_TOK = 50 / 1_000_000;
+export const FABLE_CACHE_WRITE_PER_TOK = 12.5 / 1_000_000;
+export const FABLE_CACHE_READ_PER_TOK = 1.0 / 1_000_000;
+
 /** 1M-context Opus variant costs 2× standard on input/cache tokens. */
 export const OPUS_1M_INPUT_PER_TOK = 30 / 1_000_000;
 export const OPUS_1M_CACHE_WRITE_PER_TOK = 37.5 / 1_000_000;
@@ -67,24 +72,28 @@ const INPUT_RATE: Record<string, number> = {
   haiku: 0.80 / 1_000_000,
   sonnet: 3.00 / 1_000_000,
   opus: OPUS_INPUT_PER_TOK,
+  fable: FABLE_INPUT_PER_TOK,
 };
 
 const OUTPUT_RATE: Record<string, number> = {
   haiku: 4.00 / 1_000_000,
   sonnet: 15.00 / 1_000_000,
   opus: OPUS_OUTPUT_PER_TOK,
+  fable: FABLE_OUTPUT_PER_TOK,
 };
 
 const CACHE_WRITE_RATE: Record<string, number> = {
   haiku: 1.00 / 1_000_000,
   sonnet: 3.75 / 1_000_000,
   opus: OPUS_CACHE_WRITE_PER_TOK,
+  fable: FABLE_CACHE_WRITE_PER_TOK,
 };
 
 const CACHE_READ_RATE: Record<string, number> = {
   haiku: 0.08 / 1_000_000,
   sonnet: 0.30 / 1_000_000,
   opus: OPUS_CACHE_READ_PER_TOK,
+  fable: FABLE_CACHE_READ_PER_TOK,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,10 +105,11 @@ const CACHE_READ_RATE: Record<string, number> = {
  * pricing alias. Falls back to "sonnet" when unrecognized — conservative
  * choice that slightly overestimates cheap-model costs.
  */
-export function modelAlias(modelUsed: string): "haiku" | "sonnet" | "opus" {
+export function modelAlias(modelUsed: string): "haiku" | "sonnet" | "opus" | "fable" {
   const lower = modelUsed.toLowerCase();
   if (lower.includes("haiku")) return "haiku";
   if (lower.includes("opus")) return "opus";
+  if (lower.includes("fable")) return "fable";
   return "sonnet";
 }
 
@@ -122,7 +132,7 @@ export function computeTurnCost(
 ): number {
   const alias = modelAlias(modelUsed);
   const ov = liveRates?.rates[alias];
-  // 1M-context variant is priced at 2× standard; apply same multiplier to live rates.
+  // 1M-context variant is priced at 2× standard; Opus only (Fable is always 1M-native).
   const scale = alias === "opus" && is1m ? 2 : 1;
   const ir = ov ? ov.input * scale : (alias === "opus" && is1m ? OPUS_1M_INPUT_PER_TOK : (INPUT_RATE[alias] ?? INPUT_RATE.sonnet!));
   const or = ov?.output ?? (OUTPUT_RATE[alias] ?? OUTPUT_RATE.sonnet!);

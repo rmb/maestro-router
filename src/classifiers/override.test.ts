@@ -14,6 +14,10 @@ describe("overrideClassifier", () => {
     });
   });
 
+  test("@fable → max", async () => {
+    expect(await call("@fable design the architecture")).toMatchObject({ class: "max" });
+  });
+
   test("@deep → max", async () => {
     expect(await call("@deep debug this")).toMatchObject({ class: "max" });
   });
@@ -90,7 +94,7 @@ describe("overrideClassifier", () => {
   // Sanity: every documented hint maps to a Class value of the union
   test("every documented override maps to a known class", async () => {
     const known: Class[] = ["trivial", "simple", "standard", "hard", "reasoning", "max"];
-    const hints = ["opus", "deep", "think", "sonnet", "fast", "haiku", "fast+context"];
+    const hints = ["opus", "fable", "deep", "think", "sonnet", "fast", "haiku", "fast+context"];
     for (const hint of hints) {
       const result = await call(`@${hint} test`);
       expect(known).toContain(result!.class);

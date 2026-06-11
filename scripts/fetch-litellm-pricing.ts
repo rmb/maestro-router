@@ -74,10 +74,12 @@ const claude = Object.entries(all).filter(
 const haiku = claude.filter(([k]) => k.includes("haiku"));
 const sonnet = claude.filter(([k]) => k.includes("sonnet"));
 const opus = claude.filter(([k]) => k.includes("opus"));
+const fable = claude.filter(([k]) => k.includes("fable"));
 
 const bestHaiku = pickBest(haiku);
 const bestSonnet = pickBest(sonnet);
 const bestOpus = pickBest(opus);
+const bestFable = pickBest(fable);
 
 if (!bestHaiku || !bestSonnet || !bestOpus) {
   throw new Error(
@@ -92,6 +94,7 @@ const output = {
     haiku: toRateSet(bestHaiku),
     sonnet: toRateSet(bestSonnet),
     opus: toRateSet(bestOpus),
+    ...(bestFable ? { fable: toRateSet(bestFable) } : {}),
   },
 };
 
@@ -105,3 +108,4 @@ process.stderr.write(`Wrote ${outPath}\n`);
 process.stderr.write(`  haiku:  ${fmt(output.rates.haiku)}\n`);
 process.stderr.write(`  sonnet: ${fmt(output.rates.sonnet)}\n`);
 process.stderr.write(`  opus:   ${fmt(output.rates.opus)}\n`);
+if (bestFable) process.stderr.write(`  fable:  ${fmt(toRateSet(bestFable))}\n`);

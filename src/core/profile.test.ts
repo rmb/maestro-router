@@ -172,7 +172,7 @@ describe("loadProfile", () => {
 
 // Sanity: profiles never have a model that isn't a known versioned ID
 test("all builtin profiles use only known model aliases", () => {
-  const known = new Set(["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8"]);
+  const known = new Set(["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-8", "claude-fable-5"]);
   for (const [, profile] of Object.entries(builtinProfiles) as [string, Profile][]) {
     for (const cls of ALL_CLASSES) {
       expect(known.has(profile.classes[cls].model)).toBe(true);

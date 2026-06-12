@@ -115,6 +115,77 @@ describe("heuristic classifier — non-fast-path matches", () => {
     expect(r.class).toBe("max");
   });
 
+  // Fable-tier max rules
+  test("'design the complete payment system from scratch' → max", async () => {
+    const r = (await ask("design the complete payment system from scratch")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'architect a complete multi-service backend from scratch' → max", async () => {
+    const r = (await ask("architect a complete multi-service backend from scratch")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'do a comprehensive security audit of the entire codebase' → max", async () => {
+    const r = (await ask("do a comprehensive security audit of the entire codebase")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'exhaustive analysis of the entire API surface' → max", async () => {
+    const r = (await ask("exhaustive analysis of the entire API surface")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'design a multi-region active-active architecture' → max", async () => {
+    const r = (await ask("design a multi-region active-active architecture")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'design a multi-tenant SaaS infrastructure' → max", async () => {
+    const r = (await ask("design a multi-tenant SaaS infrastructure")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'create a migration strategy from our monolith to microservices' → max", async () => {
+    const r = (await ask("create a migration strategy from our monolith to microservices")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'monolith to microservices migration plan' → max", async () => {
+    const r = (await ask("monolith to microservices migration plan")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'design an LLM agent pipeline architecture' → max", async () => {
+    const r = (await ask("design an LLM agent pipeline architecture")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'build a RAG system architecture for our platform' → max", async () => {
+    const r = (await ask("build a RAG system architecture for our platform")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'design the domain model using domain-driven design' → max", async () => {
+    const r = (await ask("design the domain model using domain-driven design")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'model our entire domain using event sourcing' → max", async () => {
+    const r = (await ask("model our entire domain using event sourcing")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'plan a zero-downtime migration from Postgres to CockroachDB' → max", async () => {
+    const r = (await ask("plan a zero-downtime migration from Postgres to CockroachDB")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
+  test("'zero-downtime migration strategy for upgrading our database' → max", async () => {
+    const r = (await ask("zero-downtime migration strategy for upgrading our database")) as { class: string };
+    expect(r.class).toBe("max");
+  });
+
   test("'bump the version to 1.2.3' → trivial", async () => {
     const r = (await ask("bump the version to 1.2.3")) as { class: string };
     expect(r.class).toBe("trivial");

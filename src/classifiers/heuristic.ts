@@ -1486,6 +1486,81 @@ export const BUILTIN_RULES: ReadonlyArray<HeuristicRule> = [
     confidence: 0.9,
     source: "builtin",
   },
+
+  // ── Fable-tier max rules ────────────────────────────────────────────────────
+  // These patterns signal work that needs frontier-level reasoning: complete
+  // system design, comprehensive audits, strategic architecture, and ML/AI
+  // pipeline design. Confidence ≥ 0.86 beats the "design … system" reasoning
+  // rule (0.85) when the scope amplifier is present.
+
+  // "design/build/architect X system from scratch" — full-scope greenfield
+  {
+    pattern: "\\b(design|architect|build|create|rewrite)\\b.{0,80}\\b(system|platform|service|application|backend|api|infrastructure|architecture)\\b.{0,40}\\bfrom\\s+scratch\\b|\\b(design|architect|build|create|rewrite)\\b.{0,40}\\bfrom\\s+scratch\\b.{0,80}\\b(system|platform|service|application|backend|api|infrastructure|architecture)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.86,
+    source: "builtin",
+  },
+  // "design/architect a complete/full/entire X system/platform" — scope amplifier
+  {
+    pattern: "\\b(design|architect)\\s+(a\\s+|the\\s+|our\\s+)?(complete|full|entire|comprehensive)\\s+(?:\\w+\\s+){0,4}(system|platform|service|application|backend|infrastructure|architecture)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.86,
+    source: "builtin",
+  },
+  // Comprehensive/exhaustive audit or analysis of an entire codebase/system
+  // Allows optional qualifier between article and noun: "of the entire codebase"
+  {
+    pattern: "\\b(comprehensive|exhaustive|thorough|complete|full)\\s+(security\\s+)?(audit|analysis|review|assessment)\\s+(of|across|for)\\s+(?:the|our|this|an?)\\s+(?:entire\\s+|whole\\s+|complete\\s+)?(codebase|api(?:\\s+surface)?|service|system|application|platform|backend)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
+  // Multi-region / multi-tenant / geo-distributed architecture design
+  // Allows extra words between qualifier and noun: "multi-region active-active architecture"
+  {
+    pattern: "\\b(design|architect|plan|build)\\s+(?:a|an|the|our)\\s+(?:[\\w-]+\\s+)?(multi[- ]region|multi[- ]tenant|multi[- ]datacenter|globally?\\s+distributed|geo[- ]distributed|active[- ]active|active[- ]passive)\\b[^.]{0,40}\\b(architecture|system|setup|deployment|infrastructure|failover|replication)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
+  // Strategic migration plan: monolith→microservices, language migration, etc.
+  {
+    pattern: "\\b(migration|refactor(?:ing)?)\\s+(strategy|plan|roadmap|approach)\\b.{0,100}\\b(monolith|microservices?|event[- ]driven|service\\s+mesh|kubernetes|serverless|cloud\\s+native)\\b|\\bmonolith(?:\\s+to|[- ]to)\\s+microservices?\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
+  // AI / ML / LLM / agent pipeline or system architecture design
+  // Allows "an" article and extra qualifier words: "an LLM agent pipeline architecture"
+  {
+    pattern: "\\b(design|architect|build|implement|plan)\\s+(?:a|an|the|our)\\s+(?:[\\w-]+\\s+)?(ml|machine\\s+learning|ai|llm|embedding|vector\\s+search|rag|retrieval[- ]augmented|agentic|agent[- ]based|multi[- ]agent)\\b[^.]{0,40}\\b(pipeline|system|architecture|platform|framework|infrastructure)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
+  // Domain-driven design, event sourcing, or full domain model design
+  // Also catches "X ... using event sourcing/DDD"
+  {
+    pattern: "\\b(design|model|architect)\\s+(?:the|our|a|an?)\\s+(?:full\\s+|complete\\s+|entire\\s+)?(data\\s+model|domain\\s+model|event\\s+sourcing|bounded\\s+context|aggregate\\s+root|domain[- ]driven|ddd)\\b|\\busing\\s+(event\\s+sourcing|domain[- ]driven\\s+design|ddd|cqrs\\s+and\\s+event\\s+sourcing)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
+  // Zero-downtime migration strategy / plan (explicit planning + complexity)
+  {
+    pattern: "\\b(plan|design|write|create|draft)\\s+(a\\s+|the\\s+)?zero[- ]downtime\\s+(migration|upgrade|transition|refactor)\\b|\\bzero[- ]downtime\\s+(migration|upgrade)\\s+(strategy|plan|approach|roadmap)\\b",
+    flags: "i",
+    class: "max",
+    confidence: 0.87,
+    source: "builtin",
+  },
 ];
 
 const KNOWN_CLASSES: ReadonlyArray<Class> = [

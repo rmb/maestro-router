@@ -8,7 +8,7 @@ import type { Class, ClassifyFn, Diagnostic, Request } from "../core/types.js";
  * Inline overrides in user prompts. Order matters in the alternation:
  * `fast+context` must come before `fast` so the longer variant wins.
  */
-const OVERRIDE_RE = /(?:^|\s)@(opus|fable|deep|think|sonnet|fast\+context|fast|haiku)\b/i;
+const OVERRIDE_RE = /(?:^|\s)@(max|opus|fable|deep|think|sonnet|fast\+context|fast|haiku)\b/i;
 
 /**
  * Natural-language equivalents of @think/@deep. Requires an intensity
@@ -20,6 +20,7 @@ const NATURAL_THINK_RE =
 type Mapping = { class: Class; disableBare?: boolean };
 
 const MAPPING: Record<string, Mapping> = {
+  max: { class: "max" },
   opus: { class: "max" },
   fable: { class: "max" },
   deep: { class: "max" },

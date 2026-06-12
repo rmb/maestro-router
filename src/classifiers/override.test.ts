@@ -7,6 +7,10 @@ import type { Class } from "../core/types.js";
 const call = (prompt: string) => overrideClassifier.classify({ prompt });
 
 describe("overrideClassifier", () => {
+  test("@max → max", async () => {
+    expect(await call("@max design something")).toMatchObject({ class: "max", confidence: 1.0 });
+  });
+
   test("@opus → max", async () => {
     expect(await call("@opus design something")).toMatchObject({
       class: "max",
@@ -94,7 +98,7 @@ describe("overrideClassifier", () => {
   // Sanity: every documented hint maps to a Class value of the union
   test("every documented override maps to a known class", async () => {
     const known: Class[] = ["trivial", "simple", "standard", "hard", "reasoning", "max"];
-    const hints = ["opus", "fable", "deep", "think", "sonnet", "fast", "haiku", "fast+context"];
+    const hints = ["max", "opus", "fable", "deep", "think", "sonnet", "fast", "haiku", "fast+context"];
     for (const hint of hints) {
       const result = await call(`@${hint} test`);
       expect(known).toContain(result!.class);

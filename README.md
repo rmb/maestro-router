@@ -31,7 +31,7 @@ Fallback rate:         3.2%    ✓ healthy
 | Rename a variable | simple | Haiku | ~$0.001 |
 | Add a feature | standard | Sonnet | ~$0.01 |
 | Debug a production incident | hard | Sonnet (high effort) | ~$0.05 |
-| Architect a system | max | Opus max | ~$0.10 |
+| Architect a system | max | Opus max (Fable on quality profile) | ~$0.10–$0.40 |
 
 ### Quick start
 
@@ -267,10 +267,12 @@ Force a specific class inline — Maestro strips the hint before forwarding to C
 |---|---|---|
 | `@fast`, `@haiku` | trivial | Haiku |
 | `@sonnet` | standard | Sonnet |
-| `@think` | reasoning | Opus high |
-| `@deep`, `@opus` | max | Opus max |
+| `@think` | reasoning | Opus xhigh (Fable on quality profile) |
+| `@deep`, `@opus`, `@fable`, `@max` | max | Opus max (Fable on quality profile) |
 
-Example: `@fast format this file` or `@deep find the root cause of this race condition`.
+Example: `@fast format this file` or `@max find the root cause of this race condition`.
+
+`@max` is the recommended top-tier hint — it routes to the max class and lets your active profile pick the model (Fable on quality, Opus on balanced/cheap). Use `@fable` or `@opus` only when you want to pin to a specific model regardless of profile.
 
 ---
 
@@ -297,7 +299,7 @@ Example `~/.maestro/config.json`:
 }
 ```
 
-Built-in profiles: `balanced` (default), `cheap` (Haiku-biased), `quality` (Opus-biased).
+Built-in profiles: `balanced` (default), `cheap` (Haiku-biased), `quality` (Opus/Fable-biased — uses Fable at reasoning and max classes).
 
 **`autoCompact`** — when `true`, Maestro injects `/compact` into the VSCode panel conversation before the next user message whenever `cache_read_input_tokens` exceeds `autoCompactThresholdTokens` (default 300k). This keeps context windows manageable without manual intervention. Fires only once per threshold crossing; resets if you manually send `/compact`. The `maestro stats` output includes a "compact hints" counter showing how often the advisory fired.
 
@@ -428,8 +430,9 @@ The first turn of any new session pays a cold-start cost of ~$0.035 due to Claud
 **Q: Maestro routed a complex task to Haiku and the answer was wrong. How do I fix this?**
 
 Use an override prefix to force a higher model for that prompt:
-- `@think <prompt>` → Opus with high effort
-- `@deep <prompt>` → Opus max
+- `@think <prompt>` → reasoning class (Opus xhigh, or Fable on quality profile)
+- `@max <prompt>` → max class (Opus max, or Fable on quality profile) — recommended top-tier hint
+- `@deep`, `@opus`, `@fable <prompt>` → max class (pin to specific model if needed)
 - `@fast <prompt>` → Haiku (explicitly cheap)
 
 For systematic misrouting of a prompt pattern, run `maestro tune` — it analyzes recent decisions and suggests heuristic rules to add to `heuristics.json` so the fix applies automatically going forward.

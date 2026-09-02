@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-01",
+  "updatedAt": "2026-09-02",
   "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
   "rates": {
     "haiku": {
@@ -24,11 +24,11 @@
       "cacheRead": 5e-7
     },
     "fable": {
-      "model": "claude-fable-5",
+      "model": "claude-fable-5-1",
       "input": 0.00001,
       "output": 0.00005,
       "cacheWrite": 0.0000125,
-      "cacheRead": 0.000001
+      "cacheRead": 2.5e-7
     }
   }
 }

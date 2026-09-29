@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-28",
+  "updatedAt": "2026-09-29",
   "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
   "rates": {
     "haiku": {
@@ -10,11 +10,11 @@
       "cacheRead": 1e-7
     },
     "sonnet": {
-      "model": "claude-sonnet-4-6",
-      "input": 0.000003,
-      "output": 0.000015,
-      "cacheWrite": 0.00000375,
-      "cacheRead": 3e-7
+      "model": "claude-sonnet-5-5",
+      "input": 0.000002,
+      "output": 0.00001,
+      "cacheWrite": 0.0000025,
+      "cacheRead": 2e-7
     },
     "opus": {
       "model": "claude-opus-5-5",
